@@ -131,3 +131,17 @@ Global `DONE` is now backed by transaction and global matrices:
 - transaction groups write `patchlet_output_matrix.json`
 - global verification writes `verification_matrix.json`
 - global verification writes `global_gate_result.json`
+
+## Live Progress And Accepted Changes
+
+Long real-Codex subprocesses can emit compact live progress such as
+`[cxor:P0001_attempt1 +004s] codex: thread.started`. The durable record remains
+`progress.jsonl`; live progress is liveness only and safe failure is not DONE.
+Set `CXOR_LIVE_CODEX_PROGRESS=0` to disable terminal progress.
+
+Accepted changes advance `refs/cxor/runs/<run_id>/integration`. The target repo
+remains clean between patchlets, each new worktree starts from the integration
+SHA, and DONE is verified against the integration SHA plus
+`.codex-orchestrator/integration/final_diff.patch`. Operators finalize results
+explicitly with `cxor apply-results --mode patch`, `cxor apply-results --mode
+branch`, or `cxor apply-results --mode working-tree`.

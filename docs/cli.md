@@ -192,6 +192,28 @@ If the preserved artifacts do not justify a more specific root cause, the
 diagnosis will report `unknown_codex_nonzero_exit`. Do not weaken validators to
 force a narrower classification.
 
+## Live Progress And Result Application
+
+Real-Codex subprocesses may print compact live progress lines like
+`[cxor:P0001_attempt1 +004s] codex: thread.started`. The durable liveness
+record remains `progress.jsonl`; live progress proves only that the subprocess
+is alive. Use `CXOR_LIVE_CODEX_PROGRESS=0` to silence terminal progress.
+
+Accepted patchlets advance `refs/cxor/runs/<run_id>/integration`; the target
+repo remains clean between patchlets and worktrees start from the integration
+SHA. Consume accepted results explicitly:
+
+```bash
+cxor apply-results --repo /path/to/target-repo --mode patch
+cxor apply-results --repo /path/to/target-repo --mode branch
+cxor apply-results --repo /path/to/target-repo --mode working-tree
+```
+
+`--mode patch` does not mutate product/runtime files. `--mode branch` creates a
+result branch without checkout. `--mode working-tree` requires a clean target
+and mutates only after explicit operator request. A safe failure is evidence
+capture, not DONE.
+
 Worker Capsule inspection:
 
 ```bash

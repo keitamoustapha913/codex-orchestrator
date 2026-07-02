@@ -2,13 +2,15 @@ from __future__ import annotations
 
 import json
 import os
+import selectors
 import shlex
 import shutil
 import subprocess
+import sys
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Mapping
+from typing import Callable, Mapping, TextIO
 
 from codex_orchestrator.codex_execution_policy import (
     resolve_patchlet_timeout_seconds,
@@ -51,6 +53,46 @@ def default_command_runner(args: list[str], cwd: Path, env: dict[str, str]) -> C
     return CommandCapture(exit_code=result.returncode, stdout=result.stdout, stderr=result.stderr)
 
 
+def streaming_command_runner(
+    args: list[str],
+    cwd: Path,
+    env: dict[str, str],
+    *,
+    live_progress_sink: TextIO | None,
+) -> CommandCapture:
+    process = subprocess.Popen(
+        args,
+        cwd=cwd,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        bufsize=1,
+    )
+    selector = selectors.DefaultSelector()
+    stdout_chunks: list[str] = []
+    stderr_chunks: list[str] = []
+    if process.stdout is not None:
+        selector.register(process.stdout, selectors.EVENT_READ, "stdout")
+    if process.stderr is not None:
+        selector.register(process.stderr, selectors.EVENT_READ, "stderr")
+
+    while selector.get_map():
+        for key, _ in selector.select(timeout=0.2):
+            line = key.fileobj.readline()
+            if line == "":
+                selector.unregister(key.fileobj)
+                continue
+            if key.data == "stdout":
+                stdout_chunks.append(line)
+            else:
+                stderr_chunks.append(line)
+            _tee_progress_line(line, live_progress_sink)
+
+    exit_code = process.wait()
+    return CommandCapture(exit_code=exit_code, stdout="".join(stdout_chunks), stderr="".join(stderr_chunks))
+
+
 def run_real_codex_smoke_runbook(
     *,
     repo_root: Path,
@@ -62,13 +104,21 @@ def run_real_codex_smoke_runbook(
     default_skip_command: list[str] | None = None,
     explicit_smoke_command: list[str] | None = None,
     env: Mapping[str, str] | None = None,
+    live_progress: bool | None = None,
+    live_progress_sink: TextIO | None = None,
 ) -> dict:
     if dry_run == run_real_codex:
         raise ValueError("choose exactly one of dry_run or run_real_codex")
 
     repo_root = repo_root.resolve()
     selected_env = dict(os.environ if env is None else env)
-    policy = _selected_policy(selected_env, dry_run=dry_run, run_real_codex=run_real_codex)
+    live_progress_enabled = _resolve_runbook_live_progress(selected_env, run_real_codex=run_real_codex, requested=live_progress)
+    policy = _selected_policy(
+        selected_env,
+        dry_run=dry_run,
+        run_real_codex=run_real_codex,
+        live_progress_enabled=live_progress_enabled,
+    )
     effective_runner = runner or default_command_runner
     run_dir = _operator_run_dir(repo_root, operator_root, timestamp)
     run_dir.mkdir(parents=True, exist_ok=False)
@@ -114,7 +164,20 @@ def run_real_codex_smoke_runbook(
         (run_dir / "explicit_smoke_stderr.txt").write_text("", encoding="utf-8")
     else:
         explicit_command = explicit_smoke_command or EXPLICIT_SMOKE_COMMAND
-        explicit = effective_runner(explicit_command, repo_root, selected_env)
+        explicit_env = dict(selected_env)
+        explicit_env["CXOR_LIVE_CODEX_PROGRESS"] = "1" if live_progress_enabled else "0"
+        if runner is None:
+            explicit = streaming_command_runner(
+                explicit_command,
+                repo_root,
+                explicit_env,
+                live_progress_sink=live_progress_sink or sys.stderr if live_progress_enabled else None,
+            )
+        else:
+            explicit = effective_runner(explicit_command, repo_root, explicit_env)
+            if live_progress_enabled:
+                _tee_progress_lines(explicit.stdout, live_progress_sink or sys.stderr)
+                _tee_progress_lines(explicit.stderr, live_progress_sink or sys.stderr)
         (run_dir / "explicit_smoke_stdout.txt").write_text(explicit.stdout, encoding="utf-8")
         (run_dir / "explicit_smoke_stderr.txt").write_text(explicit.stderr, encoding="utf-8")
         parsed, parse_error = parse_smoke_stdout(explicit.stdout)
@@ -161,7 +224,13 @@ def _operator_run_dir(repo_root: Path, operator_root: Path | None, timestamp: st
     return root / "real-codex-smoke" / f"{stamp}-real-codex-smoke"
 
 
-def _selected_policy(env: Mapping[str, str], *, dry_run: bool, run_real_codex: bool) -> dict:
+def _selected_policy(
+    env: Mapping[str, str],
+    *,
+    dry_run: bool,
+    run_real_codex: bool,
+    live_progress_enabled: bool,
+) -> dict:
     profile = resolve_codex_model_profile("patchlet", env)
     timeout = resolve_patchlet_timeout_seconds(env)
     return {
@@ -172,9 +241,36 @@ def _selected_policy(env: Mapping[str, str], *, dry_run: bool, run_real_codex: b
         "codex_model": profile.model,
         "codex_reasoning": profile.reasoning,
         "codex_progress_interval_seconds": resolve_progress_interval_seconds(env),
+        "live_progress_enabled": live_progress_enabled,
         "run_real_codex": run_real_codex,
         "dry_run": dry_run,
     }
+
+
+def _resolve_runbook_live_progress(
+    env: Mapping[str, str],
+    *,
+    run_real_codex: bool,
+    requested: bool | None,
+) -> bool:
+    if not run_real_codex:
+        return False if requested is None else requested
+    if requested is not None:
+        return requested
+    return env.get("CXOR_LIVE_CODEX_PROGRESS") != "0"
+
+
+def _tee_progress_lines(text: str, sink: TextIO) -> None:
+    for line in text.splitlines(keepends=True):
+        _tee_progress_line(line, sink)
+
+
+def _tee_progress_line(line: str, sink: TextIO | None) -> None:
+    if sink is None:
+        return
+    if line.startswith("[cxor:"):
+        sink.write(line)
+        sink.flush()
 
 
 def _optional_int_env(env: Mapping[str, str], name: str) -> int | None:

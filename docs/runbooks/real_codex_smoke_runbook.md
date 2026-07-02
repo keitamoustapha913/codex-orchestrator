@@ -68,3 +68,16 @@ the preserved cause classification.
 runbook captured evidence for a contained real-Codex failure. `DONE means the
 orchestrator validators accepted the run`, including report validation, probe
 artifact validation, wrapper gates, transaction groups, and global verification.
+
+## Live Progress And Accepted Results
+
+With `--run-real-codex --live-progress`, the runbook tees only compact
+`[cxor:...]` live progress lines. Use `--no-live-progress` or
+`CXOR_LIVE_CODEX_PROGRESS=0` to silence terminal progress. The durable record is
+still `progress.jsonl`.
+
+Accepted changes are not applied to the operator working tree during the smoke.
+They advance `refs/cxor/runs/<run_id>/integration`; the target repo remains
+clean between patchlets and subsequent worktrees start from the integration
+SHA. After DONE, use `cxor apply-results --mode patch`, `cxor apply-results
+--mode branch`, or `cxor apply-results --mode working-tree`.

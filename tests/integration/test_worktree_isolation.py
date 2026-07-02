@@ -32,7 +32,7 @@ def _compiled_ctx(git_repo: Path):
     return ctx
 
 
-def test_patchlet_worktree_valid_diff_merges_to_target_repo_after_validation(git_repo: Path):
+def test_patchlet_worktree_valid_diff_advances_integration_without_dirtying_target(git_repo: Path):
     ctx = _compiled_ctx(git_repo)
     mock_dir = ctx.paths.workflow_dir / "mock"
     mock_dir.mkdir(parents=True, exist_ok=True)
@@ -46,8 +46,16 @@ def test_patchlet_worktree_valid_diff_merges_to_target_repo_after_validation(git
 
     assert result.patchlet_id == "P0001"
     assert result.status == "COMPLETE"
-    assert sha256_file(ctx.root / "app.py") != app_hash_before
-    assert "# cxor mock allowed product change" in (ctx.root / "app.py").read_text(encoding="utf-8")
+    assert sha256_file(ctx.root / "app.py") == app_hash_before
+    state = read_json(ctx.paths.integration_state)
+    integrated_app = subprocess.run(
+        ["git", "-C", str(ctx.root), "show", f"{state['integration_sha']}:app.py"],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    ).stdout
+    assert "# cxor mock allowed product change" in integrated_app
 
 
 def test_worktree_run_records_worktree_path_base_sha_and_cleanup_status(git_repo: Path):

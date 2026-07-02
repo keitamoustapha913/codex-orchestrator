@@ -166,3 +166,148 @@ time.sleep(5)
     command = json.loads((run_dir / "command.json").read_text(encoding="utf-8"))
     assert command["timed_out"] is True
     assert "thread.started" in [event["signal"] for event in _events(run_dir / "progress.jsonl")]
+
+
+def test_codex_worker_emits_compact_live_progress_to_stderr_when_enabled(
+    git_repo: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys,
+):
+    ctx, patchlet = _setup(git_repo)
+    fake_codex = tmp_path / "codex"
+    _write_fake_codex(
+        fake_codex,
+        """#!/usr/bin/env python3
+import json
+print(json.dumps({"type": "thread.started", "payload": "x" * 1000}), flush=True)
+print(json.dumps({"type": "turn.started"}), flush=True)
+raise SystemExit(17)
+""",
+    )
+    monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ.get('PATH', '')}")
+    monkeypatch.setenv("CXOR_LIVE_CODEX_PROGRESS", "1")
+    monkeypatch.setenv("CXOR_LIVE_CODEX_PROGRESS_INTERVAL_SECONDS", "1")
+
+    run_dir = ctx.paths.runs_dir / "live_progress_enabled"
+    with pytest.raises(WorkerExecutionError):
+        CodexExecWorker().run_patchlet(ctx, patchlet, run_dir=run_dir)
+
+    stderr = capsys.readouterr().err
+    assert f"[cxor:{run_dir.name} +" in stderr
+    assert "codex: thread.started" in stderr
+    assert '{"type":' not in stderr
+    assert "x" * 1000 not in stderr
+
+
+def test_live_progress_can_be_disabled_with_env(
+    git_repo: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys,
+):
+    ctx, patchlet = _setup(git_repo)
+    fake_codex = tmp_path / "codex"
+    _write_fake_codex(fake_codex, "#!/usr/bin/env python3\nimport json\nprint(json.dumps({'type': 'thread.started'}), flush=True)\nraise SystemExit(17)\n")
+    monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ.get('PATH', '')}")
+    monkeypatch.setenv("CXOR_LIVE_CODEX_PROGRESS", "0")
+
+    run_dir = ctx.paths.runs_dir / "live_progress_disabled"
+    with pytest.raises(WorkerExecutionError):
+        CodexExecWorker().run_patchlet(ctx, patchlet, run_dir=run_dir)
+
+    assert "[cxor:" not in capsys.readouterr().err
+    assert "thread.started" in [event["signal"] for event in _events(run_dir / "progress.jsonl")]
+
+
+def test_live_progress_is_throttled(
+    git_repo: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys,
+):
+    ctx, patchlet = _setup(git_repo)
+    fake_codex = tmp_path / "codex"
+    _write_fake_codex(
+        fake_codex,
+        """#!/usr/bin/env python3
+import json
+for _ in range(5):
+    print(json.dumps({"type": "thread.started"}), flush=True)
+raise SystemExit(17)
+""",
+    )
+    monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ.get('PATH', '')}")
+    monkeypatch.setenv("CXOR_LIVE_CODEX_PROGRESS", "1")
+    monkeypatch.setenv("CXOR_LIVE_CODEX_PROGRESS_INTERVAL_SECONDS", "60")
+
+    run_dir = ctx.paths.runs_dir / "live_progress_throttled"
+    with pytest.raises(WorkerExecutionError):
+        CodexExecWorker().run_patchlet(ctx, patchlet, run_dir=run_dir)
+
+    live_lines = [line for line in capsys.readouterr().err.splitlines() if line.startswith("[cxor:")]
+    assert len([line for line in live_lines if "thread.started" in line]) == 1
+    assert len([event for event in _events(run_dir / "progress.jsonl") if event["signal"] == "thread.started"]) == 5
+
+
+def test_live_progress_does_not_replace_progress_jsonl(
+    git_repo: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys,
+):
+    ctx, patchlet = _setup(git_repo)
+    fake_codex = tmp_path / "codex"
+    _write_fake_codex(fake_codex, "#!/usr/bin/env python3\nimport json\nprint(json.dumps({'type': 'thread.started'}), flush=True)\nraise SystemExit(17)\n")
+    monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ.get('PATH', '')}")
+    monkeypatch.setenv("CXOR_LIVE_CODEX_PROGRESS", "1")
+
+    run_dir = ctx.paths.runs_dir / "live_progress_artifact_compat"
+    with pytest.raises(WorkerExecutionError):
+        CodexExecWorker().run_patchlet(ctx, patchlet, run_dir=run_dir)
+
+    assert "[cxor:" in capsys.readouterr().err
+    assert (run_dir / "progress.jsonl").exists()
+    assert (run_dir / "stdout.txt").exists()
+    assert (run_dir / "stderr.txt").exists()
+    assert (run_dir / "output.jsonl").exists()
+
+
+def test_live_progress_does_not_print_full_json_payload(
+    git_repo: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys,
+):
+    ctx, patchlet = _setup(git_repo)
+    fake_codex = tmp_path / "codex"
+    _write_fake_codex(fake_codex, "#!/usr/bin/env python3\nimport json\nprint(json.dumps({'type': 'item.completed', 'item': {'type': 'agent_message', 'text': 'SECRET_PROMPT_TEXT'}}), flush=True)\nraise SystemExit(17)\n")
+    monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ.get('PATH', '')}")
+    monkeypatch.setenv("CXOR_LIVE_CODEX_PROGRESS", "1")
+
+    run_dir = ctx.paths.runs_dir / "live_progress_no_payload"
+    with pytest.raises(WorkerExecutionError):
+        CodexExecWorker().run_patchlet(ctx, patchlet, run_dir=run_dir)
+
+    stderr = capsys.readouterr().err
+    assert "codex: message" in stderr
+    assert "SECRET_PROMPT_TEXT" not in stderr
+
+
+def test_live_progress_records_exit_line(
+    git_repo: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys,
+):
+    ctx, patchlet = _setup(git_repo)
+    fake_codex = tmp_path / "codex"
+    _write_fake_codex(fake_codex, "#!/usr/bin/env python3\nraise SystemExit(17)\n")
+    monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ.get('PATH', '')}")
+    monkeypatch.setenv("CXOR_LIVE_CODEX_PROGRESS", "1")
+
+    run_dir = ctx.paths.runs_dir / "live_progress_exit"
+    with pytest.raises(WorkerExecutionError):
+        CodexExecWorker().run_patchlet(ctx, patchlet, run_dir=run_dir)
+
+    assert "codex: exited 17" in capsys.readouterr().err

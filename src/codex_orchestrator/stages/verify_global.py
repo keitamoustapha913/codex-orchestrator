@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from codex_orchestrator.errors import StagePreconditionError
+from codex_orchestrator.integration_state import target_product_runtime_clean, write_final_diff
 from codex_orchestrator.jsonio import read_json, write_json
 from codex_orchestrator.state import load_state, now_iso, transition
 from codex_orchestrator.target_repo import TargetRepoContext
@@ -192,11 +193,14 @@ def verify_global(ctx: TargetRepoContext) -> GlobalVerificationResult:
 
     all_failure_ids = sorted(path.stem for path in ctx.paths.failures_dir.glob("F*.json"))
     unresolved_failures = [failure_id for failure_id in all_failure_ids if failure_id not in resolved_failure_ids]
+    integration_final = write_final_diff(ctx)
+    target_working_tree_clean = target_product_runtime_clean(ctx)
 
     done = (
         bool(index.get("patchlets"))
         and not failed
         and not unproven
+        and target_working_tree_clean
         and all_groups_passed
         and not failed_invariant_ids
         and not unproven_invariant_ids
@@ -289,6 +293,8 @@ def verify_global(ctx: TargetRepoContext) -> GlobalVerificationResult:
         "evidence": [str(item) for item in evidence],
         "verification_matrix": str(matrix_path),
         "global_gate_result": str(global_gate_path),
+        **integration_final,
+        "target_working_tree_clean": target_working_tree_clean,
     }
     write_json(ctx.paths.final_verification_json, final)
     ctx.paths.final_verification_md.write_text(

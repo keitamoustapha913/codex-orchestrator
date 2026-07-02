@@ -29,6 +29,7 @@ def _seed_failed_real_codex_attempt(
     output_events: list[dict] | None = None,
     command_payload: dict | None = None,
     progress_events: list[dict] | None = None,
+    worker_failure_message: str = "codex worker failed with exit_code=1",
 ) -> str:
     run_dir = ctx.paths.runs_dir / "P0001_attempt1"
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -172,7 +173,7 @@ def _seed_failed_real_codex_attempt(
             },
             "worker_failure": {
                 "type": "WorkerExecutionError",
-                "message": "codex worker failed with exit_code=1",
+                "message": worker_failure_message,
                 "exit_code": command.get("exit_code", 1),
                 "timed_out": command.get("timed_out"),
                 "timeout_seconds": command.get("timeout_seconds"),
@@ -663,3 +664,72 @@ def test_diagnosis_capsule_path_violation_recommends_path_instruction_fix(git_re
 
     assert "CXOR_WORKER_STAGE_DIR" in diagnosis["recommended_next_action"]
     assert "target-root worker_stage/" in diagnosis["recommended_next_action"]
+
+
+def test_diagnosis_classifies_dirty_allowed_product_file_after_accepted_patchlet(git_repo: Path):
+    from codex_orchestrator.diagnostics import diagnose_real_codex_attempt
+
+    ctx = _initialized_ctx(git_repo)
+    attempt_id = _seed_failed_real_codex_attempt(
+        ctx,
+        stderr_text="Worktree execution requires a clean target repo; dirty paths: app.py\n",
+        worker_failure_message="Worktree execution requires a clean target repo; dirty paths: app.py",
+    )
+
+    result = diagnose_real_codex_attempt(ctx, attempt_id=attempt_id)
+    diagnosis = _read_json(Path(result["diagnosis_json_path"]))
+
+    assert diagnosis["diagnosis"]["primary_category"] == "target_dirty_after_integration_apply"
+    assert "target_dirty_allowed_product_file" in diagnosis["observed_signals"]
+
+
+def test_diagnosis_does_not_classify_external_unknown_dirty_file_as_integration_apply(git_repo: Path):
+    from codex_orchestrator.diagnostics import diagnose_real_codex_attempt
+
+    ctx = _initialized_ctx(git_repo)
+    attempt_id = _seed_failed_real_codex_attempt(
+        ctx,
+        stderr_text="Worktree execution requires a clean target repo; dirty paths: notes.txt\n",
+        worker_failure_message="Worktree execution requires a clean target repo; dirty paths: notes.txt",
+    )
+
+    result = diagnose_real_codex_attempt(ctx, attempt_id=attempt_id)
+    diagnosis = _read_json(Path(result["diagnosis_json_path"]))
+
+    assert diagnosis["diagnosis"]["primary_category"] != "target_dirty_after_integration_apply"
+
+
+def test_diagnosis_does_not_confuse_worker_capsule_path_violation_with_target_dirty_after_integration_apply(git_repo: Path):
+    from codex_orchestrator.diagnostics import diagnose_real_codex_attempt
+
+    ctx = _initialized_ctx(git_repo)
+    (ctx.root / "worker_stage").mkdir()
+    attempt_id = _seed_failed_real_codex_attempt(
+        ctx,
+        stderr_text="Worktree execution requires a clean target repo; dirty paths: worker_stage/\n",
+        worker_failure_message="Worktree execution requires a clean target repo; dirty paths: worker_stage/",
+    )
+
+    result = diagnose_real_codex_attempt(ctx, attempt_id=attempt_id)
+    diagnosis = _read_json(Path(result["diagnosis_json_path"]))
+
+    assert diagnosis["diagnosis"]["primary_category"] == "worker_capsule_path_violation"
+
+
+def test_target_dirty_after_integration_apply_summary_names_dirty_path_and_prior_patchlet(git_repo: Path):
+    from codex_orchestrator.diagnostics import diagnose_real_codex_attempt
+
+    ctx = _initialized_ctx(git_repo)
+    attempt_id = _seed_failed_real_codex_attempt(
+        ctx,
+        stderr_text="Worktree execution requires a clean target repo; dirty paths: app.py\n",
+        worker_failure_message="Worktree execution requires a clean target repo; dirty paths: app.py",
+    )
+
+    result = diagnose_real_codex_attempt(ctx, attempt_id=attempt_id)
+    diagnosis = _read_json(Path(result["diagnosis_json_path"]))
+
+    summary = diagnosis["diagnosis"]["summary"]
+    assert "app.py" in summary
+    assert "P0001" in summary
+    assert "missing integration-state management" in summary

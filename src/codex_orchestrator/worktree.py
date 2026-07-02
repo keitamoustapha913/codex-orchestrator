@@ -8,10 +8,11 @@ from pathlib import Path
 
 from codex_orchestrator.errors import WorkerPreconditionError
 from codex_orchestrator.git_guard import repo_head
+from codex_orchestrator.integration_state import ensure_integration_state
 from codex_orchestrator.target_repo import TargetRepoContext
 
 
-VOLATILE_PREFIXES = (".codex-orchestrator/", ".artifacts/")
+VOLATILE_PREFIXES = (".codex-orchestrator/", ".artifacts/", ".operator-runs/")
 
 
 @dataclass(frozen=True)
@@ -20,6 +21,8 @@ class WorktreeContext:
     target_root: Path
     path: Path
     base_sha: str
+    base_source: str
+    integration_ref: str | None
     cleanup_policy: str
     cleanup_status: str | None = None
 
@@ -61,7 +64,8 @@ def assert_clean_for_worktree(ctx: TargetRepoContext) -> None:
 
 def create_patchlet_worktree(ctx: TargetRepoContext, *, patchlet_id: str) -> WorktreeContext:
     assert_clean_for_worktree(ctx)
-    base_sha = repo_head(ctx.root)
+    integration_state = ensure_integration_state(ctx)
+    base_sha = integration_state.get("integration_sha") or repo_head(ctx.root)
     if not base_sha:
         raise WorkerPreconditionError(f"Unable to resolve base SHA for target repo: {ctx.root}")
     root = Path(tempfile.mkdtemp(prefix=f"cxor-{patchlet_id.lower()}-", dir="/tmp")).resolve()
@@ -77,6 +81,8 @@ def create_patchlet_worktree(ctx: TargetRepoContext, *, patchlet_id: str) -> Wor
         target_root=ctx.root,
         path=root,
         base_sha=base_sha,
+        base_source="integration_state",
+        integration_ref=integration_state.get("integration_ref"),
         cleanup_policy="remove",
         cleanup_status=None,
     )
@@ -98,6 +104,8 @@ def cleanup_patchlet_worktree(worktree: WorktreeContext) -> WorktreeContext:
         target_root=worktree.target_root,
         path=worktree.path,
         base_sha=worktree.base_sha,
+        base_source=worktree.base_source,
+        integration_ref=worktree.integration_ref,
         cleanup_policy=worktree.cleanup_policy,
         cleanup_status="removed",
     )

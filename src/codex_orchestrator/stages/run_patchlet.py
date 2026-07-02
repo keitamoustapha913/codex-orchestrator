@@ -2,11 +2,17 @@ from __future__ import annotations
 
 import json
 import subprocess
+import shutil
 from dataclasses import dataclass
 
 from codex_orchestrator.codex_adapter import worker_for_mode
 from codex_orchestrator.errors import WorkerExecutionError, WorkerPreconditionError
 from codex_orchestrator.git_guard import changed_between, git_diff, snapshot_status
+from codex_orchestrator.integration_state import (
+    advance_integration_ref_from_diff,
+    advance_integration_ref_from_worktree,
+    record_accepted_change,
+)
 from codex_orchestrator.patchlet_run_context import PatchletRunContext, build_patchlet_run_context
 from codex_orchestrator.jsonio import read_json, write_json
 from codex_orchestrator.run_records import append_run_record
@@ -137,6 +143,8 @@ def _append_failed_worker_run_record(
             "enabled": use_worktree,
             "path": str(run_ctx.worktree_path) if run_ctx.worktree_path else None,
             "base_sha": worktree_ctx.base_sha if worktree_ctx else None,
+            "base_source": worktree_ctx.base_source if worktree_ctx else None,
+            "integration_ref": worktree_ctx.integration_ref if worktree_ctx else None,
             "cleanup_policy": worktree_ctx.cleanup_policy if worktree_ctx else None,
             "cleanup_status": cleanup_status,
         },
@@ -232,6 +240,49 @@ def _apply_validated_diff_to_target(ctx: TargetRepoContext, *, diff_path) -> Non
     )
     if result.returncode != 0:
         raise RuntimeError(f"validated merge failed: {result.stderr.strip() or result.stdout.strip()}")
+
+
+def _reverse_validated_diff_from_target(ctx: TargetRepoContext, *, diff_path) -> None:
+    result = subprocess.run(
+        ["git", "-C", str(ctx.root), "apply", "-R", str(diff_path)],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"validated target cleanup failed: {result.stderr.strip() or result.stdout.strip()}")
+
+
+def _cleanup_direct_worker_changes(ctx: TargetRepoContext, changed_paths: list[str]) -> None:
+    for rel_path in changed_paths:
+        if rel_path.startswith(".codex-orchestrator/") or rel_path.startswith(".artifacts/"):
+            continue
+        path = ctx.root / rel_path
+        if path.exists() and not _is_tracked(ctx, rel_path):
+            if path.is_dir():
+                shutil.rmtree(path)
+            else:
+                path.unlink()
+            continue
+        subprocess.run(
+            ["git", "-C", str(ctx.root), "checkout", "--", rel_path],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+
+
+def _is_tracked(ctx: TargetRepoContext, rel_path: str) -> bool:
+    result = subprocess.run(
+        ["git", "-C", str(ctx.root), "ls-files", "--error-unmatch", rel_path],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    return result.returncode == 0
 
 
 def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_worktree: bool = False) -> PatchletExecutionResult:
@@ -343,12 +394,11 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
                 "output_jsonl_path": _record_path_for_manifest(ctx, run_dir / "output.jsonl"),
             },
         )
-    finally:
+
+    if worker_error is not None:
         if worktree_ctx is not None:
             worktree_ctx = cleanup_patchlet_worktree(worktree_ctx)
             cleanup_status = worktree_ctx.cleanup_status
-
-    if worker_error is not None:
         gate_result = write_wrapper_gate_result(
             ctx,
             worker_capsule,
@@ -395,6 +445,8 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
     report_error: str | None = None
     try:
         if not diff_result.allowed:
+            if not use_worktree:
+                _cleanup_direct_worker_changes(ctx, changed_paths)
             failure_id = _record_failure(
                 ctx,
                 source_id=pid,
@@ -434,6 +486,8 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
                     },
                 )
             except ReportValidationError as exc:
+                if not use_worktree:
+                    _cleanup_direct_worker_changes(ctx, changed_paths)
                 report_error = str(exc)
                 append_worker_event(
                     ctx,
@@ -455,8 +509,25 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
                 )
                 report_status = "FAILED_WITH_EVIDENCE"
 
+            integration_checkpoint_sha: str | None = None
+            if report_valid and report_status not in {"COMPLETE", "VERIFIED_NO_CHANGE_NEEDED"} and not use_worktree:
+                _cleanup_direct_worker_changes(ctx, changed_paths)
             if report_valid and report_status in {"COMPLETE", "VERIFIED_NO_CHANGE_NEEDED"} and diff_text:
-                _apply_validated_diff_to_target(ctx, diff_path=diff_path)
+                if use_worktree and worktree_ctx is not None:
+                    integration_checkpoint_sha = advance_integration_ref_from_worktree(
+                        ctx,
+                        worktree_path=worktree_ctx.path,
+                        patchlet_id=pid,
+                        changed_product_runtime_files=diff_result.product_runtime_paths,
+                    )
+                else:
+                    integration_checkpoint_sha = advance_integration_ref_from_diff(
+                        ctx,
+                        diff_path=diff_path,
+                        patchlet_id=pid,
+                        changed_product_runtime_files=diff_result.product_runtime_paths,
+                    )
+                    _reverse_validated_diff_from_target(ctx, diff_path=diff_path)
     finally:
         pass
 
@@ -489,6 +560,21 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
             "wrapper_gate_result": wrapper_gate_result_path,
         },
     )
+    if gate_result["accepted"] and report_status in {"COMPLETE", "VERIFIED_NO_CHANGE_NEEDED"}:
+        record_accepted_change(
+            ctx,
+            patchlet=patchlet,
+            attempt_id=run_id,
+            changed_product_runtime_files=diff_result.product_runtime_paths,
+            diff_path=diff_path,
+            report_path=worker_result.report_path,
+            probe_root=ctx.paths.probe_dir / pid,
+            wrapper_gate_result=wrapper_gate_result_path,
+            new_integration_sha=integration_checkpoint_sha,
+        )
+    if worktree_ctx is not None:
+        worktree_ctx = cleanup_patchlet_worktree(worktree_ctx)
+        cleanup_status = worktree_ctx.cleanup_status
 
     append_run_record(ctx, {
         "stage": "PATCHLET_EXECUTION_IN_PROGRESS",
@@ -533,6 +619,8 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
             "enabled": use_worktree,
             "path": str(run_ctx.worktree_path) if run_ctx.worktree_path else None,
             "base_sha": worktree_ctx.base_sha if worktree_ctx else None,
+            "base_source": worktree_ctx.base_source if worktree_ctx else None,
+            "integration_ref": worktree_ctx.integration_ref if worktree_ctx else None,
             "cleanup_policy": worktree_ctx.cleanup_policy if worktree_ctx else None,
             "cleanup_status": cleanup_status,
         },

@@ -37,6 +37,11 @@ class WorkflowPaths:
     failures_dir: Path
     repair_plans_dir: Path
     verifier_dir: Path
+    integration_dir: Path
+    integration_state: Path
+    accepted_changes: Path
+    integration_checkpoints_dir: Path
+    final_diff_path: Path
     final_verification_md: Path
     final_verification_json: Path
     lock: Path
@@ -79,6 +84,11 @@ def build_paths(repo_root: Path) -> WorkflowPaths:
         failures_dir=workflow / "failures",
         repair_plans_dir=workflow / "repair_plans",
         verifier_dir=workflow / "verifier",
+        integration_dir=workflow / "integration",
+        integration_state=workflow / "integration" / "integration_state.json",
+        accepted_changes=workflow / "integration" / "accepted_changes.jsonl",
+        integration_checkpoints_dir=workflow / "integration" / "checkpoints",
+        final_diff_path=workflow / "integration" / "final_diff.patch",
         final_verification_md=workflow / "final_verification.md",
         final_verification_json=workflow / "final_verification.json",
         lock=workflow / ".lock",

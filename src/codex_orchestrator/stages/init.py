@@ -4,6 +4,7 @@ import shutil
 from pathlib import Path
 
 from codex_orchestrator.config import write_default_target_config
+from codex_orchestrator.integration_state import ensure_integration_state
 from codex_orchestrator.jsonio import write_json
 from codex_orchestrator.run_records import init_run_manifest
 from codex_orchestrator.state import new_state, save_state, sha256_file
@@ -21,6 +22,8 @@ def _mkdirs(ctx: TargetRepoContext) -> None:
         ctx.paths.failures_dir,
         ctx.paths.repair_plans_dir,
         ctx.paths.verifier_dir,
+        ctx.paths.integration_dir,
+        ctx.paths.integration_checkpoints_dir,
         ctx.paths.probe_dir,
     ]:
         path.mkdir(parents=True, exist_ok=True)
@@ -45,6 +48,7 @@ def init_workflow(
             encoding="utf-8",
         )
     write_default_target_config(ctx.paths.config)
+    ensure_integration_state(ctx)
 
     state_stage = "INITIALIZED"
     if master is not None:

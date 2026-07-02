@@ -115,3 +115,17 @@ should stay at `unknown_codex_nonzero_exit`.
 
 Real success is not guaranteed. It still depends on real Codex producing a
 valid report and durable probe artifacts that satisfy the existing validators.
+
+## Live Progress And Integration Results
+
+Explicit runbook mode enables compact live progress by default and tees only
+lines beginning with `[cxor:`. Disable terminal progress with
+`CXOR_LIVE_CODEX_PROGRESS=0` or pass `--no-live-progress`; `progress.jsonl`
+remains the durable liveness record. Live progress does not prove success, and
+safe failure is not DONE.
+
+Accepted real-Codex changes advance `refs/cxor/runs/<run_id>/integration`; the
+target repo remains clean between patchlets and the next worktree starts from
+the integration SHA. DONE verifies that integration SHA. Use
+`cxor apply-results --mode patch`, `cxor apply-results --mode branch`, or
+`cxor apply-results --mode working-tree` after DONE to consume results.

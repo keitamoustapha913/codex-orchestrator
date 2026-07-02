@@ -97,3 +97,17 @@ Capsule inspection remains read-only in worktree mode:
 cxor inspect-capsule --repo /path/to/target-repo --attempt P0001_attempt1
 cxor validate-capsule --repo /path/to/target-repo --attempt P0001_attempt1
 ```
+
+## Integration Ref Worktrees
+
+Accepted patchlets advance the hidden integration ref
+`refs/cxor/runs/<run_id>/integration`. The target repo remains clean between
+patchlets, and the next patchlet worktree starts from the integration SHA, not
+from dirty target files. Global verification writes
+`.codex-orchestrator/integration/final_diff.patch` from target HEAD to the
+integration SHA.
+
+Use `cxor apply-results --mode patch`, `cxor apply-results --mode branch`, or
+`cxor apply-results --mode working-tree` to consume accepted results. Patch mode
+does not mutate product files, branch mode does not checkout the branch, and
+working-tree mode requires a clean target before mutating.

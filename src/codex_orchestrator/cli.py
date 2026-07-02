@@ -276,7 +276,17 @@ def cmd_real_codex_smoke_runbook(args: argparse.Namespace) -> int:
         run_real_codex=args.run_real_codex,
         default_skip_command=command_from_string(args.default_skip_command, DEFAULT_SKIP_COMMAND),
         explicit_smoke_command=command_from_string(args.explicit_smoke_command, EXPLICIT_SMOKE_COMMAND),
+        live_progress=args.live_progress,
     )
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0
+
+
+def cmd_apply_results(args: argparse.Namespace) -> int:
+    from codex_orchestrator.apply_results import apply_results
+
+    ctx = _ctx(args)
+    result = apply_results(ctx, mode=args.mode)
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0
 
@@ -469,7 +479,16 @@ def build_parser() -> argparse.ArgumentParser:
     runbook.add_argument("--timestamp", default=None, help=argparse.SUPPRESS)
     runbook.add_argument("--default-skip-command", default=None, help=argparse.SUPPRESS)
     runbook.add_argument("--explicit-smoke-command", default=None, help=argparse.SUPPRESS)
+    live_progress = runbook.add_mutually_exclusive_group()
+    live_progress.add_argument("--live-progress", dest="live_progress", action="store_true")
+    live_progress.add_argument("--no-live-progress", dest="live_progress", action="store_false")
+    runbook.set_defaults(live_progress=None)
     runbook.set_defaults(func=cmd_real_codex_smoke_runbook)
+
+    apply_results = sub.add_parser("apply-results")
+    _add_repo_flags(apply_results)
+    apply_results.add_argument("--mode", default="patch", choices=["patch", "branch", "working-tree"])
+    apply_results.set_defaults(func=cmd_apply_results)
 
     return parser
 

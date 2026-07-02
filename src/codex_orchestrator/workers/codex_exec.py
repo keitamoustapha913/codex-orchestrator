@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import os
 import shutil
-import sys
 from pathlib import Path
 
 from codex_orchestrator.codex_execution_policy import (
@@ -16,6 +15,12 @@ from codex_orchestrator.codex_model_profile import resolve_codex_model_profile
 from codex_orchestrator.command_runner import CommandRunner
 from codex_orchestrator.errors import WorkerExecutionError, WorkerPreconditionError
 from codex_orchestrator.git_guard import repo_head
+from codex_orchestrator.live_progress import (
+    LiveProgressPolicyError,
+    LiveProgressReporter,
+    compact_codex_signal,
+    resolve_live_progress_policy,
+)
 from codex_orchestrator.patchlet_run_context import PatchletRunContext
 from codex_orchestrator.target_repo import TargetRepoContext
 
@@ -31,7 +36,8 @@ class CodexExecWorker(Worker):
         try:
             self.timeout_seconds = resolve_patchlet_timeout_seconds(os.environ)
             self.progress_interval_seconds = resolve_progress_interval_seconds(os.environ)
-        except ExecutionPolicyError as exc:
+            self.live_progress_policy = resolve_live_progress_policy(os.environ)
+        except (ExecutionPolicyError, LiveProgressPolicyError) as exc:
             raise WorkerPreconditionError(str(exc)) from exc
         self.soft_deadline_seconds = soft_deadline_seconds(self.timeout_seconds)
 
@@ -122,6 +128,7 @@ class CodexExecWorker(Worker):
         patchlet_id = patchlet["patchlet_id"]
         report_path = run_ctx.reports_dir / f"{patchlet_id}.json"
         probe_root = run_ctx.probe_dir / patchlet_id
+        live_progress = LiveProgressReporter(self.live_progress_policy, attempt_id=run_dir.name)
 
         def write_progress_event(payload: dict) -> None:
             progress_path.parent.mkdir(parents=True, exist_ok=True)
@@ -151,9 +158,9 @@ class CodexExecWorker(Worker):
             if isinstance(summary, str) and summary:
                 payload["summary"] = summary[:200]
             write_progress_event(payload)
-            if os.environ.get("CODEX_PROGRESS_STDERR") == "1":
-                summary_text = f": {payload['summary']}" if "summary" in payload else f": {signal}"
-                print(f"[{run_dir.name}] codex alive{summary_text}", file=sys.stderr)
+            compact_signal = compact_codex_signal(event)
+            if compact_signal:
+                live_progress.emit(compact_signal, elapsed_seconds)
 
         write_progress_event({
             "schema_version": "1.0",
@@ -164,6 +171,7 @@ class CodexExecWorker(Worker):
             "signal": "process.started",
             "source": "runner",
         })
+        live_progress.emit("process.started", 0, force=True)
         result = CommandRunner().run(
             args,
             cwd=run_ctx.execution_root,
@@ -198,6 +206,7 @@ class CodexExecWorker(Worker):
             stderr_path=run_dir / "stderr.txt",
             stdout_line_callback=record_progress,
         )
+        live_progress.emit(f"exited {result.exit_code}", result.duration_seconds, force=True)
         repo_sha_after = repo_head(run_ctx.execution_root)
         (run_dir / "command.json").write_text(json.dumps({
             **result.to_json(),

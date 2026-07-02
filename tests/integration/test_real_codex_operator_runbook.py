@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import os
 import subprocess
@@ -38,6 +39,20 @@ def fake_runner_factory(calls: list[list[str]], explicit_stdout: str | None = No
             return CommandCapture(exit_code=0, stdout="codex-cli 0.142.4\n", stderr="")
         if "--run-real-codex" in args:
             return CommandCapture(exit_code=0, stdout=explicit_stdout or "", stderr="explicit stderr\n")
+        return CommandCapture(exit_code=0, stdout="s\n1 skipped in 0.01s\n", stderr="")
+
+    return fake_runner
+
+
+def fake_runner_with_stderr(calls: list[list[str]], *, explicit_stdout: str = "{}", explicit_stderr: str = ""):
+    def fake_runner(args: list[str], cwd: Path, env: dict[str, str]) -> CommandCapture:
+        calls.append(args)
+        if args[:2] == ["git", "status"]:
+            return CommandCapture(exit_code=0, stdout="", stderr="")
+        if args[:2] == ["codex", "--version"]:
+            return CommandCapture(exit_code=0, stdout="codex-cli 0.142.4\n", stderr="")
+        if "--run-real-codex" in args:
+            return CommandCapture(exit_code=0, stdout=explicit_stdout, stderr=explicit_stderr)
         return CommandCapture(exit_code=0, stdout="s\n1 skipped in 0.01s\n", stderr="")
 
     return fake_runner
@@ -324,3 +339,132 @@ def test_operator_runbook_preserves_raw_stdout_and_stderr_even_when_parse_fails(
     run_dir = Path(result["operator_run_dir"])
     assert (run_dir / "explicit_smoke_stdout.txt").read_text(encoding="utf-8") == "plain output\n"
     assert (run_dir / "explicit_smoke_stderr.txt").read_text(encoding="utf-8") == "explicit stderr\n"
+
+
+def test_runbook_tees_compact_progress_lines_live(tmp_path: Path):
+    sink = io.StringIO()
+    result = run_real_codex_smoke_runbook(
+        repo_root=tmp_path,
+        operator_root=tmp_path / "runs",
+        timestamp=FIXED_TIMESTAMP,
+        dry_run=False,
+        run_real_codex=True,
+        runner=fake_runner_with_stderr(
+            [],
+            explicit_stdout='{"outcome":"safe_failure"}\n',
+            explicit_stderr="[cxor:P0001_attempt1 +004s] codex: thread.started\nfull pytest stderr\n",
+        ),
+        live_progress=True,
+        live_progress_sink=sink,
+    )
+
+    assert result["outcome"] == "safe_failure"
+    assert sink.getvalue() == "[cxor:P0001_attempt1 +004s] codex: thread.started\n"
+
+
+def test_runbook_does_not_tee_full_pytest_output_by_default(tmp_path: Path):
+    sink = io.StringIO()
+    run_real_codex_smoke_runbook(
+        repo_root=tmp_path,
+        operator_root=tmp_path / "runs",
+        timestamp=FIXED_TIMESTAMP,
+        dry_run=False,
+        run_real_codex=True,
+        runner=fake_runner_with_stderr(
+            [],
+            explicit_stdout='{"outcome":"safe_failure"}\n',
+            explicit_stderr="[cxor:P0001_attempt1 +004s] codex: thread.started\nFAILED test detail\n",
+        ),
+        live_progress=True,
+        live_progress_sink=sink,
+    )
+
+    assert "[cxor:P0001_attempt1" in sink.getvalue()
+    assert "FAILED test detail" not in sink.getvalue()
+
+
+def test_runbook_still_captures_full_stdout_stderr(tmp_path: Path):
+    sink = io.StringIO()
+    result = run_real_codex_smoke_runbook(
+        repo_root=tmp_path,
+        operator_root=tmp_path / "runs",
+        timestamp=FIXED_TIMESTAMP,
+        dry_run=False,
+        run_real_codex=True,
+        runner=fake_runner_with_stderr(
+            [],
+            explicit_stdout='{"outcome":"safe_failure"}\nfull stdout\n',
+            explicit_stderr="[cxor:P0001_attempt1 +004s] codex: thread.started\nfull stderr\n",
+        ),
+        live_progress=True,
+        live_progress_sink=sink,
+    )
+
+    run_dir = Path(result["operator_run_dir"])
+    assert "full stdout" in (run_dir / "explicit_smoke_stdout.txt").read_text(encoding="utf-8")
+    assert "full stderr" in (run_dir / "explicit_smoke_stderr.txt").read_text(encoding="utf-8")
+
+
+def test_runbook_no_live_progress_silences_terminal_progress(tmp_path: Path):
+    sink = io.StringIO()
+    run_real_codex_smoke_runbook(
+        repo_root=tmp_path,
+        operator_root=tmp_path / "runs",
+        timestamp=FIXED_TIMESTAMP,
+        dry_run=False,
+        run_real_codex=True,
+        runner=fake_runner_with_stderr(
+            [],
+            explicit_stdout='{"outcome":"safe_failure"}\n',
+            explicit_stderr="[cxor:P0001_attempt1 +004s] codex: thread.started\n",
+        ),
+        live_progress=False,
+        live_progress_sink=sink,
+    )
+
+    assert sink.getvalue() == ""
+
+
+def test_runbook_dry_run_does_not_invoke_real_codex_with_live_progress(tmp_path: Path):
+    calls: list[list[str]] = []
+    run_real_codex_smoke_runbook(
+        repo_root=tmp_path,
+        operator_root=tmp_path / "runs",
+        timestamp=FIXED_TIMESTAMP,
+        dry_run=True,
+        run_real_codex=False,
+        runner=fake_runner_factory(calls),
+        live_progress=True,
+    )
+
+    assert all("--run-real-codex" not in call for call in calls)
+
+
+def test_runbook_selected_policy_records_live_progress_enabled(tmp_path: Path):
+    result = run_real_codex_smoke_runbook(
+        repo_root=tmp_path,
+        operator_root=tmp_path / "runs",
+        timestamp=FIXED_TIMESTAMP,
+        dry_run=False,
+        run_real_codex=True,
+        runner=fake_runner_factory([], explicit_stdout='{"outcome":"success"}\n'),
+        live_progress=True,
+    )
+
+    policy = read_json(Path(result["operator_run_dir"]) / "selected_policy.json")
+    assert policy["live_progress_enabled"] is True
+
+
+def test_runbook_selected_policy_records_live_progress_disabled(tmp_path: Path):
+    result = run_real_codex_smoke_runbook(
+        repo_root=tmp_path,
+        operator_root=tmp_path / "runs",
+        timestamp=FIXED_TIMESTAMP,
+        dry_run=False,
+        run_real_codex=True,
+        runner=fake_runner_factory([], explicit_stdout='{"outcome":"success"}\n'),
+        live_progress=False,
+    )
+
+    policy = read_json(Path(result["operator_run_dir"]) / "selected_policy.json")
+    assert policy["live_progress_enabled"] is False

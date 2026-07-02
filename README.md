@@ -230,6 +230,36 @@ target-root worker_stage/. If real Codex writes a top-level `worker_stage/`,
 diagnosis reports `worker_capsule_path_violation`. This is a Codex
 path-obedience issue, not orchestrator wiring failure. Do not weaken validators.
 
+## Live Progress And Integration Results
+
+Real-Codex patchlets can emit compact live progress lines such as
+`[cxor:P0001_attempt1 +004s] codex: thread.started`. These lines are liveness
+only. The durable progress truth remains
+`.codex-orchestrator/runs/<attempt>/progress.jsonl`; live progress is not proof
+of success and a `safe_failure` capture is not DONE. Set
+`CXOR_LIVE_CODEX_PROGRESS=0` to disable terminal progress, or
+`CXOR_LIVE_CODEX_PROGRESS_INTERVAL_SECONDS=15` to adjust throttling.
+
+Accepted worktree patchlets advance an integration ref such as
+`refs/cxor/runs/R0001/integration`. The target repo remains clean between
+patchlets; accepted product/runtime changes are represented by the integration
+SHA, and the next patchlet worktree starts from that integration SHA. Global
+verification writes `.codex-orchestrator/integration/final_diff.patch` and
+verifies the integration SHA before DONE.
+
+Applying accepted results is explicit:
+
+```bash
+cxor apply-results --repo /path/to/target-repo --mode patch
+cxor apply-results --repo /path/to/target-repo --mode branch
+cxor apply-results --repo /path/to/target-repo --mode working-tree
+```
+
+`--mode patch` writes/refreshes the final diff and does not mutate product
+files. `--mode branch` creates `cxor/results/<run_id>` without checking it out.
+`--mode working-tree` requires a clean target and mutates product/runtime files
+only because the operator explicitly requested it.
+
 Useful read-only commands:
 
 ```bash

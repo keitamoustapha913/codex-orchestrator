@@ -67,6 +67,15 @@ def _contains_any(text: str, patterns: list[str]) -> bool:
     return any(pattern in haystack for pattern in patterns)
 
 
+def _dirty_paths_from_text(text: str) -> list[str]:
+    marker = "dirty paths:"
+    if marker not in text:
+        return []
+    _, tail = text.split(marker, 1)
+    first_line = tail.strip().splitlines()[0] if tail.strip() else ""
+    return [item.strip().strip(",") for item in first_line.split(",") if item.strip()]
+
+
 CAPSULE_LIKE_TARGET_ROOT_DIRS = (
     "worker_stage",
     "worker_memory",
@@ -139,6 +148,51 @@ def _capsule_path_violation(
     )
 
 
+def _target_dirty_after_integration_apply(
+    *,
+    run: dict[str, Any],
+    live_memory: dict[str, Any],
+    stderr_text: str,
+) -> tuple[list[str], dict[str, Any], list[str], str] | None:
+    evidence_text = "\n".join([
+        stderr_text,
+        str(run.get("worker_failure", {}).get("message", "")),
+    ])
+    if "clean target repo" not in evidence_text.lower():
+        return None
+    dirty_paths = _dirty_paths_from_text(evidence_text)
+    if not dirty_paths:
+        return None
+    if any(path.rstrip("/") in CAPSULE_LIKE_TARGET_ROOT_DIRS for path in dirty_paths):
+        return None
+
+    allowed_file = live_memory.get("allowed_product_runtime_file")
+    if not isinstance(allowed_file, str) or not allowed_file:
+        return None
+    if allowed_file not in dirty_paths:
+        return None
+
+    patchlet_id = str(run.get("patchlet_id", "unknown patchlet"))
+    summary = (
+        f"A prior patchlet ({patchlet_id}) appears to have produced an accepted product/runtime "
+        f"change, but the target working tree retained {allowed_file} as dirty before the next "
+        "worktree step. This indicates missing integration-state management, not Codex path failure."
+    )
+    return (
+        ["target_dirty_allowed_product_file"],
+        {
+            "primary_category": "target_dirty_after_integration_apply",
+            "confidence": "high",
+            "summary": summary,
+            "supported_by": ["run_manifest.json", "worker_memory/LIVE_MEMORY.json"],
+        },
+        [],
+        (
+            "Record accepted changes in integration state and advance the integration ref so "
+            "the target product/runtime files remain clean between patchlets; do not weaken "
+            "the clean-target precondition."
+        ),
+    )
 def _analyze_signals(
     stderr_text: str,
     stdout_text: str,
@@ -350,6 +404,7 @@ def diagnose_real_codex_attempt(ctx: TargetRepoContext, *, attempt_id: str, prom
     run_dir = _path_from_manifest(ctx, paths.get("run_dir"))
     worker_capsule_path = run_dir / "worker_capsule.json" if run_dir is not None else None
     worker_memory_dir = run_dir / "worker_memory" if run_dir is not None else None
+    live_memory_path = worker_memory_dir / "LIVE_MEMORY.json" if worker_memory_dir is not None else None
     worker_stage_dir = run_dir / "worker_stage" if run_dir is not None else None
     worker_events_path = run_dir / "worker_hooks" / "events.jsonl" if run_dir is not None else None
     wrapper_gate_path = run_dir / "gates" / "wrapper_gate_result.json" if run_dir is not None else None
@@ -378,6 +433,7 @@ def diagnose_real_codex_attempt(ctx: TargetRepoContext, *, attempt_id: str, prom
     stdout_text = _load_text(stdout_path)
     stderr_text = _load_text(stderr_path)
     command = _load_json_object(command_path)
+    live_memory = _load_json_object(live_memory_path)
     output_events = _load_jsonl_events(output_jsonl_path)
     worker_events = _load_jsonl_events(worker_events_path)
     capsule_violation = _capsule_path_violation(
@@ -389,14 +445,22 @@ def diagnose_real_codex_attempt(ctx: TargetRepoContext, *, attempt_id: str, prom
     if capsule_violation is not None:
         observed_signals, diagnosis_block, known_unknowns, next_action = capsule_violation
     else:
-        observed_signals, diagnosis_block, known_unknowns, next_action = _analyze_signals(
-            stderr_text,
-            stdout_text,
-            output_events,
-            artifact_presence,
-            command=command,
+        integration_dirty = _target_dirty_after_integration_apply(
             run=run,
+            live_memory=live_memory,
+            stderr_text=stderr_text,
         )
+        if integration_dirty is not None:
+            observed_signals, diagnosis_block, known_unknowns, next_action = integration_dirty
+        else:
+            observed_signals, diagnosis_block, known_unknowns, next_action = _analyze_signals(
+                stderr_text,
+                stdout_text,
+                output_events,
+                artifact_presence,
+                command=command,
+                run=run,
+            )
     if artifact_presence["worker_capsule"]:
         observed_signals.append("worker_capsule_present")
     if artifact_presence["worker_memory"]:

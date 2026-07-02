@@ -203,3 +203,18 @@ and the exact `CXOR_PREFLIGHT_PATH` / `CXOR_FINAL_REPORT_PATH` values. Do not
 create target-root worker_stage/. A top-level `worker_stage/` is diagnosed as
 `worker_capsule_path_violation`. This is a Codex path-obedience issue, not
 orchestrator wiring failure. Do not weaken validators.
+
+## Live Progress And Integration State
+
+Implemented: compact live progress lines (`[cxor:<attempt> +004s] codex:
+thread.started`) with `CXOR_LIVE_CODEX_PROGRESS=0` disable support. Durable
+liveness remains `progress.jsonl`; live progress and safe failure are not DONE.
+
+Implemented: accepted changes advance `refs/cxor/runs/<run_id>/integration`,
+the target repo remains clean between patchlets, worktrees start from the
+integration SHA, and final verification writes
+`.codex-orchestrator/integration/final_diff.patch`.
+
+Implemented: explicit finalization through `cxor apply-results --mode patch`,
+`cxor apply-results --mode branch`, and `cxor apply-results --mode
+working-tree`.
