@@ -46,3 +46,58 @@ cxor apply-repair --repo /path/to/target-repo
 cxor regenerate-patchlets --repo /path/to/target-repo --from-repair-plan latest
 cxor auto --repo /path/to/target-repo --resume --until DONE --worker-mode mock
 ```
+
+## Durable probes and verification
+
+Patchlet reports must carry `probe_artifact_refs` that point at durable probe artifacts under `.artifacts/probes/`.
+
+The root-cause gate is explicit:
+`ROOT-CAUSE PROBE-ONLY INVESTIGATION`
+
+The global verifier does not allow `DONE` unless patchlet reports validate, transaction groups pass, invariants are proven, and unresolved failures are absent.
+
+## Advanced repair and rediscovery
+
+Advanced repair classifications currently include:
+
+- `INSIDE_KNOWN_GRAPH`
+- `OUTSIDE_KNOWN_GRAPH`
+- `INVENTORY_CONTRADICTION`
+- `REPEATED_REPAIR_FAILURE`
+- `MASTER_GOAL_CHANGED`
+- `EXCESSIVE_IMPACTED_SCOPE`
+
+Rediscovery and rebuild commands:
+
+```bash
+cxor rediscover --repo /path/to/target-repo --scope impacted
+cxor rediscover --repo /path/to/target-repo --scope full
+cxor rebuild-inventory --repo /path/to/target-repo --scope impacted
+```
+
+## Worktree mode
+
+Worktree mode is optional. It is not the default execution path.
+
+Validated merge flow:
+
+```bash
+cxor run-next --repo /path/to/target-repo --worker-mode mock --use-worktree
+```
+
+The target repo must be clean apart from volatile workflow artifacts before worktree execution starts.
+Worktree execution writes reports, runs, and durable probe artifacts to the target repo artifact root, validates the worktree diff, validates the report, and only then applies a validated merge back to the target product/runtime file.
+Unauthorized worktree diffs are isolated as failure evidence and do not mutate target product/runtime files.
+
+No source is copied into the target repo beyond durable workflow artifacts and validated target-file edits.
+
+## CI-safe commands
+
+```bash
+export UV_CACHE_DIR=/tmp/uv-cache
+uv run --no-sync pytest -q
+uv run --no-sync cxor doctor --repo /path/to/target-repo
+uv run --no-sync cxor validate-state --repo /path/to/target-repo
+uv run --no-sync cxor verify-global --repo /path/to/target-repo
+uv run --no-sync cxor auto --repo /path/to/target-repo --resume --until DONE --worker-mode ci_only
+```

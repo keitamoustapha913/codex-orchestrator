@@ -26,11 +26,15 @@ Implemented capabilities:
 - target-repo diff guard enforcing one allowed product/runtime file and approved artifact directories;
 - patchlet report validator enforcing explicit statuses and root-cause/proof fields;
 - patchlet executor with run records, reports, diff capture, and failure record creation;
-- global verifier that marks `DONE` only when all patchlet reports validate as `COMPLETE` or `VERIFIED_NO_CHANGE_NEEDED`;
+- transaction-group verifier with durable pass/fail state and failure evidence;
+- global verifier that marks `DONE` only when patchlet reports validate, transaction groups pass, invariants are proven, and unresolved failures are absent;
 - failure classification, repair planning, and repair application scaffolds;
 - repair application artifacts and repair patchlet regeneration without blind retry;
 - idempotent replay for `cxor apply-repair`, `cxor regenerate-patchlets`, and `cxor auto --resume --until DONE` when durable repair artifacts already exist;
 - terminal `DONE` guards for `cxor apply-repair` and `cxor regenerate-patchlets` so post-completion repair commands are explicit no-op operations;
+- advanced repair classifications for inside-known-graph, outside-known-graph, inventory contradiction, repeated repair failure, master-goal change, and excessive impacted scope;
+- durable rediscovery records and inventory rebuild routing;
+- optional worktree execution with validated merge and unauthorized diff isolation;
 - `cxor auto` mock-mode autonomous loop that initializes, discovers, compiles, runs, verifies, and reaches `DONE`.
 
 ## TDD status
@@ -38,7 +42,7 @@ Implemented capabilities:
 The test suite was written before/alongside implementation and currently passes:
 
 ```text
-25 passed
+170 passed, 1 skipped
 ```
 
 Covered tests:
@@ -52,8 +56,11 @@ Covered tests:
 - goal normalization output;
 - patchlet compilation output and root-cause prompt gate;
 - mock patchlet execution and state updates;
+- transaction group verification;
 - global verification to `DONE`;
 - autonomous mock loop to `DONE`;
+- advanced repair classification and rediscovery flows;
+- optional worktree execution and validated merge;
 - CLI invocation from outside the source tree using module entrypoint.
 
 ## Current limitations
@@ -63,9 +70,23 @@ This is not the full final orchestrator. The following are intentionally still s
 - Codex-driven semantic classification is not yet implemented beyond the adapter scaffold.
 - Evidence classification, inventory graph construction, invariant extraction, and patchlet compilation are deterministic placeholder implementations.
 - Repair planning records structured intent but does not yet synthesize enriched repair patchlets automatically.
-- Transaction-group verifier is represented through metadata but not fully implemented.
-- Worktree isolation and validated merge are not yet implemented.
+- CI/documentation contract coverage still needs expansion around all newly added commands and worker modes.
 - Root-cause validation is strict for report fields but does not yet perform secondary model/human semantic verification.
+
+## Current command surface
+
+Notable verified commands now include:
+
+```bash
+cxor verify-group --repo /path/to/target-repo TG001
+cxor verify-all-groups --repo /path/to/target-repo
+cxor verify-global --repo /path/to/target-repo
+cxor rediscover --repo /path/to/target-repo --scope impacted
+cxor rebuild-inventory --repo /path/to/target-repo --scope impacted
+cxor run-next --repo /path/to/target-repo --worker-mode mock --use-worktree
+```
+
+`No blind retry` remains a required contract.
 
 ## Verified commands
 

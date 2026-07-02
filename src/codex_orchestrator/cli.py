@@ -149,7 +149,7 @@ def cmd_run_next(args: argparse.Namespace) -> int:
     from codex_orchestrator.stages.run_patchlet import run_next_patchlet
 
     ctx = _ctx(args)
-    result = run_next_patchlet(ctx, worker_mode=args.worker_mode)
+    result = run_next_patchlet(ctx, worker_mode=args.worker_mode, use_worktree=args.use_worktree)
     print(json.dumps(result.__dict__, indent=2, sort_keys=True))
     return 0 if result.status not in {"FAILED_WITH_EVIDENCE"} else 1
 
@@ -158,7 +158,7 @@ def cmd_run_all(args: argparse.Namespace) -> int:
     from codex_orchestrator.stages.run_patchlet import run_all_patchlets
 
     ctx = _ctx(args)
-    results = run_all_patchlets(ctx, worker_mode=args.worker_mode)
+    results = run_all_patchlets(ctx, worker_mode=args.worker_mode, use_worktree=args.use_worktree)
     print(json.dumps([r.__dict__ for r in results], indent=2, sort_keys=True))
     return 0 if all(r.status not in {"FAILED_WITH_EVIDENCE"} for r in results) else 1
 
@@ -319,11 +319,13 @@ def build_parser() -> argparse.ArgumentParser:
     run_next = sub.add_parser("run-next")
     _add_repo_flags(run_next)
     run_next.add_argument("--worker-mode", default="mock", choices=["mock", "real_codex", "manual", "ci_only"])
+    run_next.add_argument("--use-worktree", action="store_true")
     run_next.set_defaults(func=cmd_run_next)
 
     run_all = sub.add_parser("run-all")
     _add_repo_flags(run_all)
     run_all.add_argument("--worker-mode", default="mock", choices=["mock", "real_codex", "manual", "ci_only"])
+    run_all.add_argument("--use-worktree", action="store_true")
     run_all.set_defaults(func=cmd_run_all)
 
     validate_report = sub.add_parser("validate-report")

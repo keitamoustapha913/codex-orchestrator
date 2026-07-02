@@ -16,6 +16,7 @@ class GlobalVerificationResult:
     status: str
     failed_patchlets: list[str]
     unproven_patchlets: list[str]
+    artifact_path: str
 
 
 def verify_global(ctx: TargetRepoContext) -> GlobalVerificationResult:
@@ -192,4 +193,10 @@ def verify_global(ctx: TargetRepoContext) -> GlobalVerificationResult:
         transition(ctx, state, "DONE", reason="global verification passed")
     else:
         transition(ctx, state, "FAILURE_CLASSIFICATION_REQUIRED", reason="global verification failed")
-    return GlobalVerificationResult(done=done, status=status, failed_patchlets=failed, unproven_patchlets=unproven)
+    return GlobalVerificationResult(
+        done=done,
+        status=status,
+        failed_patchlets=failed,
+        unproven_patchlets=unproven,
+        artifact_path=str(ctx.paths.final_verification_json),
+    )

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from codex_orchestrator.errors import StagePreconditionError
 from codex_orchestrator.locks import workflow_lock
 from codex_orchestrator.state import WorkflowState, load_state
 from codex_orchestrator.target_repo import TargetRepoContext
@@ -47,6 +48,20 @@ def run_auto(
             state = init_workflow(ctx, master=master, invocation_argv=["cxor", "auto"], mode="auto", until=until)
         elif master is not None and not ctx.paths.master_prompt.exists():
             state = init_workflow(ctx, master=master, invocation_argv=["cxor", "auto"], mode="auto", until=until)
+
+        state = load_state(ctx)
+        if worker_mode == "ci_only":
+            if state.stage == until:
+                return state
+            raise StagePreconditionError(
+                "auto",
+                current_stage=state.stage,
+                target_repo=str(ctx.root),
+                detail=(
+                    "ci_only worker is read-only and can only resume a workflow "
+                    f"already at the requested stage {until}"
+                ),
+            )
 
         for _ in range(max_iterations):
             state = load_state(ctx)

@@ -1,15 +1,18 @@
 from __future__ import annotations
 
+import subprocess
 from dataclasses import dataclass
 
 from codex_orchestrator.codex_adapter import worker_for_mode
 from codex_orchestrator.git_guard import changed_between, git_diff, snapshot_status
+from codex_orchestrator.patchlet_run_context import PatchletRunContext, build_patchlet_run_context
 from codex_orchestrator.jsonio import read_json, write_json
 from codex_orchestrator.run_records import append_run_record
 from codex_orchestrator.state import load_state, now_iso, transition
 from codex_orchestrator.target_repo import TargetRepoContext
 from codex_orchestrator.validators.diff_validator import validate_changed_paths
 from codex_orchestrator.validators.report_validator import ReportValidationError, validate_patchlet_report_file
+from codex_orchestrator.worktree import cleanup_patchlet_worktree, create_patchlet_worktree
 
 
 @dataclass(frozen=True)
@@ -64,7 +67,19 @@ def _record_failure(ctx: TargetRepoContext, *, source_id: str, observed_failure:
     return failure_id
 
 
-def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock") -> PatchletExecutionResult:
+def _apply_validated_diff_to_target(ctx: TargetRepoContext, *, diff_path) -> None:
+    result = subprocess.run(
+        ["git", "-C", str(ctx.root), "apply", str(diff_path)],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"validated merge failed: {result.stderr.strip() or result.stdout.strip()}")
+
+
+def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_worktree: bool = False) -> PatchletExecutionResult:
     index = _load_patchlet_index(ctx)
     patchlet = _next_pending_patchlet(index)
     if patchlet is None:
@@ -75,38 +90,101 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock") -> P
     state.attempts[pid] = state.attempts.get(pid, 0) + 1
     transition(ctx, state, "PATCHLET_EXECUTION_IN_PROGRESS", reason=f"running {pid}")
 
-    before = snapshot_status(ctx.root)
     run_id = f"{pid}_attempt{state.attempts[pid]}"
-    run_dir = ctx.paths.runs_dir / run_id
+    worktree_ctx = create_patchlet_worktree(ctx, patchlet_id=pid) if use_worktree else None
+    run_ctx = build_patchlet_run_context(
+        ctx,
+        patchlet=patchlet,
+        run_id=run_id,
+        execution_root=worktree_ctx.path if worktree_ctx else ctx.root,
+        artifact_root=ctx.root,
+        is_worktree=bool(worktree_ctx),
+        worktree_path=worktree_ctx.path if worktree_ctx else None,
+    )
+    run_dir = run_ctx.run_dir
+    before = snapshot_status(run_ctx.execution_root)
     worker = worker_for_mode(worker_mode)
-    worker_result = worker.run_patchlet(ctx, patchlet, run_dir=run_dir)
-    after = snapshot_status(ctx.root)
+    worker_result = worker.run_patchlet(ctx, patchlet, run_dir=run_dir, run_ctx=run_ctx)
+    after = snapshot_status(run_ctx.execution_root)
     changed_paths = changed_between(before, after)
-    diff_text = git_diff(ctx.root)
-    (run_dir / "diff.patch").write_text(diff_text, encoding="utf-8")
+    diff_text = git_diff(run_ctx.execution_root)
+    run_dir.mkdir(parents=True, exist_ok=True)
+    diff_path = run_dir / "diff.patch"
+    diff_path.write_text(diff_text, encoding="utf-8")
     (run_dir / "diff_name_status.txt").write_text("\n".join(changed_paths) + "\n", encoding="utf-8")
 
     diff_result = validate_changed_paths(changed_paths, patchlet)
+    cleanup_status = None
+    failure_id: str | None = None
+    report_valid = False
+    report_status = "FAILED_WITH_EVIDENCE"
+    report_error: str | None = None
+    try:
+        if not diff_result.allowed:
+            failure_id = _record_failure(
+                ctx,
+                source_id=pid,
+                observed_failure=f"Unauthorized diff detected: {', '.join(diff_result.unauthorized_paths)}",
+                changed_paths=changed_paths,
+            )
+            report_status = "FAILED_WITH_EVIDENCE"
+        else:
+            try:
+                if worker_result.report_path is None:
+                    raise ReportValidationError("Worker did not create a report")
+                report = validate_patchlet_report_file(worker_result.report_path, patchlet)
+                report_valid = True
+                report_status = report["status"]
+            except ReportValidationError as exc:
+                report_error = str(exc)
+                failure_id = _record_failure(
+                    ctx,
+                    source_id=pid,
+                    observed_failure=f"Invalid or missing patchlet report: {exc}",
+                    changed_paths=changed_paths,
+                )
+                report_status = "FAILED_WITH_EVIDENCE"
+
+            if report_valid and report_status in {"COMPLETE", "VERIFIED_NO_CHANGE_NEEDED"} and diff_text:
+                _apply_validated_diff_to_target(ctx, diff_path=diff_path)
+    finally:
+        if worktree_ctx is not None:
+            worktree_ctx = cleanup_patchlet_worktree(worktree_ctx)
+            cleanup_status = worktree_ctx.cleanup_status
+
     append_run_record(ctx, {
         "stage": "PATCHLET_EXECUTION_IN_PROGRESS",
         "worker": worker_mode,
         "patchlet_id": pid,
         "repair_plan_id": patchlet.get("repair_plan_id"),
         "source_failure_ids": patchlet.get("source_failure_ids", []),
+        "execution_mode": "worktree" if use_worktree else "direct",
+        "target_root": str(run_ctx.target_root),
+        "execution_root": str(run_ctx.execution_root),
+        "artifact_root": str(run_ctx.artifact_root),
         "exit_code": worker_result.exit_code,
         "stdout": worker_result.stdout,
         "stderr": worker_result.stderr,
         "changed_files": changed_paths,
         "diff_allowed": diff_result.allowed,
+        "diff_validation": {
+            "valid": diff_result.allowed,
+            "changed_product_runtime_files": diff_result.product_runtime_paths,
+            "artifact_files": diff_result.artifact_paths,
+            "unauthorized_files": diff_result.unauthorized_paths,
+        },
+        "worktree": {
+            "enabled": use_worktree,
+            "path": str(run_ctx.worktree_path) if run_ctx.worktree_path else None,
+            "base_sha": worktree_ctx.base_sha if worktree_ctx else None,
+            "cleanup_policy": worktree_ctx.cleanup_policy if worktree_ctx else None,
+            "cleanup_status": cleanup_status,
+        },
+        "report_valid": report_valid,
+        "report_error": report_error,
     })
 
     if not diff_result.allowed:
-        failure_id = _record_failure(
-            ctx,
-            source_id=pid,
-            observed_failure=f"Unauthorized diff detected: {', '.join(diff_result.unauthorized_paths)}",
-            changed_paths=changed_paths,
-        )
         patchlet["status"] = "FAILED_WITH_EVIDENCE"
         _save_patchlet_index(ctx, index)
         state = load_state(ctx)
@@ -116,18 +194,6 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock") -> P
             state.pending_patchlets.remove(pid)
         transition(ctx, state, "FAILURE_CLASSIFICATION_REQUIRED", reason=f"{pid} unauthorized diff {failure_id}")
         return PatchletExecutionResult(pid, "FAILED_WITH_EVIDENCE", changed_paths, False, f"unauthorized diff; failure {failure_id}")
-
-    report_valid = False
-    report_status = "FAILED_WITH_EVIDENCE"
-    try:
-        if worker_result.report_path is None:
-            raise ReportValidationError("Worker did not create a report")
-        report = validate_patchlet_report_file(worker_result.report_path, patchlet)
-        report_valid = True
-        report_status = report["status"]
-    except ReportValidationError as exc:
-        _record_failure(ctx, source_id=pid, observed_failure=f"Invalid or missing patchlet report: {exc}", changed_paths=changed_paths)
-        report_status = "FAILED_WITH_EVIDENCE"
 
     patchlet["status"] = report_status
     _save_patchlet_index(ctx, index)
@@ -150,10 +216,10 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock") -> P
     return PatchletExecutionResult(pid, report_status, changed_paths, report_valid, "patchlet execution recorded")
 
 
-def run_all_patchlets(ctx: TargetRepoContext, *, worker_mode: str = "mock") -> list[PatchletExecutionResult]:
+def run_all_patchlets(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_worktree: bool = False) -> list[PatchletExecutionResult]:
     results: list[PatchletExecutionResult] = []
     while True:
-        result = run_next_patchlet(ctx, worker_mode=worker_mode)
+        result = run_next_patchlet(ctx, worker_mode=worker_mode, use_worktree=use_worktree)
         if result.status == "NO_PENDING_PATCHLETS":
             break
         results.append(result)
