@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "repair_plan",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "kind",
+    "repair_plan_id",
+    "source_failure_ids",
+    "classification",
+    "recommended_action",
+    "impacted_goal_ids",
+    "impacted_invariant_ids",
+    "impacted_graph_node_ids",
+    "impacted_files",
+    "generated_patchlet_ids",
+    "requires_partial_rediscovery",
+    "requires_full_rediscovery",
+    "requires_inventory_rebuild",
+    "requires_patchlet_regeneration",
+    "why",
+    "acceptance_criteria"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "kind": {"const": "repair_plan"},
+    "repair_plan_id": {"type": "string", "pattern": "^RP[0-9]{4}$"},
+    "source_failure_ids": {
+      "type": "array",
+      "items": {"type": "string", "pattern": "^F[0-9]{4}$"}
+    },
+    "classification": {
+      "type": "string",
+      "enum": ["INSIDE_KNOWN_GRAPH", "NO_FAILURES"]
+    },
+    "recommended_action": {
+      "type": "string",
+      "enum": ["GENERATE_REPAIR_PATCHLETS", "GLOBAL_REVERIFY"]
+    },
+    "impacted_goal_ids": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "impacted_invariant_ids": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "impacted_graph_node_ids": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "impacted_files": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "generated_patchlet_ids": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "requires_partial_rediscovery": {"type": "boolean"},
+    "requires_full_rediscovery": {"type": "boolean"},
+    "requires_inventory_rebuild": {"type": "boolean"},
+    "requires_patchlet_regeneration": {"type": "boolean"},
+    "why": {"type": "string", "minLength": 1},
+    "acceptance_criteria": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "created_at": {"type": "string"}
+  },
+  "additionalProperties": true
+}

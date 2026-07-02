@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "failure_record",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "kind",
+    "failure_id",
+    "source",
+    "source_id",
+    "observed_failure",
+    "blocking_invariant_ids",
+    "evidence_ids",
+    "graph_node_ids",
+    "changed_paths",
+    "suspected_scope",
+    "required_next_step"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "kind": {"const": "failure_record"},
+    "failure_id": {"type": "string", "pattern": "^F[0-9]{4}$"},
+    "source": {"type": "string"},
+    "source_id": {"type": "string"},
+    "observed_failure": {"type": "string", "minLength": 1},
+    "blocking_invariant_ids": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "evidence_ids": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "graph_node_ids": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "changed_paths": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "suspected_scope": {"type": "string"},
+    "classification": {"type": "string"},
+    "required_next_step": {"type": "string"},
+    "created_at": {"type": "string"}
+  },
+  "additionalProperties": true
+}

@@ -1,0 +1,7 @@
+# Codex orchestrator volatile run logs
+.codex-orchestrator/runs/
+.codex-orchestrator/tmp/
+.codex-orchestrator/.lock
+
+# Optional: large probe outputs
+.artifacts/probes/**/large-output/

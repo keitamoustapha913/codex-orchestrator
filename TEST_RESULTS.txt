@@ -1,0 +1,25 @@
+Test run command:
+
+    pytest -q
+
+Result:
+
+    25 passed in 10.90s
+
+Smoke checks after editable install:
+
+    cxor --version
+    codex-orchestrator --version
+    python -m codex_orchestrator --version
+
+Each printed:
+
+    codex-orchestrator 0.1.0
+
+Demo target run:
+
+    cxor auto --repo /mnt/data/cxor_demo_target --master /mnt/data/cxor_demo_target/master_prompt.md --until DONE --worker-mode mock --max-iterations 25
+
+Result:
+
+    DONE /mnt/data/cxor_demo_target

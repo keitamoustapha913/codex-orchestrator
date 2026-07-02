@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Codex Orchestrator Workflow State",
+  "type": "object",
+  "required": ["schema_version", "kind", "workflow_id", "stage", "orchestrator", "target_repo", "created_at", "updated_at"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "kind": {"const": "workflow_state"},
+    "workflow_id": {"type": "string"},
+    "stage": {"type": "string"},
+    "mode": {"type": "string"},
+    "until": {"type": "string"},
+    "orchestrator": {"type": "object"},
+    "target_repo": {"type": "object"},
+    "master_prompt_sha256": {"type": ["string", "null"]},
+    "current_loop_iteration": {"type": "integer"},
+    "current_patchlet_id": {"type": ["string", "null"]},
+    "attempts": {"type": "object"},
+    "pending_patchlets": {"type": "array", "items": {"type": "string"}},
+    "completed_patchlets": {"type": "array", "items": {"type": "string"}},
+    "verified_no_change_needed": {"type": "array", "items": {"type": "string"}},
+    "blocked_patchlets": {"type": "array", "items": {"type": "string"}},
+    "failed_patchlets": {"type": "array", "items": {"type": "string"}},
+    "stage_history": {"type": "array"},
+    "created_at": {"type": "string"},
+    "updated_at": {"type": "string"}
+  },
+  "additionalProperties": true
+}

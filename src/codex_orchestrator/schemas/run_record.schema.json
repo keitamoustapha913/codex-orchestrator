@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "run_record",
+  "type": "object",
+  "required": ["schema_version", "kind"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "kind": {"type": "string"}
+  },
+  "additionalProperties": true
+}

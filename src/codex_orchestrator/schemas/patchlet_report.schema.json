@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Patchlet Report",
+  "type": "object",
+  "required": [
+    "schema_version", "kind", "patchlet_id", "status", "changed_product_runtime_file",
+    "changed_artifact_files", "probe_commands", "deterministic_run_counts",
+    "root_cause_classification", "before_after_state", "row_ledger", "trace_ledger",
+    "cleanup_proof", "acceptance_criteria_result"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "kind": {"const": "patchlet_report"},
+    "patchlet_id": {"type": "string"},
+    "status": {"enum": ["COMPLETE", "VERIFIED_NO_CHANGE_NEEDED", "BLOCKED_WITH_EVIDENCE", "FAILED_WITH_EVIDENCE"]},
+    "changed_product_runtime_file": {"type": ["string", "null"]},
+    "changed_artifact_files": {"type": "array", "items": {"type": "string"}},
+    "probe_commands": {"type": "array", "items": {"type": "string"}},
+    "deterministic_run_counts": {"type": "object"},
+    "root_cause_classification": {"type": "object"},
+    "before_after_state": {"type": "array"},
+    "row_ledger": {"type": "array"},
+    "trace_ledger": {"type": "array"},
+    "cleanup_proof": {"type": "string"},
+    "acceptance_criteria_result": {"enum": ["pass", "fail", "blocked"]}
+  },
+  "additionalProperties": true
+}

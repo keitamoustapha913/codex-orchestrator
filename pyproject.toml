@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "codex-orchestrator"
+version = "0.1.0"
+description = "Probe-gated root-cause Codex orchestration CLI"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [{name = "Codex Orchestrator Maintainers"}]
+dependencies = [
+  "jsonschema>=4"
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-cov", "ruff", "mypy", "build"]
+
+[project.scripts]
+cxor = "codex_orchestrator.cli:main"
+codex-orchestrator = "codex_orchestrator.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+codex_orchestrator = [
+  "schemas/*.json",
+  "prompt_templates/*.md",
+  "templates/target_repo/*"
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

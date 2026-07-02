@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Goal Spec",
+  "type": "object",
+  "required": ["schema_version", "kind", "master_goal", "success_goals", "target_invariants", "forbidden_actions", "runtime_constraints", "validation_commands", "allowed_edit_scope", "must_preserve", "known_failure_modes", "proof_requirements"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "kind": {"const": "goal_spec"},
+    "master_goal": {"type": "string"},
+    "success_goals": {"type": "array"},
+    "target_invariants": {"type": "array"},
+    "forbidden_actions": {"type": "array"},
+    "runtime_constraints": {"type": "array"},
+    "validation_commands": {"type": "array"},
+    "allowed_edit_scope": {"type": "array"},
+    "must_preserve": {"type": "array"},
+    "known_failure_modes": {"type": "array"},
+    "proof_requirements": {"type": "array"}
+  },
+  "additionalProperties": true
+}

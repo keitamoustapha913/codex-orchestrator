@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Patchlet",
+  "type": "object",
+  "required": [
+    "schema_version", "kind", "patchlet_id", "subprompt_path", "master_goal_ids", "invariant_ids",
+    "evidence_ids", "graph_node_ids", "allowed_product_runtime_file", "allowed_artifact_dirs",
+    "transaction_group_id", "depends_on", "status"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "kind": {"const": "patchlet"},
+    "patchlet_id": {"type": "string"},
+    "subprompt_path": {"type": "string"},
+    "master_goal_ids": {"type": "array", "items": {"type": "string"}},
+    "invariant_ids": {"type": "array", "items": {"type": "string"}},
+    "evidence_ids": {"type": "array", "items": {"type": "string"}},
+    "graph_node_ids": {"type": "array", "items": {"type": "string"}},
+    "allowed_product_runtime_file": {"type": "string"},
+    "allowed_artifact_dirs": {"type": "array", "items": {"type": "string"}},
+    "transaction_group_id": {"type": "string"},
+    "depends_on": {"type": "array", "items": {"type": "string"}},
+    "status": {"enum": ["PENDING", "IN_PROGRESS", "COMPLETE", "VERIFIED_NO_CHANGE_NEEDED", "BLOCKED_WITH_EVIDENCE", "FAILED_WITH_EVIDENCE"]}
+  },
+  "additionalProperties": true
+}

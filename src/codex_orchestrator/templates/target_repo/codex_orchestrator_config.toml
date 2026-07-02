@@ -1,0 +1,33 @@
+[repo]
+root = "."
+name = "target-repo"
+
+[artifacts]
+workflow_dir = ".codex-orchestrator"
+probe_dir = ".artifacts/probes"
+
+[worker]
+mode = "mock"
+codex_binary = "codex"
+default_model = "default"
+
+[execution]
+non_interactive = true
+auto_repair = true
+auto_replan = true
+auto_rediscover = true
+until = "DONE"
+max_patchlet_attempts = 3
+max_repair_cycles = 0
+
+[git]
+require_clean_start = false
+use_worktrees = false
+rollback_unauthorized_diffs = true
+allow_self_target = false
+allow_non_git = false
+
+[commands]
+test = ""
+lint = ""
+typecheck = ""
