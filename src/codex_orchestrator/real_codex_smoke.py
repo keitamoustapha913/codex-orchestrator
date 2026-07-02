@@ -9,6 +9,7 @@ from codex_orchestrator.git_guard import snapshot_status
 from codex_orchestrator.state import load_state
 from codex_orchestrator.target_repo import TargetRepoContext
 
+from .diagnostics import diagnose_real_codex_attempt
 from .stages.build_inventory import build_inventory
 from .stages.census import run_census
 from .stages.classify_evidence import classify_evidence
@@ -151,6 +152,22 @@ def _latest_patchlet_run_entry(ctx: TargetRepoContext) -> dict | None:
 
 
 def _latest_prompt_artifact_path(ctx: TargetRepoContext) -> Path | None:
+    run_dir = _latest_run_dir(ctx)
+    if run_dir is not None:
+        command_path = run_dir / "command.json"
+        if command_path.exists():
+            from .jsonio import read_json
+            command = read_json(command_path)
+            recorded_prompt_path = command.get("prompt_path")
+            if recorded_prompt_path:
+                prompt_path = Path(recorded_prompt_path)
+                if prompt_path.exists():
+                    return prompt_path
+            args = command.get("args", [])
+            if args:
+                prompt_path = Path(args[-1])
+                if prompt_path.exists():
+                    return prompt_path
     manifest = load_run_manifest(ctx)
     patchlet_runs = [run for run in manifest.get("runs", []) if run.get("patchlet_id")]
     if not patchlet_runs:
@@ -186,11 +203,12 @@ def _smoke_result(
     run_dir = _latest_run_dir(ctx)
     run_manifest_entry = _latest_patchlet_run_entry(ctx)
     prompt_artifact_path = _latest_prompt_artifact_path(ctx)
+    capsule_manifest_path = str(run_dir / "worker_capsule.json") if run_dir is not None else None
     contract_template_path = _real_codex_contract_template_path()
     contract_injected = False
     if prompt_artifact_path is not None and prompt_artifact_path.exists():
         contract_injected = "Real Codex Patchlet Contract" in prompt_artifact_path.read_text(encoding="utf-8")
-    return {
+    result = {
         "worker_mode": "real_codex",
         "use_worktree": True,
         "command": build_real_codex_auto_worktree_smoke_command(
@@ -206,6 +224,10 @@ def _smoke_result(
         "target_repo_root": str(ctx.root),
         "run_manifest_path": str(ctx.paths.run_manifest),
         "prompt_artifact_path": str(prompt_artifact_path) if prompt_artifact_path is not None else None,
+        "worker_capsule_manifest_path": capsule_manifest_path,
+        "worker_memory_dir": str(run_dir / "worker_memory") if run_dir is not None else None,
+        "worker_stage_dir": str(run_dir / "worker_stage") if run_dir is not None else None,
+        "wrapper_gate_result_path": str(run_dir / "gates" / "wrapper_gate_result.json") if run_dir is not None else None,
         "contract_template_path": str(contract_template_path),
         "contract_injected": contract_injected,
         "final_verification_path": str(ctx.paths.final_verification_json),
@@ -220,6 +242,15 @@ def _smoke_result(
         "output_jsonl_path": str(run_dir / "output.jsonl") if run_dir is not None else None,
         "diff_path": str(run_dir / "diff.patch") if run_dir is not None else None,
     }
+    if outcome == "safe_failure" and run_manifest_entry is not None and run_manifest_entry.get("attempt_id"):
+        diagnosis = diagnose_real_codex_attempt(
+            ctx,
+            attempt_id=run_manifest_entry["attempt_id"],
+            prompt_artifact_path=prompt_artifact_path,
+            outcome=outcome,
+        )
+        result.update(diagnosis)
+    return result
 
 
 def run_real_codex_auto_worktree_smoke(

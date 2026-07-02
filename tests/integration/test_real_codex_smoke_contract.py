@@ -54,6 +54,9 @@ run_dir.mkdir(parents=True, exist_ok=True)
 (probe_root / "run_001" / "before_state.json").write_text(json.dumps({"value": "before"}) + "\\n", encoding="utf-8")
 (probe_root / "run_001" / "after_state.json").write_text(json.dumps({"value": "after"}) + "\\n", encoding="utf-8")
 (probe_root / "run_001" / "cleanup_proof.json").write_text(json.dumps({"cleanup_passed": True}) + "\\n", encoding="utf-8")
+final_report = run_dir / "worker_stage" / "05_final_report.md"
+final_report.parent.mkdir(parents=True, exist_ok=True)
+final_report.write_text("FINAL_STATUS: PASS\\n", encoding="utf-8")
 report_path.parent.mkdir(parents=True, exist_ok=True)
 report_path.write_text(json.dumps({
     "schema_version": "1.0",
@@ -112,16 +115,39 @@ import os
 import sys
 from pathlib import Path
 
-prompt_path = Path(sys.argv[-1])
-prompt_text = prompt_path.read_text(encoding="utf-8")
 run_dir = Path(os.environ["CXOR_RUN_DIR"])
 run_dir.mkdir(parents=True, exist_ok=True)
+prompt_arg = sys.argv[-1]
+if prompt_arg == "-":
+    prompt_path = run_dir / "codex_task_prompt.md"
+    prompt_text = sys.stdin.read()
+else:
+    prompt_path = Path(prompt_arg)
+    prompt_text = prompt_path.read_text(encoding="utf-8")
+task_contract_path = next(
+    (Path(line.split("- ", 1)[1].strip()) for line in prompt_text.splitlines() if "worker_memory/TASK_CONTRACT.md" in line),
+    None,
+)
+task_contract_read = False
+task_contract_text = ""
+if task_contract_path is not None:
+    if not task_contract_path.exists():
+        print("missing task contract", file=sys.stderr)
+        raise SystemExit(19)
+    task_contract_text = task_contract_path.read_text(encoding="utf-8")
+    task_contract_read = True
 (run_dir / "contract_check.json").write_text(json.dumps({
     "prompt_path": str(prompt_path),
     "contract_seen": "Real Codex Patchlet Contract" in prompt_text,
     "report_path_seen": "CXOR_REPORT_PATH" in prompt_text,
     "probe_root_seen": "CXOR_PROBE_ROOT" in prompt_text,
-    "allowed_file_seen": "CXOR_ALLOWED_PRODUCT_RUNTIME_FILE" in prompt_text
+    "allowed_file_seen": "CXOR_ALLOWED_PRODUCT_RUNTIME_FILE" in prompt_text,
+    "task_contract_seen": "worker_memory/TASK_CONTRACT.md" in prompt_text,
+    "task_contract_read": task_contract_read,
+    "task_contract_text_seen": "orchestrator owns gate results" in task_contract_text.lower(),
+    "preflight_stage_seen": "worker_stage/00_preflight.md" in prompt_text,
+    "final_report_stage_seen": "worker_stage/05_final_report.md" in prompt_text,
+    "wrapper_gate_seen": "The orchestrator writes gates." in prompt_text
 }, indent=2, sort_keys=True), encoding="utf-8")
 
 if "Real Codex Patchlet Contract" not in prompt_text:
@@ -142,6 +168,9 @@ probe_root = Path(os.environ["CXOR_PROBE_ROOT"])
 (probe_root / "run_001" / "before_state.json").write_text(json.dumps({"value": "before"}) + "\\n", encoding="utf-8")
 (probe_root / "run_001" / "after_state.json").write_text(json.dumps({"value": "after"}) + "\\n", encoding="utf-8")
 (probe_root / "run_001" / "cleanup_proof.json").write_text(json.dumps({"cleanup_passed": True}) + "\\n", encoding="utf-8")
+final_report = run_dir / "worker_stage" / "05_final_report.md"
+final_report.parent.mkdir(parents=True, exist_ok=True)
+final_report.write_text("FINAL_STATUS: PASS\\n", encoding="utf-8")
 report_path.parent.mkdir(parents=True, exist_ok=True)
 report_path.write_text(json.dumps({
     "schema_version": "1.0",
@@ -425,6 +454,9 @@ probe_root = artifact_root / ".artifacts" / "probes" / patchlet_id
 (probe_root / "run_001" / "before_state.json").write_text(json.dumps({"value": "before"}) + "\\n", encoding="utf-8")
 (probe_root / "run_001" / "after_state.json").write_text(json.dumps({"value": "after"}) + "\\n", encoding="utf-8")
 (probe_root / "run_001" / "cleanup_proof.json").write_text(json.dumps({"cleanup_passed": True}) + "\\n", encoding="utf-8")
+final_report = artifact_root / ".codex-orchestrator" / "runs" / "P0001_attempt1" / "worker_stage" / "05_final_report.md"
+final_report.parent.mkdir(parents=True, exist_ok=True)
+final_report.write_text("FINAL_STATUS: PASS\\n", encoding="utf-8")
 report_path = artifact_root / ".codex-orchestrator" / "reports" / f"{patchlet_id}.json"
 report_path.parent.mkdir(parents=True, exist_ok=True)
 report_path.write_text(json.dumps({
@@ -696,6 +728,208 @@ def test_fake_codex_contract_sensitive_binary_records_prompt_contract_evidence(
     assert contract_check["report_path_seen"] is True
     assert contract_check["probe_root_seen"] is True
     assert contract_check["allowed_file_seen"] is True
+    assert contract_check["task_contract_seen"] is True
+    assert contract_check["preflight_stage_seen"] is True
+    assert contract_check["final_report_stage_seen"] is True
+    assert contract_check["wrapper_gate_seen"] is True
+
+
+def test_real_codex_prompt_mentions_task_contract_path(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    fake_bin_dir = tmp_path / "fake-bin"
+    fake_bin_dir.mkdir()
+    fake_codex = fake_bin_dir / "codex"
+    _write_contract_sensitive_fake_codex(fake_codex)
+    monkeypatch.setenv("PATH", f"{fake_bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+
+    ctx = resolve_target_repo(repo=git_repo)
+    result = run_real_codex_auto_worktree_smoke(
+        ctx,
+        master=git_repo / "master_prompt.md",
+        allow_real_codex=True,
+        codex_binary="codex",
+        max_iterations=25,
+    )
+
+    prompt_text = Path(result["prompt_artifact_path"]).read_text(encoding="utf-8")
+    assert "worker_memory/TASK_CONTRACT.md" in prompt_text
+
+
+def test_real_codex_prompt_mentions_worker_stage_preflight_path(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    fake_bin_dir = tmp_path / "fake-bin"
+    fake_bin_dir.mkdir()
+    fake_codex = fake_bin_dir / "codex"
+    _write_contract_sensitive_fake_codex(fake_codex)
+    monkeypatch.setenv("PATH", f"{fake_bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+
+    ctx = resolve_target_repo(repo=git_repo)
+    result = run_real_codex_auto_worktree_smoke(
+        ctx,
+        master=git_repo / "master_prompt.md",
+        allow_real_codex=True,
+        codex_binary="codex",
+        max_iterations=25,
+    )
+
+    prompt_text = Path(result["prompt_artifact_path"]).read_text(encoding="utf-8")
+    assert "worker_stage/00_preflight.md" in prompt_text
+
+
+def test_real_codex_prompt_mentions_worker_stage_final_report_path(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    fake_bin_dir = tmp_path / "fake-bin"
+    fake_bin_dir.mkdir()
+    fake_codex = fake_bin_dir / "codex"
+    _write_contract_sensitive_fake_codex(fake_codex)
+    monkeypatch.setenv("PATH", f"{fake_bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+
+    ctx = resolve_target_repo(repo=git_repo)
+    result = run_real_codex_auto_worktree_smoke(
+        ctx,
+        master=git_repo / "master_prompt.md",
+        allow_real_codex=True,
+        codex_binary="codex",
+        max_iterations=25,
+    )
+
+    prompt_text = Path(result["prompt_artifact_path"]).read_text(encoding="utf-8")
+    assert "worker_stage/05_final_report.md" in prompt_text
+
+
+def test_real_codex_prompt_mentions_wrapper_gate_is_orchestrator_owned(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    fake_bin_dir = tmp_path / "fake-bin"
+    fake_bin_dir.mkdir()
+    fake_codex = fake_bin_dir / "codex"
+    _write_contract_sensitive_fake_codex(fake_codex)
+    monkeypatch.setenv("PATH", f"{fake_bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+
+    ctx = resolve_target_repo(repo=git_repo)
+    result = run_real_codex_auto_worktree_smoke(
+        ctx,
+        master=git_repo / "master_prompt.md",
+        allow_real_codex=True,
+        codex_binary="codex",
+        max_iterations=25,
+    )
+
+    prompt_text = Path(result["prompt_artifact_path"]).read_text(encoding="utf-8")
+    assert "The orchestrator writes gates." in prompt_text
+
+
+def test_contract_sensitive_fake_codex_reads_task_contract_and_reaches_done(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    fake_bin_dir = tmp_path / "fake-bin"
+    fake_bin_dir.mkdir()
+    fake_codex = fake_bin_dir / "codex"
+    _write_contract_sensitive_fake_codex(fake_codex)
+    monkeypatch.setenv("PATH", f"{fake_bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+
+    ctx = resolve_target_repo(repo=git_repo)
+    result = run_real_codex_auto_worktree_smoke(
+        ctx,
+        master=git_repo / "master_prompt.md",
+        allow_real_codex=True,
+        codex_binary="codex",
+        max_iterations=25,
+    )
+
+    contract_check = read_json(Path(result["run_dir"]) / "contract_check.json")
+    assert result["state_stage"] == "DONE"
+    assert contract_check["contract_seen"] is True
+    assert contract_check["task_contract_seen"] is True
+    assert contract_check["task_contract_read"] is True
+    assert contract_check["task_contract_text_seen"] is True
+
+
+def test_contract_sensitive_fake_codex_fails_when_task_contract_missing(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    from codex_orchestrator.patchlet_run_context import build_patchlet_run_context
+    from codex_orchestrator.stages.build_inventory import build_inventory
+    from codex_orchestrator.stages.census import run_census
+    from codex_orchestrator.stages.classify_evidence import classify_evidence
+    from codex_orchestrator.stages.compile_patchlets import compile_patchlets
+    from codex_orchestrator.stages.extract_invariants import extract_invariants
+    from codex_orchestrator.stages.init import init_workflow
+    from codex_orchestrator.stages.normalize import normalize_master_prompt
+    from codex_orchestrator.errors import WorkerExecutionError
+    from codex_orchestrator.workers.codex_exec import CodexExecWorker
+
+    fake_bin_dir = tmp_path / "fake-bin"
+    fake_bin_dir.mkdir()
+    fake_codex = fake_bin_dir / "codex"
+    _write_contract_sensitive_fake_codex(fake_codex)
+    monkeypatch.setenv("PATH", f"{fake_bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+
+    ctx = resolve_target_repo(repo=git_repo)
+    init_workflow(ctx, master=git_repo / "master_prompt.md", invocation_argv=["cxor", "init"])
+    normalize_master_prompt(ctx)
+    run_census(ctx)
+    classify_evidence(ctx)
+    build_inventory(ctx)
+    extract_invariants(ctx)
+    compile_patchlets(ctx)
+    patchlet = read_json(ctx.paths.patchlet_index)["patchlets"][0]
+    run_ctx = build_patchlet_run_context(
+        ctx,
+        patchlet=patchlet,
+        run_id="P0001_attempt1",
+        execution_root=ctx.root,
+        artifact_root=ctx.root,
+        is_worktree=False,
+        worktree_path=None,
+    )
+    run_dir = ctx.paths.runs_dir / "P0001_attempt1"
+
+    with pytest.raises(WorkerExecutionError, match="exit_code=19"):
+        CodexExecWorker(codex_binary="codex").run_patchlet(ctx, patchlet, run_dir=run_dir, run_ctx=run_ctx)
+
+    assert "missing task contract" in (run_dir / "stderr.txt").read_text(encoding="utf-8")
+
+
+def test_real_codex_smoke_result_reports_worker_capsule_paths(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    fake_bin_dir = tmp_path / "fake-bin"
+    fake_bin_dir.mkdir()
+    fake_codex = fake_bin_dir / "codex"
+    _write_contract_sensitive_fake_codex(fake_codex)
+    monkeypatch.setenv("PATH", f"{fake_bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+
+    ctx = resolve_target_repo(repo=git_repo)
+    result = run_real_codex_auto_worktree_smoke(
+        ctx,
+        master=git_repo / "master_prompt.md",
+        allow_real_codex=True,
+        codex_binary="codex",
+        max_iterations=25,
+    )
+
+    assert Path(result["worker_capsule_manifest_path"]).exists()
+    assert Path(result["worker_memory_dir"]).is_dir()
+    assert Path(result["worker_stage_dir"]).is_dir()
+    assert Path(result["wrapper_gate_result_path"]).exists()
 
 
 def test_real_codex_auto_worktree_smoke_result_reports_prompt_artifact_path(
@@ -886,6 +1120,129 @@ raise SystemExit(17)
     assert result["run_manifest_entry"]["patchlet_id"] == "P0001"
     assert result["run_manifest_entry"]["status"] == "WORKER_FAILED"
     assert result["run_manifest_entry"]["worker_failure"]["blind_retry_allowed"] is False
+
+
+def test_real_codex_auto_worktree_safe_failure_writes_diagnosis_artifacts_with_fake_codex(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    fake_bin_dir = tmp_path / "fake-bin"
+    fake_bin_dir.mkdir()
+    fake_codex = fake_bin_dir / "codex"
+    _write_fake_codex(
+        fake_codex,
+        """#!/usr/bin/env python3
+import sys
+print("authentication failed: session expired", file=sys.stderr)
+raise SystemExit(17)
+""",
+    )
+    monkeypatch.setenv("PATH", f"{fake_bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+
+    ctx = resolve_target_repo(repo=git_repo)
+    result = run_real_codex_auto_worktree_smoke(
+        ctx,
+        master=git_repo / "master_prompt.md",
+        allow_real_codex=True,
+        codex_binary="codex",
+        max_iterations=25,
+    )
+
+    assert result["outcome"] == "safe_failure"
+    assert Path(result["diagnosis_json_path"]).exists()
+    assert Path(result["diagnosis_md_path"]).exists()
+
+
+def test_real_codex_auto_worktree_safe_failure_result_reports_diagnosis_paths(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    fake_bin_dir = tmp_path / "fake-bin"
+    fake_bin_dir.mkdir()
+    fake_codex = fake_bin_dir / "codex"
+    _write_fake_codex(
+        fake_codex,
+        """#!/usr/bin/env python3
+raise SystemExit(17)
+""",
+    )
+    monkeypatch.setenv("PATH", f"{fake_bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+
+    ctx = resolve_target_repo(repo=git_repo)
+    result = run_real_codex_auto_worktree_smoke(
+        ctx,
+        master=git_repo / "master_prompt.md",
+        allow_real_codex=True,
+        codex_binary="codex",
+        max_iterations=25,
+    )
+
+    assert result["diagnosis_json_path"]
+    assert result["diagnosis_md_path"]
+    assert result["diagnosis_primary_category"]
+    assert result["diagnosis_summary"]
+
+
+def test_real_codex_auto_worktree_safe_failure_diagnosis_links_run_manifest_entry(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    fake_bin_dir = tmp_path / "fake-bin"
+    fake_bin_dir.mkdir()
+    fake_codex = fake_bin_dir / "codex"
+    _write_fake_codex(
+        fake_codex,
+        """#!/usr/bin/env python3
+raise SystemExit(17)
+""",
+    )
+    monkeypatch.setenv("PATH", f"{fake_bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+
+    ctx = resolve_target_repo(repo=git_repo)
+    result = run_real_codex_auto_worktree_smoke(
+        ctx,
+        master=git_repo / "master_prompt.md",
+        allow_real_codex=True,
+        codex_binary="codex",
+        max_iterations=25,
+    )
+
+    diagnosis = read_json(Path(result["diagnosis_json_path"]))
+    assert diagnosis["attempt_id"] == result["run_manifest_entry"]["attempt_id"]
+    assert diagnosis["evidence_paths"]["run_manifest"].endswith("run_manifest.json")
+
+
+def test_real_codex_auto_worktree_safe_failure_diagnosis_mentions_prompt_artifact_when_present(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    fake_bin_dir = tmp_path / "fake-bin"
+    fake_bin_dir.mkdir()
+    fake_codex = fake_bin_dir / "codex"
+    _write_fake_codex(
+        fake_codex,
+        """#!/usr/bin/env python3
+raise SystemExit(17)
+""",
+    )
+    monkeypatch.setenv("PATH", f"{fake_bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+
+    ctx = resolve_target_repo(repo=git_repo)
+    result = run_real_codex_auto_worktree_smoke(
+        ctx,
+        master=git_repo / "master_prompt.md",
+        allow_real_codex=True,
+        codex_binary="codex",
+        max_iterations=25,
+    )
+
+    diagnosis = read_json(Path(result["diagnosis_json_path"]))
+    assert diagnosis["artifact_presence"]["prompt_artifact"] is True
+    assert diagnosis["evidence_paths"]["prompt_artifact"].endswith(".md")
 
 
 def test_real_codex_auto_worktree_smoke_preserves_target_on_unauthorized_fake_codex_diff(

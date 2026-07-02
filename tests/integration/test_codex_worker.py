@@ -173,6 +173,31 @@ raise SystemExit(17)
     assert command["exit_code"] == 17
 
 
+def test_codex_worker_timeout_becomes_structured_worker_failure(git_repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    ctx, patchlet = setup_patchlet_ctx(git_repo)
+    fake_codex = tmp_path / "codex"
+    write_fake_codex(
+        fake_codex,
+        """#!/usr/bin/env python3
+import time
+time.sleep(5)
+""",
+    )
+    monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ.get('PATH', '')}")
+    monkeypatch.setenv("CODEX_TIMEOUT_SECONDS", "1")
+
+    run_dir = ctx.paths.runs_dir / "real_codex_timeout"
+    with pytest.raises(WorkerExecutionError, match="timed out after 1s"):
+        CodexExecWorker().run_patchlet(ctx, patchlet, run_dir=run_dir)
+
+    command = json.loads((run_dir / "command.json").read_text(encoding="utf-8"))
+    output = json.loads((run_dir / "output.jsonl").read_text(encoding="utf-8").strip())
+    assert command["exit_code"] == 124
+    assert command["timed_out"] is True
+    assert output["timeout_seconds"] == 1
+    assert "timed out after 1 seconds" in (run_dir / "stderr.txt").read_text(encoding="utf-8")
+
+
 def test_codex_worker_does_not_write_into_orchestrator_source_repo(git_repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     ctx, patchlet = setup_patchlet_ctx(git_repo)
     fake_codex = tmp_path / "codex"

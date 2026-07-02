@@ -23,6 +23,8 @@ class CommandResult:
     stderr_path: str | None
     stdout: str = ""
     stderr: str = ""
+    timed_out: bool = False
+    timeout_seconds: int | None = None
 
     def to_json(self) -> dict:
         return asdict(self)
@@ -35,6 +37,7 @@ class CommandRunner:
         *,
         cwd: Path,
         env: Mapping[str, str] | None = None,
+        input_text: str | None = None,
         timeout_seconds: int | None = None,
         stdout_path: Path | None = None,
         stderr_path: Path | None = None,
@@ -44,12 +47,14 @@ class CommandRunner:
         proc_env = os.environ.copy()
         if env:
             proc_env.update(env)
+        timed_out = False
         try:
             proc = subprocess.run(
                 args,
                 cwd=str(cwd),
                 env=proc_env,
                 text=True,
+                input=input_text,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 timeout=timeout_seconds,
@@ -58,6 +63,18 @@ class CommandRunner:
             exit_code = proc.returncode
             stdout = proc.stdout
             stderr = proc.stderr
+        except subprocess.TimeoutExpired as exc:
+            timed_out = True
+            exit_code = 124
+            stdout = exc.stdout or ""
+            stderr = exc.stderr or ""
+            if isinstance(stdout, bytes):
+                stdout = stdout.decode(errors="replace")
+            if isinstance(stderr, bytes):
+                stderr = stderr.decode(errors="replace")
+            stderr = (
+                f"{stderr}\n" if stderr else ""
+            ) + f"command timed out after {timeout_seconds} seconds"
         except FileNotFoundError as exc:
             exit_code = 127
             stdout = ""
@@ -80,6 +97,8 @@ class CommandRunner:
             stderr_path=str(stderr_path) if stderr_path else None,
             stdout=stdout,
             stderr=stderr,
+            timed_out=timed_out,
+            timeout_seconds=timeout_seconds,
         )
         if check and exit_code != 0:
             raise subprocess.CalledProcessError(exit_code, args, output=stdout, stderr=stderr)
