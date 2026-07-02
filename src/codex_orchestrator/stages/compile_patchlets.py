@@ -87,6 +87,8 @@ def compile_patchlets(ctx: TargetRepoContext) -> dict:
             "invariant_ids": [invariant["invariant_id"]],
             "verification_commands": invariant.get("regression_commands", []),
             "status": "PENDING",
+            "result": None,
+            "failure_ids": [],
         })
 
         subprompt = ctx.root / subprompt_rel

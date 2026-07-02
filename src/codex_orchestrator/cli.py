@@ -118,6 +118,15 @@ def cmd_build_inventory(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_rebuild_inventory(args: argparse.Namespace) -> int:
+    from codex_orchestrator.stages.rebuild_inventory import rebuild_inventory
+
+    ctx = _ctx(args)
+    result = rebuild_inventory(ctx, scope=args.scope)
+    print(f"{result['next_stage']} {ctx.root}")
+    return 0
+
+
 def cmd_extract_invariants(args: argparse.Namespace) -> int:
     from codex_orchestrator.stages.extract_invariants import extract_invariants
 
@@ -172,6 +181,24 @@ def cmd_verify_global(args: argparse.Namespace) -> int:
     return 0 if result.done else 1
 
 
+def cmd_verify_group(args: argparse.Namespace) -> int:
+    from codex_orchestrator.stages.verify_group import verify_group
+
+    ctx = _ctx(args)
+    result = verify_group(ctx, transaction_group_id=args.transaction_group_id)
+    print(f"{result['transaction_group_id']} {result['status']} {result['artifact_path']}")
+    return 0 if result["status"] == "PASSED" else 1
+
+
+def cmd_verify_all_groups(args: argparse.Namespace) -> int:
+    from codex_orchestrator.stages.verify_group import verify_all_groups
+
+    ctx = _ctx(args)
+    results = verify_all_groups(ctx)
+    print(json.dumps(results, indent=2, sort_keys=True))
+    return 0 if all(result["status"] == "PASSED" for result in results) else 1
+
+
 def cmd_classify_failures(args: argparse.Namespace) -> int:
     from codex_orchestrator.stages.classify_failures import classify_failures
 
@@ -211,6 +238,15 @@ def cmd_regenerate_patchlets(args: argparse.Namespace) -> int:
         print(f"DONE no-op {ctx.root}")
     else:
         print(f"PATCHLETS_READY {ctx.root} {' '.join(result['patchlet_ids'])}")
+    return 0
+
+
+def cmd_rediscover(args: argparse.Namespace) -> int:
+    from codex_orchestrator.stages.rediscover import rediscover
+
+    ctx = _ctx(args)
+    result = rediscover(ctx, scope=args.scope)
+    print(f"{result['rediscovery_id']} {result['scope']} {ctx.root}")
     return 0
 
 
@@ -258,18 +294,26 @@ def build_parser() -> argparse.ArgumentParser:
         ("normalize", cmd_normalize),
         ("classify-evidence", cmd_classify_evidence),
         ("build-inventory", cmd_build_inventory),
+        ("rebuild-inventory", cmd_rebuild_inventory),
         ("extract-invariants", cmd_extract_invariants),
         ("compile-patchlets", cmd_compile_patchlets),
+        ("verify-group", cmd_verify_group),
+        ("verify-all-groups", cmd_verify_all_groups),
         ("verify-global", cmd_verify_global),
         ("classify-failures", cmd_classify_failures),
         ("plan-repair", cmd_plan_repair),
         ("apply-repair", cmd_apply_repair),
+        ("rediscover", cmd_rediscover),
         ("regenerate-patchlets", cmd_regenerate_patchlets),
     ]:
         p = sub.add_parser(name)
         _add_repo_flags(p)
         if name == "regenerate-patchlets":
             p.add_argument("--from-repair-plan", default="latest")
+        if name in {"rediscover", "rebuild-inventory"}:
+            p.add_argument("--scope", default="impacted", choices=["impacted", "full"])
+        if name == "verify-group":
+            p.add_argument("transaction_group_id")
         p.set_defaults(func=func)
 
     run_next = sub.add_parser("run-next")

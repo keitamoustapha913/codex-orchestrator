@@ -31,11 +31,27 @@
     },
     "classification": {
       "type": "string",
-      "enum": ["INSIDE_KNOWN_GRAPH", "NO_FAILURES"]
+      "enum": [
+        "INSIDE_KNOWN_GRAPH",
+        "OUTSIDE_KNOWN_GRAPH",
+        "INVENTORY_CONTRADICTION",
+        "REPEATED_REPAIR_FAILURE",
+        "MASTER_GOAL_CHANGED",
+        "EXCESSIVE_IMPACTED_SCOPE",
+        "NO_FAILURES"
+      ]
     },
     "recommended_action": {
       "type": "string",
-      "enum": ["GENERATE_REPAIR_PATCHLETS", "GLOBAL_REVERIFY"]
+      "enum": [
+        "GENERATE_REPAIR_PATCHLETS",
+        "PARTIAL_REDISCOVERY_REQUIRED",
+        "INVENTORY_REBUILD_REQUIRED",
+        "FULL_REDISCOVERY_REQUIRED",
+        "ESCALATED_REPAIR_REQUIRED",
+        "GLOBAL_REVERIFY",
+        "ORCHESTRATOR_ABORTED"
+      ]
     },
     "impacted_goal_ids": {
       "type": "array",

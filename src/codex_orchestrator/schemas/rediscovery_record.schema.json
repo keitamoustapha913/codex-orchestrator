@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "rediscovery_record",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "kind",
+    "rediscovery_id",
+    "scope",
+    "source_repair_plan_id",
+    "source_failure_ids",
+    "impacted_files",
+    "impacted_goal_ids",
+    "impacted_invariant_ids",
+    "outputs",
+    "next_stage"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "kind": {"const": "rediscovery_record"},
+    "rediscovery_id": {"type": "string", "pattern": "^RD[0-9]{4}$"},
+    "scope": {"enum": ["impacted", "full"]},
+    "source_repair_plan_id": {"type": "string", "pattern": "^RP[0-9]{4}$"},
+    "source_failure_ids": {"type": "array", "items": {"type": "string", "pattern": "^F[0-9]{4}$"}},
+    "impacted_files": {"type": "array", "items": {"type": "string"}},
+    "impacted_goal_ids": {"type": "array", "items": {"type": "string"}},
+    "impacted_invariant_ids": {"type": "array", "items": {"type": "string"}},
+    "outputs": {
+      "type": "object",
+      "required": ["census_dir", "evidence_rows", "inventory_graph"],
+      "properties": {
+        "census_dir": {"type": "string"},
+        "evidence_rows": {"type": "string"},
+        "inventory_graph": {"type": "string"}
+      },
+      "additionalProperties": true
+    },
+    "next_stage": {"type": "string"},
+    "created_at": {"type": "string"}
+  },
+  "additionalProperties": true
+}

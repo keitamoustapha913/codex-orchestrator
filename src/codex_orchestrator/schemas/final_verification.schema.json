@@ -2,10 +2,61 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "final_verification",
   "type": "object",
-  "required": ["schema_version", "kind"],
+  "required": [
+    "schema_version",
+    "kind",
+    "status",
+    "proven_goal_ids",
+    "unproven_goal_ids",
+    "proven_invariant_ids",
+    "failed_invariant_ids",
+    "unproven_invariant_ids",
+    "transaction_group_results",
+    "passed_probe_commands",
+    "failed_probe_commands",
+    "passed_regression_commands",
+    "failed_regression_commands",
+    "changed_files",
+    "allowed_diff_result",
+    "resolved_failures",
+    "unresolved_failures",
+    "repair_cycles",
+    "evidence"
+  ],
   "properties": {
     "schema_version": {"const": "1.0"},
-    "kind": {"type": "string"}
+    "kind": {"const": "final_verification"},
+    "status": {"enum": ["DONE", "FAILED", "BLOCKED"]},
+    "proven_goal_ids": {"type": "array", "items": {"type": "string"}},
+    "unproven_goal_ids": {"type": "array", "items": {"type": "string"}},
+    "proven_invariant_ids": {"type": "array", "items": {"type": "string"}},
+    "failed_invariant_ids": {"type": "array", "items": {"type": "string"}},
+    "unproven_invariant_ids": {"type": "array", "items": {"type": "string"}},
+    "transaction_group_results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["transaction_group_id", "status", "patchlet_ids", "invariant_ids"],
+        "properties": {
+          "transaction_group_id": {"type": "string"},
+          "status": {"type": "string"},
+          "patchlet_ids": {"type": "array", "items": {"type": "string"}},
+          "invariant_ids": {"type": "array", "items": {"type": "string"}}
+        },
+        "additionalProperties": true
+      }
+    },
+    "passed_probe_commands": {"type": "array", "items": {"type": "string"}},
+    "failed_probe_commands": {"type": "array", "items": {"type": "string"}},
+    "passed_regression_commands": {"type": "array", "items": {"type": "string"}},
+    "failed_regression_commands": {"type": "array", "items": {"type": "string"}},
+    "changed_files": {"type": "array", "items": {"type": "string"}},
+    "allowed_diff_result": {"enum": ["pass", "fail"]},
+    "resolved_failures": {"type": "array", "items": {"type": "string"}},
+    "unresolved_failures": {"type": "array", "items": {"type": "string"}},
+    "repair_cycles": {"type": "array", "items": {"type": "object"}},
+    "evidence": {"type": "array", "items": {"type": "string"}},
+    "created_at": {"type": "string"}
   },
   "additionalProperties": true
 }

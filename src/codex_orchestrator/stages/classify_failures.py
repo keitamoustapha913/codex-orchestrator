@@ -5,11 +5,22 @@ from codex_orchestrator.state import load_state, transition
 from codex_orchestrator.target_repo import TargetRepoContext
 
 
+CLASSIFICATION_MAP = {
+    "INSIDE_KNOWN_GRAPH": "INSIDE_KNOWN_GRAPH",
+    "OUTSIDE_KNOWN_GRAPH": "OUTSIDE_KNOWN_GRAPH",
+    "INVENTORY_CONTRADICTION": "INVENTORY_CONTRADICTION",
+    "REPEATED_REPAIR_FAILURE": "REPEATED_REPAIR_FAILURE",
+    "MASTER_GOAL_CHANGED": "MASTER_GOAL_CHANGED",
+    "EXCESSIVE_IMPACTED_SCOPE": "EXCESSIVE_IMPACTED_SCOPE",
+}
+
+
 def classify_failures(ctx: TargetRepoContext) -> dict:
     failures = []
     for path in sorted(ctx.paths.failures_dir.glob("F*.json")):
         record = read_json(path)
-        record["classification"] = record.get("suspected_scope", "inside_known_graph").upper()
+        raw_scope = str(record.get("suspected_scope", "inside_known_graph")).upper()
+        record["classification"] = CLASSIFICATION_MAP.get(raw_scope, "INSIDE_KNOWN_GRAPH")
         write_json(path, record)
         failures.append(record)
     result = {

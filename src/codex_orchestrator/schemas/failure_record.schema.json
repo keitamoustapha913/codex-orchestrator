@@ -40,7 +40,17 @@
       "items": {"type": "string"}
     },
     "suspected_scope": {"type": "string"},
-    "classification": {"type": "string"},
+    "classification": {
+      "type": "string",
+      "enum": [
+        "INSIDE_KNOWN_GRAPH",
+        "OUTSIDE_KNOWN_GRAPH",
+        "INVENTORY_CONTRADICTION",
+        "REPEATED_REPAIR_FAILURE",
+        "MASTER_GOAL_CHANGED",
+        "EXCESSIVE_IMPACTED_SCOPE"
+      ]
+    },
     "required_next_step": {"type": "string"},
     "created_at": {"type": "string"}
   },

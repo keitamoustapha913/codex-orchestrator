@@ -16,6 +16,8 @@ from .extract_invariants import extract_invariants
 from .init import init_workflow
 from .normalize import normalize_master_prompt
 from .plan_repair import plan_repair
+from .rebuild_inventory import rebuild_inventory
+from .rediscover import rediscover
 from .regenerate_patchlets import regenerate_patchlets
 from .run_patchlet import run_all_patchlets
 from .verify_global import verify_global
@@ -52,7 +54,7 @@ def run_auto(
             from codex_orchestrator.state import save_state, transition
             save_state(ctx, state)
             stage = state.stage
-            if stage == "DONE":
+            if stage == until:
                 return state
             if not ctx.paths.master_prompt.exists():
                 if master is None:
@@ -108,6 +110,15 @@ def run_auto(
                 continue
             if stage == "REPAIR_PLAN_READY":
                 apply_repair(ctx)
+                continue
+            if stage == "PARTIAL_REDISCOVERY_REQUIRED":
+                rediscover(ctx, scope="impacted")
+                continue
+            if stage == "FULL_REDISCOVERY_REQUIRED":
+                rediscover(ctx, scope="full")
+                continue
+            if stage == "INVENTORY_REBUILD_REQUIRED":
+                rebuild_inventory(ctx, scope="impacted")
                 continue
             if stage == "PATCHLET_REGENERATION_REQUIRED":
                 regenerate_patchlets(ctx, from_repair_plan="latest")
