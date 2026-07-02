@@ -18,3 +18,30 @@ Expected durable probe artifacts live under:
 ```
 
 No blind retry is allowed.
+## Worker Capsule
+
+Each patchlet attempt gets a Worker Capsule under
+`.codex-orchestrator/runs/<attempt>/`.
+
+Key rule: memory is context, not proof.
+
+Codex may write:
+
+- `worker_memory/*`
+- `worker_stage/*`
+
+The orchestrator writes:
+
+- `worker_hooks/events.jsonl`
+- `gates/wrapper_gate_result.json`
+
+This keeps the worker separate from the acceptance decision.
+
+If a real-Codex attempt fails safely, inspect the capsule first and then run:
+
+```bash
+cxor diagnose-real-codex --repo /path/to/target-repo --attempt P0001_attempt1
+```
+
+The diagnosis is read-only and should explain the failure without relaxing the
+report, probe, or gate validators.

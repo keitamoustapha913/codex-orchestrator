@@ -37,6 +37,8 @@ Implemented capabilities:
 - optional worktree execution with validated merge and unauthorized diff isolation;
 - `cxor auto --use-worktree` routing through the validated worktree patchlet execution path;
 - opt-in `real_codex` smoke harness for `cxor auto --use-worktree`;
+- read-only capsule inspection, validation, and real-Codex diagnosis commands;
+- matrix-backed transaction-group and global verification artifacts;
 - `cxor auto` mock-mode autonomous loop that initializes, discovers, compiles, runs, verifies, and reaches `DONE`.
 
 ## TDD status
@@ -44,7 +46,7 @@ Implemented capabilities:
 The test suite was written before/alongside implementation and currently passes:
 
 ```text
-170 passed, 1 skipped
+369 passed, 2 skipped
 ```
 
 Covered tests:
@@ -89,6 +91,9 @@ cxor rebuild-inventory --repo /path/to/target-repo --scope impacted
 cxor run-next --repo /path/to/target-repo --worker-mode mock --use-worktree
 cxor auto --repo /path/to/target-repo --master /path/to/master_prompt.md --until DONE --worker-mode mock --use-worktree
 uv run --no-sync pytest -q tests/smoke/test_real_codex_auto_worktree.py --run-real-codex -s
+cxor inspect-capsule --repo /path/to/target-repo --attempt P0001_attempt1
+cxor validate-capsule --repo /path/to/target-repo --attempt P0001_attempt1
+cxor diagnose-real-codex --repo /path/to/target-repo --attempt P0001_attempt1
 ```
 
 `No blind retry` remains a required contract.
@@ -112,6 +117,18 @@ a minimal durable probe example rooted at `CXOR_PROBE_ROOT`.
 
 When a real/non-mock worker exits non-zero, `run_manifest.json` should retain a `WORKER_FAILED` patchlet run entry together with preserved `stdout.txt`, `stderr.txt`, `command.json`, and `output.jsonl` artifact paths. Blind retry is not allowed.
 
+Use `cxor diagnose-real-codex --repo /path/to/target-repo --attempt P0001_attempt1`
+to summarize preserved `stdout.txt`, `stderr.txt`, `output.jsonl`,
+`command.json`, `run_manifest.json`, and generated prompt artifacts into:
+
+- generic artifact kinds: `real_codex_failure_diagnosis.json` and `real_codex_failure_diagnosis.md`
+- `.codex-orchestrator/diagnostics/real_codex/P0001_attempt1_diagnosis.json`
+- `.codex-orchestrator/diagnostics/real_codex/P0001_attempt1_diagnosis.md`
+
+This diagnosis is read-only, does not run Codex, does not weaken validators,
+and must fall back to `unknown_codex_nonzero_exit` when the artifacts do not
+support a narrower cause.
+
 ## Verified commands
 
 The following commands were verified after editable install:
@@ -122,3 +139,20 @@ codex-orchestrator --version
 python -m codex_orchestrator --version
 pytest -q
 ```
+
+## Worker Capsule evidence layer
+
+Implemented and covered:
+
+- per-attempt `worker_capsule.json`
+- per-attempt `worker_memory/` and `worker_stage/`
+- append-only `worker_hooks/events.jsonl`
+- orchestrator-owned `gates/wrapper_gate_result.json`
+- transaction `patchlet_output_matrix.json`
+- global `verification_matrix.json`
+- global `global_gate_result.json`
+- read-only `cxor inspect-capsule`
+- read-only `cxor validate-capsule`
+- read-only `cxor diagnose-real-codex`
+
+Memory is context, not proof. The orchestrator writes gate results.

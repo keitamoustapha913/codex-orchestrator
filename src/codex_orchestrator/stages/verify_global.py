@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
 from codex_orchestrator.errors import StagePreconditionError
 from codex_orchestrator.jsonio import read_json, write_json
@@ -19,11 +20,43 @@ class GlobalVerificationResult:
     artifact_path: str
 
 
+def _global_verification_dir(ctx: TargetRepoContext) -> Path:
+    return ctx.paths.workflow_dir / "global_verification"
+
+
+def _latest_run_manifest(ctx: TargetRepoContext) -> dict:
+    return read_json(ctx.paths.run_manifest) if ctx.paths.run_manifest.exists() else {"runs": []}
+
+
+def _repair_plan_summary(ctx: TargetRepoContext, plan_path: Path) -> dict:
+    plan = read_json(plan_path)
+    application_path = plan_path.with_name(f"{plan['repair_plan_id']}_application.json")
+    application_exists = application_path.exists()
+    application = read_json(application_path) if application_exists else {}
+    return {
+        "repair_plan_id": plan["repair_plan_id"],
+        "classification": plan.get("classification"),
+        "recommended_action": plan.get("recommended_action"),
+        "source_failure_ids": plan.get("source_failure_ids", []),
+        "generated_patchlet_ids": plan.get("generated_patchlet_ids", []),
+        "application_artifact": f".codex-orchestrator/repair_plans/{plan['repair_plan_id']}_application.json" if application_exists else None,
+        "application_exists": application_exists,
+        "next_stage": application.get("next_stage"),
+        "requires_patchlet_regeneration": bool(plan.get("requires_patchlet_regeneration", False)),
+    }
+
+
 def verify_global(ctx: TargetRepoContext) -> GlobalVerificationResult:
     index = read_json(ctx.paths.patchlet_index) if ctx.paths.patchlet_index.exists() else {"patchlets": []}
     goal_spec = read_json(ctx.paths.goal_spec) if ctx.paths.goal_spec.exists() else {"success_goals": [], "target_invariants": []}
     invariants_document = read_json(ctx.paths.invariants) if ctx.paths.invariants.exists() else {"invariants": []}
     transaction_groups = read_json(ctx.paths.transaction_groups) if ctx.paths.transaction_groups.exists() else {"transaction_groups": []}
+    repair_plans = sorted(
+        path
+        for path in ctx.paths.repair_plans_dir.glob("RP*.json")
+        if not path.name.endswith("_application.json")
+    )
+    run_manifest = _latest_run_manifest(ctx)
     state = load_state(ctx)
     patchlets = index.get("patchlets", [])
     patchlets_by_id = {patchlet["patchlet_id"]: patchlet for patchlet in patchlets}
@@ -80,6 +113,19 @@ def verify_global(ctx: TargetRepoContext) -> GlobalVerificationResult:
         patchlet_status = patchlet.get("status")
         if pid in resolved_source_patchlets:
             continue
+        patchlet_runs = [
+            run for run in read_json(ctx.paths.run_manifest).get("runs", [])
+            if run.get("patchlet_id") == pid
+        ] if run_manifest.get("runs") else []
+        latest_run = patchlet_runs[-1] if patchlet_runs else None
+        wrapper_gate_path = None
+        if latest_run and latest_run.get("wrapper_gate_result"):
+            wrapper_gate_path = ctx.root / latest_run["wrapper_gate_result"]
+            if wrapper_gate_path.exists():
+                wrapper_gate = read_json(wrapper_gate_path)
+                if wrapper_gate.get("accepted") is not True:
+                    failed.append(pid)
+                    continue
         if patchlet_status in {"FAILED_WITH_EVIDENCE", "BLOCKED_WITH_EVIDENCE"}:
             failed.append(pid)
             continue
@@ -157,6 +203,68 @@ def verify_global(ctx: TargetRepoContext) -> GlobalVerificationResult:
         and not unresolved_failures
         and not unproven_goal_ids
     )
+    verification_dir = _global_verification_dir(ctx)
+    verification_dir.mkdir(parents=True, exist_ok=True)
+    matrix_path = verification_dir / "verification_matrix.json"
+    global_gate_path = verification_dir / "gates" / "global_gate_result.json"
+    global_gate_path.parent.mkdir(parents=True, exist_ok=True)
+    verification_matrix = {
+        "schema_version": "1.0",
+        "kind": "verification_matrix",
+        "goals": [
+            {
+                "goal_id": goal_id,
+                "status": "PROVEN" if goal_id in proven_goal_ids else "UNPROVEN",
+            }
+            for goal_id in all_goal_ids
+        ],
+        "invariants": [
+            {
+                "invariant_id": invariant["invariant_id"],
+                "status": (
+                    "PROVEN"
+                    if invariant["invariant_id"] in proven_invariant_ids
+                    else "FAILED"
+                    if invariant["invariant_id"] in failed_invariant_ids
+                    else "UNPROVEN"
+                ),
+            }
+            for invariant in all_invariants
+        ],
+        "transaction_groups": transaction_group_results,
+        "repair_plans": [_repair_plan_summary(ctx, plan_path) for plan_path in repair_plans],
+        "patchlets": [
+            {
+                "patchlet_id": patchlet["patchlet_id"],
+                "status": patchlet.get("status"),
+                "wrapper_gate_result": next(
+                    (
+                        run.get("wrapper_gate_result")
+                        for run in reversed(run_manifest.get("runs", []))
+                        if run.get("patchlet_id") == patchlet["patchlet_id"]
+                    ),
+                    None,
+                ),
+            }
+            for patchlet in patchlets
+        ],
+        "failures": all_failure_ids,
+        "unresolved": unresolved_failures,
+        "verdict": "DONE_ALLOWED" if done else "DONE_BLOCKED",
+    }
+    write_json(matrix_path, verification_matrix)
+    write_json(global_gate_path, {
+        "schema_version": "1.0",
+        "kind": "global_gate_result",
+        "accepted": done,
+        "verification_matrix": str(matrix_path),
+        "reasons": unresolved_failures
+        or failed
+        or unproven
+        or failed_invariant_ids
+        or unproven_invariant_ids
+        or unproven_goal_ids,
+    })
     status = "DONE" if done else "FAILED"
     final = {
         "schema_version": "1.0",
@@ -179,6 +287,8 @@ def verify_global(ctx: TargetRepoContext) -> GlobalVerificationResult:
         "created_at": now_iso(),
         "repair_cycles": state.repair_cycles,
         "evidence": [str(item) for item in evidence],
+        "verification_matrix": str(matrix_path),
+        "global_gate_result": str(global_gate_path),
     }
     write_json(ctx.paths.final_verification_json, final)
     ctx.paths.final_verification_md.write_text(

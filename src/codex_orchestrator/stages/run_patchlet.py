@@ -12,6 +12,14 @@ from codex_orchestrator.jsonio import read_json, write_json
 from codex_orchestrator.run_records import append_run_record
 from codex_orchestrator.state import load_state, now_iso, transition
 from codex_orchestrator.target_repo import TargetRepoContext
+from codex_orchestrator.worker_capsule import (
+    append_worker_event,
+    build_worker_capsule,
+    ensure_worker_capsule,
+    ensure_worker_memory,
+    ensure_worker_stage_templates,
+    write_wrapper_gate_result,
+)
 from codex_orchestrator.validators.diff_validator import validate_changed_paths
 from codex_orchestrator.validators.report_validator import ReportValidationError, validate_patchlet_report_file
 from codex_orchestrator.worktree import cleanup_patchlet_worktree, create_patchlet_worktree
@@ -56,6 +64,8 @@ def _append_failed_worker_run_record(
     cleanup_status: str | None,
     worker_error: Exception,
     state_stage: str,
+    worker_capsule_manifest: str | None,
+    wrapper_gate_result: str | None,
 ) -> None:
     run_dir = run_ctx.run_dir
     exit_code = _read_exit_code_from_run_dir(run_dir)
@@ -81,6 +91,7 @@ def _append_failed_worker_run_record(
         "target_root": str(run_ctx.target_root),
         "execution_root": str(run_ctx.execution_root),
         "artifact_root": str(run_ctx.artifact_root),
+        "worker_capsule_manifest": worker_capsule_manifest,
         "paths": paths,
         "worktree": {
             "enabled": use_worktree,
@@ -105,6 +116,7 @@ def _append_failed_worker_run_record(
             "output_jsonl_exists": (run_dir / "output.jsonl").exists(),
             "diff_exists": (run_dir / "diff.patch").exists(),
         },
+        "wrapper_gate_result": wrapper_gate_result,
         "diff_validation": {
             "valid": None,
             "reason": "not_run_worker_failed_before_diff_validation",
@@ -195,6 +207,19 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
         worktree_path=worktree_ctx.path if worktree_ctx else None,
     )
     run_dir = run_ctx.run_dir
+    worker_capsule = build_worker_capsule(run_ctx, patchlet)
+    ensure_worker_capsule(ctx, worker_capsule)
+    ensure_worker_memory(ctx, worker_capsule, run_ctx, patchlet, worker_mode=worker_mode)
+    ensure_worker_stage_templates(worker_capsule, run_ctx, patchlet)
+    worker_capsule_manifest = _record_path_for_manifest(ctx, worker_capsule.manifest_path)
+    wrapper_gate_result_path = _record_path_for_manifest(ctx, worker_capsule.gates_dir / "wrapper_gate_result.json")
+    append_worker_event(
+        ctx,
+        worker_capsule,
+        run_ctx,
+        event="before_worker_start",
+        worker_mode=worker_mode,
+    )
     worker = worker_for_mode(worker_mode)
     cleanup_status = None
     worker_error: WorkerExecutionError | WorkerPreconditionError | None = None
@@ -206,21 +231,94 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
     diff_result = None
     try:
         worker_result = worker.run_patchlet(ctx, patchlet, run_dir=run_dir, run_ctx=run_ctx)
+        append_worker_event(
+            ctx,
+            worker_capsule,
+            run_ctx,
+            event="after_prompt_written",
+            worker_mode=worker_mode,
+            details={
+                "command_path": _record_path_for_manifest(ctx, run_dir / "command.json"),
+                "output_jsonl_path": _record_path_for_manifest(ctx, run_dir / "output.jsonl"),
+            },
+        )
+        append_worker_event(
+            ctx,
+            worker_capsule,
+            run_ctx,
+            event="after_worker_exit",
+            worker_mode=worker_mode,
+            details={
+                "exit_code": worker_result.exit_code,
+                "stdout_path": _record_path_for_manifest(ctx, run_dir / "stdout.txt"),
+                "stderr_path": _record_path_for_manifest(ctx, run_dir / "stderr.txt"),
+                "output_jsonl_path": _record_path_for_manifest(ctx, run_dir / "output.jsonl"),
+            },
+        )
         after = snapshot_status(run_ctx.execution_root)
         changed_paths = changed_between(before, after)
         diff_text = git_diff(run_ctx.execution_root)
         run_dir.mkdir(parents=True, exist_ok=True)
         diff_path.write_text(diff_text, encoding="utf-8")
         (run_dir / "diff_name_status.txt").write_text("\n".join(changed_paths) + "\n", encoding="utf-8")
+        append_worker_event(
+            ctx,
+            worker_capsule,
+            run_ctx,
+            event="after_diff_capture",
+            worker_mode=worker_mode,
+            details={
+                "diff_path": _record_path_for_manifest(ctx, diff_path),
+                "changed_paths": changed_paths,
+            },
+        )
         diff_result = validate_changed_paths(changed_paths, patchlet)
     except (WorkerExecutionError, WorkerPreconditionError) as exc:
         worker_error = exc
+        append_worker_event(
+            ctx,
+            worker_capsule,
+            run_ctx,
+            event="after_worker_exception",
+            worker_mode=worker_mode,
+            details={
+                "exception_type": type(exc).__name__,
+                "exception_message": str(exc),
+                "exit_code": _read_exit_code_from_run_dir(run_dir),
+                "stdout_path": _record_path_for_manifest(ctx, run_dir / "stdout.txt"),
+                "stderr_path": _record_path_for_manifest(ctx, run_dir / "stderr.txt"),
+                "output_jsonl_path": _record_path_for_manifest(ctx, run_dir / "output.jsonl"),
+            },
+        )
     finally:
         if worktree_ctx is not None:
             worktree_ctx = cleanup_patchlet_worktree(worktree_ctx)
             cleanup_status = worktree_ctx.cleanup_status
 
     if worker_error is not None:
+        gate_result = write_wrapper_gate_result(
+            ctx,
+            worker_capsule,
+            run_ctx,
+            worker_mode=worker_mode,
+            worker_exit_ok=False,
+            diff_allowed=None,
+            report_valid=None,
+            probe_valid=None,
+            next_state=load_state(ctx).stage,
+            reasons=[str(worker_error)],
+        )
+        append_worker_event(
+            ctx,
+            worker_capsule,
+            run_ctx,
+            event="after_wrapper_gate",
+            worker_mode=worker_mode,
+            details={
+                "accepted": gate_result["accepted"],
+                "wrapper_gate_result": wrapper_gate_result_path,
+            },
+        )
         _append_failed_worker_run_record(
             ctx,
             patchlet=patchlet,
@@ -231,6 +329,8 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
             cleanup_status=cleanup_status,
             worker_error=worker_error,
             state_stage=load_state(ctx).stage,
+            worker_capsule_manifest=worker_capsule_manifest,
+            wrapper_gate_result=wrapper_gate_result_path,
         )
         raise worker_error
 
@@ -256,8 +356,44 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
                 report = validate_patchlet_report_file(worker_result.report_path, patchlet)
                 report_valid = True
                 report_status = report["status"]
+                append_worker_event(
+                    ctx,
+                    worker_capsule,
+                    run_ctx,
+                    event="after_report_validation",
+                    worker_mode=worker_mode,
+                    details={
+                        "report_path": _record_path_for_manifest(ctx, worker_result.report_path),
+                        "report_valid": True,
+                        "report_status": report_status,
+                    },
+                )
+                append_worker_event(
+                    ctx,
+                    worker_capsule,
+                    run_ctx,
+                    event="after_probe_validation",
+                    worker_mode=worker_mode,
+                    details={
+                        "report_path": _record_path_for_manifest(ctx, worker_result.report_path),
+                        "probe_refs": report.get("probe_artifact_refs", []),
+                        "probe_valid": True,
+                    },
+                )
             except ReportValidationError as exc:
                 report_error = str(exc)
+                append_worker_event(
+                    ctx,
+                    worker_capsule,
+                    run_ctx,
+                    event="after_report_validation",
+                    worker_mode=worker_mode,
+                    details={
+                        "report_path": _record_path_for_manifest(ctx, worker_result.report_path) if worker_result.report_path else None,
+                        "report_valid": False,
+                        "report_error": report_error,
+                    },
+                )
                 failure_id = _record_failure(
                     ctx,
                     source_id=pid,
@@ -270,6 +406,36 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
                 _apply_validated_diff_to_target(ctx, diff_path=diff_path)
     finally:
         pass
+
+    next_state = (
+        "FAILURE_CLASSIFICATION_REQUIRED"
+        if report_status in {"FAILED_WITH_EVIDENCE", "BLOCKED_WITH_EVIDENCE"} or not diff_result.allowed
+        else "PATCHLETS_READY"
+    )
+    gate_result = write_wrapper_gate_result(
+        ctx,
+        worker_capsule,
+        run_ctx,
+        worker_mode=worker_mode,
+        worker_exit_ok=True,
+        diff_allowed=diff_result.allowed,
+        report_valid=report_valid,
+        probe_valid=report_valid,
+        next_state=next_state,
+        report_path=worker_result.report_path,
+        reasons=([report_error] if report_error else []),
+    )
+    append_worker_event(
+        ctx,
+        worker_capsule,
+        run_ctx,
+        event="after_wrapper_gate",
+        worker_mode=worker_mode,
+        details={
+            "accepted": gate_result["accepted"],
+            "wrapper_gate_result": wrapper_gate_result_path,
+        },
+    )
 
     append_run_record(ctx, {
         "stage": "PATCHLET_EXECUTION_IN_PROGRESS",
@@ -285,6 +451,7 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
         "target_root": str(run_ctx.target_root),
         "execution_root": str(run_ctx.execution_root),
         "artifact_root": str(run_ctx.artifact_root),
+        "worker_capsule_manifest": worker_capsule_manifest,
         "exit_code": worker_result.exit_code,
         "stdout": worker_result.stdout,
         "stderr": worker_result.stderr,
@@ -315,6 +482,7 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
             "cleanup_policy": worktree_ctx.cleanup_policy if worktree_ctx else None,
             "cleanup_status": cleanup_status,
         },
+        "wrapper_gate_result": wrapper_gate_result_path,
         "report_valid": report_valid,
         "report_error": report_error,
     })

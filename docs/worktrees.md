@@ -45,3 +45,31 @@ subprompt artifact under `.codex-orchestrator/subprompts/`. The contract
 includes a minimal valid report example for `CXOR_REPORT_PATH`, a minimal probe
 artifact tree for `CXOR_PROBE_ROOT`, and a rule that Codex must not invent
 alternate paths or edit files outside the allowed product/runtime file.
+
+After a safe failure, use:
+
+```bash
+cxor diagnose-real-codex --repo /path/to/target-repo --attempt P0001_attempt1
+```
+
+This reads preserved `stdout.txt`, `stderr.txt`, `output.jsonl`, `command.json`,
+`run_manifest.json`, and the generated prompt artifact, then writes:
+
+- generic artifact kinds: `real_codex_failure_diagnosis.json` and `real_codex_failure_diagnosis.md`
+- `.codex-orchestrator/diagnostics/real_codex/P0001_attempt1_diagnosis.json`
+- `.codex-orchestrator/diagnostics/real_codex/P0001_attempt1_diagnosis.md`
+
+The command is read-only for product/runtime files. If the evidence cannot
+support a narrower claim, the diagnosis should stay at
+`unknown_codex_nonzero_exit`. Do not weaken validators.
+Worker Capsule artifacts stay under the target repo artifact root even in
+worktree mode. Do not treat worker memory or stage notes as proof. The
+orchestrator writes wrapper gates after validation, and those gates are what
+later transaction and global verification consume.
+
+Capsule inspection remains read-only in worktree mode:
+
+```bash
+cxor inspect-capsule --repo /path/to/target-repo --attempt P0001_attempt1
+cxor validate-capsule --repo /path/to/target-repo --attempt P0001_attempt1
+```

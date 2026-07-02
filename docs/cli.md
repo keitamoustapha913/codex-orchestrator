@@ -24,6 +24,9 @@ cxor validate-report
 cxor verify-group
 cxor verify-all-groups
 cxor verify-global
+cxor inspect-capsule
+cxor validate-capsule
+cxor diagnose-real-codex
 cxor classify-failures
 cxor plan-repair
 cxor apply-repair
@@ -122,3 +125,38 @@ cxor validate-state --repo /path/to/target-repo
 cxor verify-global --repo /path/to/target-repo
 cxor auto --repo /path/to/target-repo --resume --until DONE --worker-mode ci_only
 ```
+
+Real Codex safe-failure diagnosis:
+
+```bash
+cxor diagnose-real-codex --repo /path/to/target-repo --attempt P0001_attempt1
+```
+
+This command does not run Codex and does not mutate product/runtime files. It
+reads `stdout.txt`, `stderr.txt`, `output.jsonl`, `command.json`,
+`run_manifest.json`, and the generated prompt artifact, then writes:
+
+- generic artifact kinds: `real_codex_failure_diagnosis.json` and `real_codex_failure_diagnosis.md`
+- `.codex-orchestrator/diagnostics/real_codex/P0001_attempt1_diagnosis.json`
+- `.codex-orchestrator/diagnostics/real_codex/P0001_attempt1_diagnosis.md`
+
+If the preserved artifacts do not justify a more specific root cause, the
+diagnosis will report `unknown_codex_nonzero_exit`. Do not weaken validators to
+force a narrower classification.
+
+Worker Capsule inspection:
+
+```bash
+cxor inspect-capsule --repo /path/to/target-repo --attempt P0001_attempt1
+cxor validate-capsule --repo /path/to/target-repo --attempt P0001_attempt1
+```
+
+These commands are read-only for product/runtime files. `inspect-capsule`
+prints per-attempt capsule paths and presence bits. `validate-capsule`
+validates `worker_capsule.json`, `LIVE_MEMORY.json`, `ALLOWED_PATHS.json`,
+`events.jsonl`, and `wrapper_gate_result.json` when present.
+
+`diagnose-real-codex` is also read-only and summarizes preserved failure
+evidence before writing diagnosis artifacts. `verify-group` and
+`verify-global` write matrix-backed gate artifacts before they decide
+acceptance.

@@ -8,6 +8,8 @@ from pathlib import Path
 class WorkflowPaths:
     repo_root: Path
     workflow_dir: Path
+    diagnostics_dir: Path
+    real_codex_diagnostics_dir: Path
     probe_dir: Path
     master_prompt: Path
     goal_spec: Path
@@ -48,6 +50,8 @@ def build_paths(repo_root: Path) -> WorkflowPaths:
     return WorkflowPaths(
         repo_root=repo_root,
         workflow_dir=workflow,
+        diagnostics_dir=workflow / "diagnostics",
+        real_codex_diagnostics_dir=workflow / "diagnostics" / "real_codex",
         probe_dir=repo_root / ".artifacts" / "probes",
         master_prompt=workflow / "master_prompt.md",
         goal_spec=workflow / "goal_spec.json",

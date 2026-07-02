@@ -250,6 +250,94 @@ def cmd_rediscover(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_diagnose_real_codex(args: argparse.Namespace) -> int:
+    from codex_orchestrator.diagnostics import diagnose_real_codex_attempt
+
+    ctx = _ctx(args)
+    result = diagnose_real_codex_attempt(ctx, attempt_id=args.attempt)
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0
+
+
+def cmd_inspect_capsule(args: argparse.Namespace) -> int:
+    ctx = _ctx(args)
+    run_dir = ctx.paths.runs_dir / args.attempt
+    payload = {
+        "attempt": args.attempt,
+        "run_dir": str(run_dir),
+        "worker_capsule_manifest": str(run_dir / "worker_capsule.json"),
+        "worker_memory_dir": str(run_dir / "worker_memory"),
+        "worker_stage_dir": str(run_dir / "worker_stage"),
+        "worker_events_path": str(run_dir / "worker_hooks" / "events.jsonl"),
+        "wrapper_gate_result_path": str(run_dir / "gates" / "wrapper_gate_result.json"),
+        "diagnostics_dir": str(run_dir / "diagnostics"),
+        "presence": {
+            "worker_capsule_manifest": (run_dir / "worker_capsule.json").exists(),
+            "worker_memory_dir": (run_dir / "worker_memory").is_dir(),
+            "worker_stage_dir": (run_dir / "worker_stage").is_dir(),
+            "worker_events_path": (run_dir / "worker_hooks" / "events.jsonl").exists(),
+            "wrapper_gate_result_path": (run_dir / "gates" / "wrapper_gate_result.json").exists(),
+            "diagnostics_dir": (run_dir / "diagnostics").is_dir(),
+        },
+    }
+    print(json.dumps(payload, indent=2, sort_keys=True))
+    return 0
+
+
+def cmd_validate_capsule(args: argparse.Namespace) -> int:
+    from codex_orchestrator.validators.schema_validator import validate_json, validate_json_file
+
+    ctx = _ctx(args)
+    run_dir = ctx.paths.runs_dir / args.attempt
+    errors: list[str] = []
+    capsule_manifest = run_dir / "worker_capsule.json"
+    live_memory = run_dir / "worker_memory" / "LIVE_MEMORY.json"
+    allowed_paths = run_dir / "worker_memory" / "ALLOWED_PATHS.json"
+    events_path = run_dir / "worker_hooks" / "events.jsonl"
+    wrapper_gate = run_dir / "gates" / "wrapper_gate_result.json"
+
+    if not capsule_manifest.exists():
+        errors.append(f"missing {capsule_manifest}")
+    else:
+        errors.extend(validate_json_file(capsule_manifest, "worker_capsule.schema.json"))
+    if not live_memory.exists():
+        errors.append(f"missing {live_memory}")
+    else:
+        errors.extend(validate_json_file(live_memory, "worker_memory.schema.json"))
+    if not allowed_paths.exists():
+        errors.append(f"missing {allowed_paths}")
+    else:
+        errors.extend(validate_json_file(allowed_paths, "allowed_paths.schema.json"))
+    if not events_path.exists():
+        errors.append(f"missing {events_path}")
+    else:
+        for lineno, line in enumerate(events_path.read_text(encoding="utf-8").splitlines(), start=1):
+            if not line.strip():
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError as exc:
+                errors.append(f"events.jsonl line {lineno}: {exc}")
+                continue
+            if not isinstance(event, dict):
+                errors.append(f"events.jsonl line {lineno}: event is not an object")
+                continue
+            event_errors = validate_json(event, "worker_event.schema.json")
+            errors.extend(f"events.jsonl line {lineno}: {error}" for error in event_errors)
+    if not wrapper_gate.exists():
+        errors.append(f"missing {wrapper_gate}")
+    else:
+        errors.extend(validate_json_file(wrapper_gate, "wrapper_gate_result.schema.json"))
+
+    if errors:
+        print("INVALID")
+        for error in errors:
+            print(f"- {error}")
+        return 1
+    print("VALID")
+    return 0
+
+
 def cmd_auto(args: argparse.Namespace) -> int:
     from codex_orchestrator.stages.auto import run_auto
 
@@ -305,12 +393,19 @@ def build_parser() -> argparse.ArgumentParser:
         ("plan-repair", cmd_plan_repair),
         ("apply-repair", cmd_apply_repair),
         ("rediscover", cmd_rediscover),
+        ("diagnose-real-codex", cmd_diagnose_real_codex),
+        ("inspect-capsule", cmd_inspect_capsule),
+        ("validate-capsule", cmd_validate_capsule),
         ("regenerate-patchlets", cmd_regenerate_patchlets),
     ]:
         p = sub.add_parser(name)
         _add_repo_flags(p)
         if name == "regenerate-patchlets":
             p.add_argument("--from-repair-plan", default="latest")
+        if name == "diagnose-real-codex":
+            p.add_argument("--attempt", required=True)
+        if name in {"inspect-capsule", "validate-capsule"}:
+            p.add_argument("--attempt", required=True)
         if name in {"rediscover", "rebuild-inventory"}:
             p.add_argument("--scope", default="impacted", choices=["impacted", "full"])
         if name == "verify-group":

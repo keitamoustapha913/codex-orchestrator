@@ -61,3 +61,43 @@ The contract contains a minimal valid report example for `CXOR_REPORT_PATH`, a
 minimal durable probe example for `CXOR_PROBE_ROOT`, and explicit instructions
 that real success is not guaranteed unless Codex obeys the contract without the
 validators being weakened.
+
+If the opt-in smoke fails safely, run:
+
+```bash
+cxor diagnose-real-codex --repo /path/to/target-repo --attempt P0001_attempt1
+```
+
+This produces:
+
+- generic artifact kinds: `real_codex_failure_diagnosis.json` and `real_codex_failure_diagnosis.md`
+- `.codex-orchestrator/diagnostics/real_codex/P0001_attempt1_diagnosis.json`
+- `.codex-orchestrator/diagnostics/real_codex/P0001_attempt1_diagnosis.md`
+
+The diagnosis is evidence-bound. It reads `stdout.txt`, `stderr.txt`,
+`output.jsonl`, `command.json`, `run_manifest.json`, and the generated prompt
+artifact. It does not run Codex and does not weaken validators. If the
+artifacts are insufficient, expect `unknown_codex_nonzero_exit`.
+
+The same attempt-local evidence layer is visible through:
+
+```bash
+cxor inspect-capsule --repo /path/to/target-repo --attempt P0001_attempt1
+cxor validate-capsule --repo /path/to/target-repo --attempt P0001_attempt1
+```
+
+Worker Capsule is now part of each patchlet attempt. It is per-attempt memory,
+not global memory. The capsule lives under
+`.codex-orchestrator/runs/<attempt>/` and includes worker memory, worker stage
+templates, lifecycle events, gates, and diagnostics.
+
+Memory is context, not proof. Codex can write memory and stage notes, but the
+orchestrator writes gate results. `gates/wrapper_gate_result.json` is the
+machine verdict for the attempt. A Codex `FINAL_STATUS` claim is evidence only;
+it is not sufficient proof by itself.
+
+Global `DONE` is now backed by transaction and global matrices:
+
+- transaction groups write `patchlet_output_matrix.json`
+- global verification writes `verification_matrix.json`
+- global verification writes `global_gate_result.json`

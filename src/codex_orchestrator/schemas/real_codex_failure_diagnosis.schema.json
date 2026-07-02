@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "real_codex_failure_diagnosis",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "kind",
+    "patchlet_id",
+    "attempt_id",
+    "worker_mode",
+    "execution_mode",
+    "outcome",
+    "worker_failure",
+    "evidence_paths",
+    "artifact_presence",
+    "observed_signals",
+    "diagnosis",
+    "known_unknowns",
+    "recommended_next_action",
+    "validator_weakening_allowed",
+    "blind_retry_allowed"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "kind": {"const": "real_codex_failure_diagnosis"},
+    "patchlet_id": {"type": "string"},
+    "attempt_id": {"type": "string"},
+    "worker_mode": {"const": "real_codex"},
+    "execution_mode": {"type": "string"},
+    "outcome": {"const": "safe_failure"},
+    "worker_failure": {
+      "type": "object",
+      "required": ["type", "message", "exit_code"],
+      "properties": {
+        "type": {"type": "string"},
+        "message": {"type": "string"},
+        "exit_code": {"type": ["integer", "null"]}
+      },
+      "additionalProperties": true
+    },
+    "evidence_paths": {
+      "type": "object",
+      "required": ["stdout", "stderr", "output_jsonl", "command", "run_manifest", "prompt_artifact"],
+      "properties": {
+        "stdout": {"type": ["string", "null"]},
+        "stderr": {"type": ["string", "null"]},
+        "output_jsonl": {"type": ["string", "null"]},
+        "command": {"type": ["string", "null"]},
+        "run_manifest": {"type": "string"},
+        "prompt_artifact": {"type": ["string", "null"]}
+      },
+      "additionalProperties": true
+    },
+    "artifact_presence": {
+      "type": "object",
+      "required": ["stdout", "stderr", "output_jsonl", "command", "prompt_artifact", "report", "probe_run", "diff"],
+      "properties": {
+        "stdout": {"type": "boolean"},
+        "stderr": {"type": "boolean"},
+        "output_jsonl": {"type": "boolean"},
+        "command": {"type": "boolean"},
+        "prompt_artifact": {"type": "boolean"},
+        "report": {"type": "boolean"},
+        "probe_run": {"type": "boolean"},
+        "diff": {"type": "boolean"}
+      },
+      "additionalProperties": true
+    },
+    "observed_signals": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "diagnosis": {
+      "type": "object",
+      "required": ["primary_category", "confidence", "summary", "supported_by"],
+      "properties": {
+        "primary_category": {"type": "string"},
+        "confidence": {"type": "string", "enum": ["low", "medium", "high"]},
+        "summary": {"type": "string"},
+        "supported_by": {
+          "type": "array",
+          "items": {"type": "string"}
+        }
+      },
+      "additionalProperties": true
+    },
+    "known_unknowns": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "recommended_next_action": {"type": "string"},
+    "validator_weakening_allowed": {"const": false},
+    "blind_retry_allowed": {"const": false}
+  },
+  "additionalProperties": true
+}

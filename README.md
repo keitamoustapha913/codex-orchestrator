@@ -138,6 +138,58 @@ The contract includes a minimal valid report example written to
 explicit instructions not to invent alternate paths or mutate any file other
 than the allowed product/runtime file.
 
+Real Codex failure diagnosis:
+
+```bash
+cxor diagnose-real-codex --repo /path/to/target-repo --attempt P0001_attempt1
+```
+
+This command is read-only for product/runtime files. It does not run Codex. It
+reads preserved `stdout.txt`, `stderr.txt`, `output.jsonl`, `command.json`,
+`run_manifest.json`, and the generated prompt artifact, then writes:
+
+- generic artifact kinds: `real_codex_failure_diagnosis.json` and `real_codex_failure_diagnosis.md`
+- `.codex-orchestrator/diagnostics/real_codex/P0001_attempt1_diagnosis.json`
+- `.codex-orchestrator/diagnostics/real_codex/P0001_attempt1_diagnosis.md`
+
+Use the diagnosis only as evidence review. Do not weaken validators. When the
+artifacts do not support a more specific cause, expect the conservative category
+`unknown_codex_nonzero_exit`.
+
+For the smoke-specific operator guide, see `docs/real_codex_smoke.md`.
+
+## Worker Capsule
+
+Worker Capsule is a per-attempt evidence layer under
+`.codex-orchestrator/runs/<attempt>/`.
+
+It contains:
+
+- `worker_capsule.json`
+- `worker_memory/`
+- `worker_stage/`
+- `worker_hooks/events.jsonl`
+- `gates/wrapper_gate_result.json`
+- `diagnostics/`
+
+Worker memory is context, not proof. Codex may read and write attempt-local
+memory and stage files, but the orchestrator writes gate results and decides
+whether the attempt is accepted.
+
+Useful read-only commands:
+
+```bash
+cxor inspect-capsule --repo /path/to/target-repo --attempt P0001_attempt1
+cxor validate-capsule --repo /path/to/target-repo --attempt P0001_attempt1
+cxor diagnose-real-codex --repo /path/to/target-repo --attempt P0001_attempt1
+cxor verify-group --repo /path/to/target-repo TG001
+cxor verify-global --repo /path/to/target-repo
+```
+
+Transaction verification now writes `patchlet_output_matrix.json` before the
+group verdict, and global verification writes `verification_matrix.json` plus
+`global_gate_result.json` before concluding `DONE`.
+
 ## CI-safe commands
 
 ```bash

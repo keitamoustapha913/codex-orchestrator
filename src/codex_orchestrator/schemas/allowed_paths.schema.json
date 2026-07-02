@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "allowed_paths",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "kind",
+    "patchlet_id",
+    "attempt_id",
+    "allowed_product_runtime_files",
+    "allowed_artifact_roots",
+    "forbidden_roots"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "kind": {"const": "allowed_paths"}
+  },
+  "additionalProperties": true
+}

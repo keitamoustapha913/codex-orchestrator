@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "worker_memory",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "kind",
+    "patchlet_id",
+    "attempt_id",
+    "allowed_product_runtime_file",
+    "goal_ids",
+    "invariant_ids",
+    "evidence_ids",
+    "graph_node_ids",
+    "required_report_path",
+    "required_probe_root",
+    "current_stage",
+    "known_facts",
+    "previous_failures",
+    "open_questions"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "kind": {"const": "worker_memory"}
+  },
+  "additionalProperties": true
+}

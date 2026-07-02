@@ -89,9 +89,16 @@ def regenerate_patchlets(ctx: TargetRepoContext, *, from_repair_plan: str = "lat
         failure = read_json(ctx.paths.failures_dir / f"{failure_id}.json")
         source_patchlet_id = failure["source_id"]
         source_patchlet = next(
-            patchlet for patchlet in index.get("patchlets", [])
-            if patchlet.get("patchlet_id") == source_patchlet_id
+            (patchlet for patchlet in index.get("patchlets", []) if patchlet.get("patchlet_id") == source_patchlet_id),
+            None,
         )
+        if source_patchlet is None:
+            raise StagePreconditionError(
+                "regenerate-patchlets",
+                current_stage=state.stage,
+                target_repo=str(ctx.root),
+                detail=f"missing source patchlet manifest for {source_patchlet_id}",
+            )
         patchlet_id = _next_patchlet_id(index)
         transaction_group_id = _next_transaction_group_id(index)
         subprompt_rel = f".codex-orchestrator/subprompts/{patchlet_id[1:]}_repair.md"

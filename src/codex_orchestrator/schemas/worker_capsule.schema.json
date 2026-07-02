@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "worker_capsule",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "kind",
+    "patchlet_id",
+    "attempt_id",
+    "run_dir",
+    "worker_memory_dir",
+    "worker_stage_dir",
+    "worker_hooks_dir",
+    "gates_dir",
+    "diagnostics_dir"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "kind": {"const": "worker_capsule"},
+    "patchlet_id": {"type": "string"},
+    "attempt_id": {"type": "string"},
+    "run_dir": {"type": "string"},
+    "worker_memory_dir": {"type": "string"},
+    "worker_stage_dir": {"type": "string"},
+    "worker_hooks_dir": {"type": "string"},
+    "gates_dir": {"type": "string"},
+    "diagnostics_dir": {"type": "string"}
+  },
+  "additionalProperties": true
+}

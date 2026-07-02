@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from codex_orchestrator.errors import StagePreconditionError
 from codex_orchestrator.jsonio import read_json, write_json
 from codex_orchestrator.state import load_state, now_iso, transition
 from codex_orchestrator.target_repo import TargetRepoContext
 from codex_orchestrator.validators.report_validator import ReportValidationError, validate_patchlet_report_file
+from codex_orchestrator.run_records import load_run_manifest
 
 
 ALLOWED_PATCHLET_STATUSES = {"COMPLETE", "VERIFIED_NO_CHANGE_NEEDED"}
@@ -19,6 +22,16 @@ def _load_transaction_groups(ctx: TargetRepoContext) -> dict:
 
 def _save_transaction_groups(ctx: TargetRepoContext, groups: dict) -> None:
     write_json(ctx.paths.transaction_groups, groups)
+
+
+def _group_output_dir(ctx: TargetRepoContext, transaction_group_id: str) -> Path:
+    return ctx.paths.workflow_dir / "transaction_groups" / transaction_group_id
+
+
+def _latest_patchlet_run(ctx: TargetRepoContext, patchlet_id: str) -> dict | None:
+    manifest = load_run_manifest(ctx)
+    runs = [run for run in manifest.get("runs", []) if run.get("patchlet_id") == patchlet_id]
+    return runs[-1] if runs else None
 
 
 def _replacement_patchlet_ids_for_source_patchlet(
@@ -128,24 +141,80 @@ def verify_group(ctx: TargetRepoContext, *, transaction_group_id: str) -> dict:
     validated_patchlet_ids: list[str] = []
     failed_patchlet_ids: list[str] = []
     validation_errors: list[str] = []
+    matrix_rows: list[dict] = []
     for patchlet in required_patchlets:
         patchlet_id = patchlet["patchlet_id"]
         report_path = ctx.paths.reports_dir / f"{patchlet_id}.json"
+        run_entry = _latest_patchlet_run(ctx, patchlet_id)
+        row = {
+            "patchlet_id": patchlet_id,
+            "status": patchlet.get("status"),
+            "report_valid": False,
+            "probe_valid": False,
+            "allowed_diff_valid": bool(run_entry and run_entry.get("diff_validation", {}).get("valid") is True),
+            "wrapper_gate_accepted": bool(run_entry and run_entry.get("wrapper_gate_result")),
+            "goal_ids": patchlet.get("master_goal_ids", []),
+            "invariant_ids": patchlet.get("invariant_ids", []),
+            "evidence_ids": patchlet.get("evidence_ids", []),
+            "contradictions": [],
+        }
         if not report_path.exists():
             failed_patchlet_ids.append(patchlet_id)
             validation_errors.append(f"missing report {report_path}")
+            row["contradictions"].append("missing_report")
+            matrix_rows.append(row)
             continue
         try:
             report = validate_patchlet_report_file(report_path, patchlet)
         except ReportValidationError as exc:
             failed_patchlet_ids.append(patchlet_id)
             validation_errors.append(f"{patchlet_id}: {exc}")
+            row["contradictions"].append(f"report_invalid:{exc}")
+            matrix_rows.append(row)
             continue
+        row["report_valid"] = True
+        row["probe_valid"] = True
+        row["wrapper_gate_accepted"] = bool(
+            run_entry
+            and run_entry.get("wrapper_gate_result")
+            and (ctx.root / run_entry["wrapper_gate_result"]).exists()
+            and read_json(ctx.root / run_entry["wrapper_gate_result"]).get("accepted") is True
+        )
+        if not row["allowed_diff_valid"]:
+            row["contradictions"].append("diff_not_validated")
+        if not row["wrapper_gate_accepted"]:
+            row["contradictions"].append("wrapper_gate_not_accepted")
+        if group.get("invariant_ids"):
+            missing_invariants = [invariant_id for invariant_id in group.get("invariant_ids", []) if invariant_id not in patchlet.get("invariant_ids", [])]
+            if missing_invariants:
+                row["contradictions"].append(f"missing_invariants:{','.join(missing_invariants)}")
         if report["status"] not in ALLOWED_PATCHLET_STATUSES:
             failed_patchlet_ids.append(patchlet_id)
             validation_errors.append(f"{patchlet_id}: report status {report['status']} is not transaction-passable")
+            row["contradictions"].append(f"report_status_not_passable:{report['status']}")
+            matrix_rows.append(row)
+            continue
+        if row["contradictions"]:
+            failed_patchlet_ids.append(patchlet_id)
+            validation_errors.append(f"{patchlet_id}: contradictions present")
+            matrix_rows.append(row)
             continue
         validated_patchlet_ids.append(patchlet_id)
+        matrix_rows.append(row)
+
+    output_dir = _group_output_dir(ctx, transaction_group_id)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    matrix_path = output_dir / "patchlet_output_matrix.json"
+    gate_path = output_dir / "gates" / "group_gate_result.json"
+    gate_path.parent.mkdir(parents=True, exist_ok=True)
+    matrix = {
+        "schema_version": "1.0",
+        "kind": "patchlet_output_matrix",
+        "transaction_group_id": transaction_group_id,
+        "patchlets": matrix_rows,
+        "group_verdict": "FAILED" if failed_patchlet_ids else "PASSED",
+    }
+    write_json(matrix_path, matrix)
 
     if failed_patchlet_ids:
         failure_id = _record_group_failure(
@@ -162,13 +231,26 @@ def verify_group(ctx: TargetRepoContext, *, transaction_group_id: str) -> dict:
             "failed_patchlet_ids": failed_patchlet_ids,
             "verified_at": now_iso(),
             "artifact_path": str(ctx.paths.transaction_groups),
+            "patchlet_output_matrix": str(matrix_path),
+            "group_gate_result": str(gate_path),
         }
+        write_json(gate_path, {
+            "schema_version": "1.0",
+            "kind": "group_gate_result",
+            "transaction_group_id": transaction_group_id,
+            "accepted": False,
+            "matrix_path": str(matrix_path),
+            "failure_ids": [failure_id],
+            "reasons": validation_errors,
+        })
         _save_transaction_groups(ctx, groups)
         transition(ctx, state, "FAILURE_CLASSIFICATION_REQUIRED", reason=f"{transaction_group_id} verification failed")
         return {
             "transaction_group_id": transaction_group_id,
             "status": "FAILED",
             "artifact_path": str(ctx.paths.transaction_groups),
+            "patchlet_output_matrix": str(matrix_path),
+            "group_gate_result": str(gate_path),
             "failure_ids": [failure_id],
         }
 
@@ -180,13 +262,26 @@ def verify_group(ctx: TargetRepoContext, *, transaction_group_id: str) -> dict:
         "failed_patchlet_ids": [],
         "verified_at": now_iso(),
         "artifact_path": str(ctx.paths.transaction_groups),
+        "patchlet_output_matrix": str(matrix_path),
+        "group_gate_result": str(gate_path),
     }
+    write_json(gate_path, {
+        "schema_version": "1.0",
+        "kind": "group_gate_result",
+        "transaction_group_id": transaction_group_id,
+        "accepted": True,
+        "matrix_path": str(matrix_path),
+        "failure_ids": [],
+        "reasons": [],
+    })
     _save_transaction_groups(ctx, groups)
     transition(ctx, state, "TRANSACTION_VERIFICATION_COMPLETE", reason=f"{transaction_group_id} verification passed")
     return {
         "transaction_group_id": transaction_group_id,
         "status": "PASSED",
         "artifact_path": str(ctx.paths.transaction_groups),
+        "patchlet_output_matrix": str(matrix_path),
+        "group_gate_result": str(gate_path),
         "failure_ids": [],
     }
 

@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "worker_event",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "kind",
+    "event",
+    "patchlet_id",
+    "attempt_id",
+    "worker_mode",
+    "execution_mode",
+    "created_at"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "kind": {"const": "worker_event"},
+    "event": {"type": "string"},
+    "patchlet_id": {"type": "string"},
+    "attempt_id": {"type": "string"},
+    "worker_mode": {"type": "string"},
+    "execution_mode": {"type": "string"},
+    "created_at": {"type": "string"}
+  },
+  "additionalProperties": true
+}

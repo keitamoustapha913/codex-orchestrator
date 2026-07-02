@@ -47,6 +47,26 @@ def _default_report(patchlet: dict) -> dict:
     }
 
 
+def _final_status_for_report(report_status: str) -> str:
+    if report_status in {"COMPLETE", "VERIFIED_NO_CHANGE_NEEDED"}:
+        return "PASS"
+    if report_status == "BLOCKED_WITH_EVIDENCE":
+        return "BLOCKED"
+    return "FAILED"
+
+
+def _write_final_report_stage(run_ctx: PatchletRunContext, patchlet: dict, report_status: str) -> None:
+    final_report = run_ctx.run_dir / "worker_stage" / "05_final_report.md"
+    final_report.parent.mkdir(parents=True, exist_ok=True)
+    final_report.write_text(
+        "# Final Report\n\n"
+        f"- Patchlet: `{patchlet['patchlet_id']}`\n"
+        f"FINAL_STATUS: {_final_status_for_report(report_status)}\n"
+        f"- Worker report status: `{report_status}`\n",
+        encoding="utf-8",
+    )
+
+
 def _write_probe_run_artifacts(run_ctx: PatchletRunContext, patchlet_id: str) -> list[str]:
     probe_root = run_ctx.probe_dir / patchlet_id
     probe_root.mkdir(parents=True, exist_ok=True)
@@ -111,6 +131,7 @@ class MockWorker(Worker):
 
         report_path = run_ctx.reports_dir / f"{pid}.json"
         write_json(report_path, report)
+        _write_final_report_stage(run_ctx, patchlet, report["status"])
         run_dir.mkdir(parents=True, exist_ok=True)
         (run_dir / "output.jsonl").write_text(json.dumps({"mock": True, "patchlet_id": pid}) + "\n", encoding="utf-8")
         if scenario.get("consume_after_run") and scenario_path.exists():

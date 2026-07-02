@@ -15,6 +15,7 @@ def _docs_text() -> str:
         repo / "docs" / "transaction_groups.md",
         repo / "docs" / "rediscovery.md",
         repo / "docs" / "worktrees.md",
+        repo / "docs" / "real_codex_smoke.md",
     ]
     return "\n".join(path.read_text(encoding="utf-8") for path in paths if path.exists())
 
@@ -201,3 +202,31 @@ def test_docs_explain_real_success_still_depends_on_codex_obeying_contract():
     assert "real success is not guaranteed" in text or "real codex success to done is not guaranteed" in text
     assert "do not weaken validators" in text
     assert "contract" in text
+
+
+def test_docs_explain_real_codex_failure_diagnosis_artifacts():
+    text = _docs_text()
+    assert "real_codex_failure_diagnosis.json" in text
+    assert "real_codex_failure_diagnosis.md" in text
+    assert "stdout.txt" in text
+    assert "stderr.txt" in text
+    assert "output.jsonl" in text
+    assert "command.json" in text
+    assert "run_manifest.json" in text
+
+
+def test_docs_explain_diagnose_real_codex_command():
+    text = _docs_text()
+    assert "diagnose-real-codex" in text
+    assert "--attempt" in text
+
+
+def test_docs_explain_diagnosis_does_not_weaken_validators():
+    text = _docs_text().lower()
+    assert "do not weaken validators" in text
+    assert "diagnose-real-codex" in text
+
+
+def test_docs_explain_unknown_category_when_artifacts_are_insufficient():
+    text = _docs_text()
+    assert "unknown_codex_nonzero_exit" in text
