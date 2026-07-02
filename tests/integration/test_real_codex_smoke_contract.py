@@ -104,11 +104,105 @@ print("fake real_codex success parity", file=__import__("sys").stderr)
     path.chmod(0o755)
 
 
+def _write_contract_sensitive_fake_codex(path: Path) -> None:
+    path.write_text(
+        """#!/usr/bin/env python3
+import json
+import os
+import sys
+from pathlib import Path
+
+prompt_path = Path(sys.argv[-1])
+prompt_text = prompt_path.read_text(encoding="utf-8")
+run_dir = Path(os.environ["CXOR_RUN_DIR"])
+run_dir.mkdir(parents=True, exist_ok=True)
+(run_dir / "contract_check.json").write_text(json.dumps({
+    "prompt_path": str(prompt_path),
+    "contract_seen": "Real Codex Patchlet Contract" in prompt_text,
+    "report_path_seen": "CXOR_REPORT_PATH" in prompt_text,
+    "probe_root_seen": "CXOR_PROBE_ROOT" in prompt_text,
+    "allowed_file_seen": "CXOR_ALLOWED_PRODUCT_RUNTIME_FILE" in prompt_text
+}, indent=2, sort_keys=True), encoding="utf-8")
+
+if "Real Codex Patchlet Contract" not in prompt_text:
+    print("missing real codex contract", file=sys.stderr)
+    raise SystemExit(17)
+
+execution_root = Path(os.environ["CXOR_EXECUTION_ROOT"])
+patchlet_id = os.environ["CXOR_PATCHLET_ID"]
+allowed_file = os.environ["CXOR_ALLOWED_PRODUCT_RUNTIME_FILE"]
+report_path = Path(os.environ["CXOR_REPORT_PATH"])
+probe_root = Path(os.environ["CXOR_PROBE_ROOT"])
+
+(execution_root / allowed_file).write_text("def main():\\n    return 'ok'\\n# contract sensitive parity\\n", encoding="utf-8")
+(probe_root / "run_001").mkdir(parents=True, exist_ok=True)
+(probe_root / "probe.py").write_text("print('probe')\\n", encoding="utf-8")
+(probe_root / "run_001" / "row_ledger.jsonl").write_text(json.dumps({"row": 1}) + "\\n", encoding="utf-8")
+(probe_root / "run_001" / "trace_ledger.jsonl").write_text(json.dumps({"trace": 1}) + "\\n", encoding="utf-8")
+(probe_root / "run_001" / "before_state.json").write_text(json.dumps({"value": "before"}) + "\\n", encoding="utf-8")
+(probe_root / "run_001" / "after_state.json").write_text(json.dumps({"value": "after"}) + "\\n", encoding="utf-8")
+(probe_root / "run_001" / "cleanup_proof.json").write_text(json.dumps({"cleanup_passed": True}) + "\\n", encoding="utf-8")
+report_path.parent.mkdir(parents=True, exist_ok=True)
+report_path.write_text(json.dumps({
+    "schema_version": "1.0",
+    "kind": "patchlet_report",
+    "patchlet_id": patchlet_id,
+    "status": "COMPLETE",
+    "changed_product_runtime_file": allowed_file,
+    "changed_artifact_files": [
+        f".artifacts/probes/{patchlet_id}/probe.py",
+        f".artifacts/probes/{patchlet_id}/run_001/row_ledger.jsonl",
+        f".artifacts/probes/{patchlet_id}/run_001/trace_ledger.jsonl",
+        f".artifacts/probes/{patchlet_id}/run_001/before_state.json",
+        f".artifacts/probes/{patchlet_id}/run_001/after_state.json",
+        f".artifacts/probes/{patchlet_id}/run_001/cleanup_proof.json"
+    ],
+    "probe_commands": [f"python .artifacts/probes/{patchlet_id}/probe.py"],
+    "deterministic_run_counts": {"baseline": "5/5", "proof_of_fix": "5/5", "negative_controls": "5/5"},
+    "root_cause_classification": {
+        "observed_failure": "baseline failed before allowed change",
+        "immediate_cause": "allowed file lacked required behavior",
+        "why_immediate_cause_happened": "contract-sensitive fake codex applied deterministic fix",
+        "deeper_owner_boundary": allowed_file,
+        "producer_transformer_consumer_boundary": f"producer {allowed_file} -> consumer probe",
+        "not_downstream_of_unprobed_state_proof": "probe ran directly against changed boundary",
+        "negative_control_proof": "adjacent paths remained unchanged",
+        "recursive_why_audit": ["why1", "why2", "why3"]
+    },
+    "before_after_state": [{"before": "old", "after": "new"}],
+    "row_ledger": [],
+    "trace_ledger": [],
+    "cleanup_proof": "probe created isolated temp data and cleaned it",
+    "proof_of_fix": {
+        "summary": "direct probe passed after allowed change",
+        "deterministic_run_count": "5/5"
+    },
+    "probe_artifact_refs": [{
+        "patchlet_id": patchlet_id,
+        "probe_root": f".artifacts/probes/{patchlet_id}",
+        "run_id": "run_001"
+    }],
+    "acceptance_criteria_result": "pass"
+}, indent=2) + "\\n", encoding="utf-8")
+print(str(prompt_path))
+print("contract present", file=sys.stderr)
+""",
+        encoding="utf-8",
+    )
+    path.chmod(0o755)
+
+
 def _last_patchlet_run(ctx) -> dict:
     manifest = read_json(ctx.paths.run_manifest)
     patchlet_runs = [run for run in manifest["runs"] if run.get("patchlet_id") == "P0001"]
     assert patchlet_runs
     return patchlet_runs[-1]
+
+
+def _first_subprompt_text(ctx) -> tuple[Path, str]:
+    subprompts = sorted(ctx.paths.subprompts_dir.glob("*.md"))
+    assert subprompts
+    return subprompts[0], subprompts[0].read_text(encoding="utf-8")
 
 
 def test_real_codex_smoke_is_skipped_without_explicit_flag():
@@ -182,6 +276,126 @@ def test_real_codex_auto_worktree_pytest_documents_exact_opt_in_command():
     assert "pytest -q tests/smoke/test_real_codex_auto_worktree.py" in command
     assert "--run-real-codex" in command
     assert "-s" in command
+
+
+def test_real_codex_auto_worktree_smoke_injects_patchlet_contract_into_generated_prompt(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    fake_bin_dir = tmp_path / "fake-bin"
+    fake_bin_dir.mkdir()
+    fake_codex = fake_bin_dir / "codex"
+    _write_fake_codex(
+        fake_codex,
+        """#!/usr/bin/env python3
+raise SystemExit(17)
+""",
+    )
+    monkeypatch.setenv("PATH", f"{fake_bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+
+    ctx = resolve_target_repo(repo=git_repo)
+    run_real_codex_auto_worktree_smoke(
+        ctx,
+        master=git_repo / "master_prompt.md",
+        allow_real_codex=True,
+        codex_binary="codex",
+        max_iterations=25,
+    )
+
+    _, subprompt = _first_subprompt_text(ctx)
+    assert "Real Codex Patchlet Contract" in subprompt
+
+
+def test_real_codex_auto_worktree_smoke_prompt_mentions_cxor_report_and_probe_paths(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    fake_bin_dir = tmp_path / "fake-bin"
+    fake_bin_dir.mkdir()
+    fake_codex = fake_bin_dir / "codex"
+    _write_fake_codex(
+        fake_codex,
+        """#!/usr/bin/env python3
+raise SystemExit(17)
+""",
+    )
+    monkeypatch.setenv("PATH", f"{fake_bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+
+    ctx = resolve_target_repo(repo=git_repo)
+    run_real_codex_auto_worktree_smoke(
+        ctx,
+        master=git_repo / "master_prompt.md",
+        allow_real_codex=True,
+        codex_binary="codex",
+        max_iterations=25,
+    )
+
+    _, subprompt = _first_subprompt_text(ctx)
+    assert "CXOR_REPORT_PATH" in subprompt
+    assert "CXOR_PROBE_ROOT" in subprompt
+    assert "probe_artifact_refs" in subprompt
+
+
+def test_real_codex_auto_worktree_smoke_prompt_mentions_only_allowed_product_file(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    fake_bin_dir = tmp_path / "fake-bin"
+    fake_bin_dir.mkdir()
+    fake_codex = fake_bin_dir / "codex"
+    _write_fake_codex(
+        fake_codex,
+        """#!/usr/bin/env python3
+raise SystemExit(17)
+""",
+    )
+    monkeypatch.setenv("PATH", f"{fake_bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+
+    ctx = resolve_target_repo(repo=git_repo)
+    run_real_codex_auto_worktree_smoke(
+        ctx,
+        master=git_repo / "master_prompt.md",
+        allow_real_codex=True,
+        codex_binary="codex",
+        max_iterations=25,
+    )
+
+    _, subprompt = _first_subprompt_text(ctx)
+    assert "CXOR_ALLOWED_PRODUCT_RUNTIME_FILE" in subprompt
+    assert "Only change the allowed product/runtime file" in subprompt
+
+
+def test_real_codex_auto_worktree_smoke_prompt_is_available_as_durable_artifact(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    fake_bin_dir = tmp_path / "fake-bin"
+    fake_bin_dir.mkdir()
+    fake_codex = fake_bin_dir / "codex"
+    _write_fake_codex(
+        fake_codex,
+        """#!/usr/bin/env python3
+raise SystemExit(17)
+""",
+    )
+    monkeypatch.setenv("PATH", f"{fake_bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+
+    ctx = resolve_target_repo(repo=git_repo)
+    run_real_codex_auto_worktree_smoke(
+        ctx,
+        master=git_repo / "master_prompt.md",
+        allow_real_codex=True,
+        codex_binary="codex",
+        max_iterations=25,
+    )
+
+    subprompt_path, _ = _first_subprompt_text(ctx)
+    assert subprompt_path.exists()
+    assert subprompt_path.is_relative_to(ctx.root)
 
 
 def test_real_codex_auto_worktree_smoke_success_contract_with_fake_codex(
@@ -396,6 +610,173 @@ def test_real_codex_worker_fake_success_artifacts_are_under_target_root(
     assert (ctx.paths.probe_dir / "P0001" / "run_001" / "cleanup_proof.json").exists()
     patchlet_run = _last_patchlet_run(ctx)
     assert patchlet_run["artifact_root"] == str(ctx.root)
+
+
+def test_fake_codex_contract_sensitive_binary_fails_without_contract(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    fake_bin_dir = tmp_path / "fake-bin"
+    fake_bin_dir.mkdir()
+    fake_codex = fake_bin_dir / "codex"
+    _write_contract_sensitive_fake_codex(fake_codex)
+    monkeypatch.setenv("PATH", f"{fake_bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+
+    ctx = resolve_target_repo(repo=git_repo)
+    result = run_real_codex_auto_worktree_smoke(
+        ctx,
+        master=git_repo / "master_prompt.md",
+        allow_real_codex=True,
+        codex_binary="codex",
+        max_iterations=25,
+        inject_contract=False,
+    )
+
+    contract_check = read_json(Path(result["run_dir"]) / "contract_check.json")
+    assert result["outcome"] == "safe_failure"
+    assert result["error_type"] == "WorkerExecutionError"
+    assert contract_check["contract_seen"] is False
+
+
+def test_fake_codex_contract_sensitive_binary_reaches_done_with_injected_contract(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    fake_bin_dir = tmp_path / "fake-bin"
+    fake_bin_dir.mkdir()
+    fake_codex = fake_bin_dir / "codex"
+    _write_contract_sensitive_fake_codex(fake_codex)
+    monkeypatch.setenv("PATH", f"{fake_bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+
+    ctx = resolve_target_repo(repo=git_repo)
+    result = run_real_codex_auto_worktree_smoke(
+        ctx,
+        master=git_repo / "master_prompt.md",
+        allow_real_codex=True,
+        codex_binary="codex",
+        max_iterations=25,
+    )
+
+    final = read_json(ctx.paths.final_verification_json)
+    patchlet_run = _last_patchlet_run(ctx)
+    contract_check = read_json(Path(result["run_dir"]) / "contract_check.json")
+
+    assert result["outcome"] == "success"
+    assert result["state_stage"] == "DONE"
+    assert final["status"] == "DONE"
+    assert patchlet_run["status"] == "COMPLETE"
+    assert contract_check["contract_seen"] is True
+
+
+def test_fake_codex_contract_sensitive_binary_records_prompt_contract_evidence(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    fake_bin_dir = tmp_path / "fake-bin"
+    fake_bin_dir.mkdir()
+    fake_codex = fake_bin_dir / "codex"
+    _write_contract_sensitive_fake_codex(fake_codex)
+    monkeypatch.setenv("PATH", f"{fake_bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+
+    ctx = resolve_target_repo(repo=git_repo)
+    result = run_real_codex_auto_worktree_smoke(
+        ctx,
+        master=git_repo / "master_prompt.md",
+        allow_real_codex=True,
+        codex_binary="codex",
+        max_iterations=25,
+    )
+
+    contract_check = read_json(Path(result["run_dir"]) / "contract_check.json")
+    assert contract_check["prompt_path"] == result["prompt_artifact_path"]
+    assert contract_check["contract_seen"] is True
+    assert contract_check["report_path_seen"] is True
+    assert contract_check["probe_root_seen"] is True
+    assert contract_check["allowed_file_seen"] is True
+
+
+def test_real_codex_auto_worktree_smoke_result_reports_prompt_artifact_path(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    fake_bin_dir = tmp_path / "fake-bin"
+    fake_bin_dir.mkdir()
+    fake_codex = fake_bin_dir / "codex"
+    _write_contract_sensitive_fake_codex(fake_codex)
+    monkeypatch.setenv("PATH", f"{fake_bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+
+    ctx = resolve_target_repo(repo=git_repo)
+    result = run_real_codex_auto_worktree_smoke(
+        ctx,
+        master=git_repo / "master_prompt.md",
+        allow_real_codex=True,
+        codex_binary="codex",
+        max_iterations=25,
+    )
+
+    assert result["prompt_artifact_path"]
+    assert Path(result["prompt_artifact_path"]).exists()
+    assert Path(result["prompt_artifact_path"]).is_relative_to(ctx.root)
+
+
+def test_real_codex_auto_worktree_smoke_result_reports_contract_injected_true(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    fake_bin_dir = tmp_path / "fake-bin"
+    fake_bin_dir.mkdir()
+    fake_codex = fake_bin_dir / "codex"
+    _write_contract_sensitive_fake_codex(fake_codex)
+    monkeypatch.setenv("PATH", f"{fake_bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+
+    ctx = resolve_target_repo(repo=git_repo)
+    result = run_real_codex_auto_worktree_smoke(
+        ctx,
+        master=git_repo / "master_prompt.md",
+        allow_real_codex=True,
+        codex_binary="codex",
+        max_iterations=25,
+    )
+
+    assert result["contract_template_path"].endswith("real_codex_patchlet_contract.md")
+    assert result["contract_injected"] is True
+
+
+def test_real_codex_auto_worktree_smoke_safe_failure_reports_contract_prompt_context(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    fake_bin_dir = tmp_path / "fake-bin"
+    fake_bin_dir.mkdir()
+    fake_codex = fake_bin_dir / "codex"
+    _write_fake_codex(
+        fake_codex,
+        """#!/usr/bin/env python3
+raise SystemExit(17)
+""",
+    )
+    monkeypatch.setenv("PATH", f"{fake_bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+
+    ctx = resolve_target_repo(repo=git_repo)
+    result = run_real_codex_auto_worktree_smoke(
+        ctx,
+        master=git_repo / "master_prompt.md",
+        allow_real_codex=True,
+        codex_binary="codex",
+        max_iterations=25,
+    )
+
+    assert result["outcome"] == "safe_failure"
+    assert result["prompt_artifact_path"]
+    assert Path(result["prompt_artifact_path"]).exists()
+    assert result["contract_template_path"].endswith("real_codex_patchlet_contract.md")
+    assert result["contract_injected"] is True
 
 
 def test_real_codex_auto_worktree_smoke_safe_failure_contract_with_fake_codex(

@@ -175,3 +175,29 @@ def test_docs_link_real_codex_failure_to_run_manifest_evidence():
 def test_docs_reference_real_codex_patchlet_contract_prompt():
     text = _docs_text()
     assert "real_codex_patchlet_contract.md" in text
+
+
+def test_docs_explain_real_codex_contract_is_injected_into_smoke_prompt():
+    text = _docs_text().lower()
+    assert "real_codex_patchlet_contract.md" in text
+    assert "contract injected" in text or "injected into the smoke prompt" in text
+
+
+def test_docs_explain_real_codex_contract_contains_minimal_valid_payload_example():
+    text = _docs_text().lower()
+    assert "minimal valid report" in text
+    assert "cxor_report_path" in text
+    assert "cxor_probe_root" in text
+
+
+def test_docs_explain_how_to_inspect_generated_prompt_artifact():
+    text = _docs_text().lower()
+    assert "generated prompt artifact" in text or "generated subprompt artifact" in text
+    assert ".codex-orchestrator/subprompts/" in text
+
+
+def test_docs_explain_real_success_still_depends_on_codex_obeying_contract():
+    text = _docs_text().lower()
+    assert "real success is not guaranteed" in text or "real codex success to done is not guaranteed" in text
+    assert "do not weaken validators" in text
+    assert "contract" in text

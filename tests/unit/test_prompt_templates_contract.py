@@ -41,3 +41,35 @@ def test_real_codex_patchlet_contract_forbids_blind_retry_and_transient_claims()
     text = _text()
     assert "Do not use blind retry" in text
     assert "Do not claim the issue is transient" in text or "Do not claim transient" in text
+
+
+def test_real_codex_patchlet_contract_contains_minimal_complete_report_example():
+    text = _text()
+    assert '"status": "COMPLETE"' in text
+    assert "CXOR_REPORT_PATH" in text
+    assert '"probe_artifact_refs"' in text
+
+
+def test_real_codex_patchlet_contract_contains_probe_jsonl_examples():
+    text = _text()
+    assert "row_ledger.jsonl" in text
+    assert '{"row": 1}' in text or '"row": 1' in text
+    assert "trace_ledger.jsonl" in text
+    assert '{"trace": 1}' in text or '"trace": 1' in text
+
+
+def test_real_codex_patchlet_contract_contains_cleanup_proof_example():
+    text = _text()
+    assert "cleanup_proof.json" in text
+    assert '"cleanup_passed": true' in text.lower()
+
+
+def test_real_codex_patchlet_contract_tells_codex_not_to_invent_paths():
+    text = _text()
+    assert "Do not invent extra artifact locations" in text or "Do not invent alternate paths" in text
+
+
+def test_real_codex_patchlet_contract_tells_codex_to_write_artifacts_to_artifact_root():
+    text = _text()
+    assert "CXOR_ARTIFACT_ROOT" in text
+    assert "Do not write report or probe artifacts into the worktree" in text

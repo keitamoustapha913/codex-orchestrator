@@ -52,3 +52,12 @@ Safe failures are expected to leave a `run_manifest.json` entry with status `WOR
 Operator prompt contract:
 
 - `src/codex_orchestrator/prompt_templates/real_codex_patchlet_contract.md`
+
+For the opt-in real Codex smoke, the orchestrator injects this contract into
+the generated subprompt artifact under `.codex-orchestrator/subprompts/`. That
+artifact is the exact prompt context to inspect after a safe failure.
+
+The contract contains a minimal valid report example for `CXOR_REPORT_PATH`, a
+minimal durable probe example for `CXOR_PROBE_ROOT`, and explicit instructions
+that real success is not guaranteed unless Codex obeys the contract without the
+validators being weakened.

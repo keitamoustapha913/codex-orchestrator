@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import os
 import re
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 
 from codex_orchestrator.jsonio import read_json, write_json
 from codex_orchestrator.state import load_state, transition
@@ -37,10 +38,21 @@ def _existing_patchlets(ctx: TargetRepoContext) -> dict[str, dict]:
     return {patchlet["patchlet_id"]: patchlet for patchlet in index.get("patchlets", [])}
 
 
+def _real_codex_contract_text() -> str:
+    contract_path = os.environ.get("CXOR_REAL_CODEX_CONTRACT_PATH")
+    if not contract_path:
+        return ""
+    path = Path(contract_path)
+    if not path.exists():
+        raise RuntimeError(f"Missing real Codex contract template: {path}")
+    return "\n\n" + path.read_text(encoding="utf-8").strip() + "\n"
+
+
 def compile_patchlets(ctx: TargetRepoContext) -> dict:
     node_file_map = _node_file_map(ctx)
     invariants = _load_invariants(ctx)
     existing_patchlets = _existing_patchlets(ctx)
+    real_codex_contract = _real_codex_contract_text()
     patchlets: list[dict] = []
     transaction_groups: list[dict] = []
 
@@ -113,7 +125,8 @@ def compile_patchlets(ctx: TargetRepoContext) -> dict:
             "## Report contract\n\n"
             f"Write `.codex-orchestrator/reports/{patchlet_id}.json` with status COMPLETE, "
             "VERIFIED_NO_CHANGE_NEEDED, BLOCKED_WITH_EVIDENCE, or FAILED_WITH_EVIDENCE, "
-            "and include valid `probe_artifact_refs`.\n",
+            "and include valid `probe_artifact_refs`.\n"
+            + real_codex_contract,
             encoding="utf-8",
         )
 

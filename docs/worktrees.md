@@ -39,3 +39,9 @@ If the worker fails before diff or report validation, inspect `run_manifest.json
 Use `src/codex_orchestrator/prompt_templates/real_codex_patchlet_contract.md`
 when you need an operator-facing contract for what the real Codex subprocess
 must write.
+
+For the opt-in real Codex smoke, that contract is injected into the generated
+subprompt artifact under `.codex-orchestrator/subprompts/`. The contract
+includes a minimal valid report example for `CXOR_REPORT_PATH`, a minimal probe
+artifact tree for `CXOR_PROBE_ROOT`, and a rule that Codex must not invent
+alternate paths or edit files outside the allowed product/runtime file.

@@ -64,6 +64,58 @@ The report must include at least:
 `probe_artifact_refs` must reference the durable probe run written under
 `CXOR_PROBE_ROOT`.
 
+## Minimal Valid COMPLETE Example
+
+Write the report JSON to `CXOR_REPORT_PATH`. A minimal valid shape is:
+
+```json
+{
+  "schema_version": "1.0",
+  "kind": "patchlet_report",
+  "patchlet_id": "P0001",
+  "status": "COMPLETE",
+  "changed_product_runtime_file": "app.py",
+  "changed_artifact_files": [
+    ".artifacts/probes/P0001/probe.py",
+    ".artifacts/probes/P0001/run_001/row_ledger.jsonl",
+    ".artifacts/probes/P0001/run_001/trace_ledger.jsonl",
+    ".artifacts/probes/P0001/run_001/before_state.json",
+    ".artifacts/probes/P0001/run_001/after_state.json",
+    ".artifacts/probes/P0001/run_001/cleanup_proof.json"
+  ],
+  "probe_commands": ["python .artifacts/probes/P0001/probe.py"],
+  "deterministic_run_counts": {
+    "baseline": "5/5",
+    "proof_of_fix": "5/5",
+    "negative_controls": "5/5"
+  },
+  "root_cause_classification": {
+    "observed_failure": "baseline failed before the allowed change",
+    "immediate_cause": "the allowed file lacked the required behavior",
+    "why_immediate_cause_happened": "the behavior was not implemented correctly",
+    "deeper_owner_boundary": "app.py",
+    "producer_transformer_consumer_boundary": "producer app.py -> consumer probe",
+    "not_downstream_of_unprobed_state_proof": "the direct probe ran against the changed boundary",
+    "negative_control_proof": "adjacent paths remained unchanged",
+    "recursive_why_audit": ["why1", "why2", "why3"]
+  },
+  "before_after_state": [{"before": "old", "after": "new"}],
+  "row_ledger": [],
+  "trace_ledger": [],
+  "cleanup_proof": "probe created isolated temp data and cleaned it",
+  "proof_of_fix": {
+    "summary": "direct probe passed after the allowed change",
+    "deterministic_run_count": "5/5"
+  },
+  "probe_artifact_refs": [{
+    "patchlet_id": "P0001",
+    "probe_root": ".artifacts/probes/P0001",
+    "run_id": "run_001"
+  }],
+  "acceptance_criteria_result": "pass"
+}
+```
+
 ## Required Durable Probe Files
 
 Write these durable probe artifacts:
@@ -77,6 +129,38 @@ Write these durable probe artifacts:
 
 The report must include `probe_artifact_refs` pointing at that probe root and
 run id.
+
+Minimal probe file examples:
+
+`CXOR_PROBE_ROOT/run_001/row_ledger.jsonl`
+
+```json
+{"row": 1}
+```
+
+`CXOR_PROBE_ROOT/run_001/trace_ledger.jsonl`
+
+```json
+{"trace": 1}
+```
+
+`CXOR_PROBE_ROOT/run_001/before_state.json`
+
+```json
+{"value": "before"}
+```
+
+`CXOR_PROBE_ROOT/run_001/after_state.json`
+
+```json
+{"value": "after"}
+```
+
+`CXOR_PROBE_ROOT/run_001/cleanup_proof.json`
+
+```json
+{"cleanup_passed": true}
+```
 
 ## Required Investigation Content
 
@@ -93,6 +177,7 @@ Do not claim the issue is transient.
 Do not claim the issue is flaky.
 Do not use blind retry.
 Do not say rerun fixed it.
+Do not invent alternate paths.
 
 The orchestrator validators are strict. Do not weaken the report or omit the
 durable probe files to make the run appear successful.

@@ -128,6 +128,16 @@ Operator prompt contract:
 
 - `src/codex_orchestrator/prompt_templates/real_codex_patchlet_contract.md`
 
+For the opt-in smoke, this contract is injected into the smoke prompt and the
+generated subprompt artifact under `.codex-orchestrator/subprompts/` so the
+real Codex subprocess sees the same path and payload rules that the fake-success
+parity harness proved.
+
+The contract includes a minimal valid report example written to
+`CXOR_REPORT_PATH`, a durable probe tree rooted at `CXOR_PROBE_ROOT`, and
+explicit instructions not to invent alternate paths or mutate any file other
+than the allowed product/runtime file.
+
 ## CI-safe commands
 
 ```bash

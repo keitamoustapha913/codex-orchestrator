@@ -106,6 +106,14 @@ Prompt contract artifact:
 
 - `src/codex_orchestrator/prompt_templates/real_codex_patchlet_contract.md`
 
+During the opt-in smoke, that contract is injected into the smoke prompt and
+the generated prompt artifact under `.codex-orchestrator/subprompts/`. Inspect
+that generated subprompt artifact first if installed Codex fails safely.
+
+The contract carries a minimal valid report example for `CXOR_REPORT_PATH`, a
+minimal durable probe layout for `CXOR_PROBE_ROOT`, and explicit instructions
+not to invent alternate paths.
+
 CI-friendly commands that exist:
 
 ```bash
