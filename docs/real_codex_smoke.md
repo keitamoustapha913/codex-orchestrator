@@ -8,6 +8,11 @@ Run it with:
 uv run --no-sync pytest -q tests/smoke/test_real_codex_auto_worktree.py --run-real-codex -s
 ```
 
+Patchlet real-Codex execution defaults to 10 minutes / 600 seconds. Operators
+can set `CODEX_TIMEOUT_SECONDS`, and patchlet-specific runs can set
+`CODEX_PATCHLET_TIMEOUT_SECONDS` to take precedence. The patchlet receives
+`CXOR_TIMEOUT_SECONDS` and `CXOR_SOFT_DEADLINE_SECONDS`.
+
 That smoke exercises:
 
 ```bash
@@ -49,6 +54,15 @@ Safe failure should preserve:
 - `stderr.txt`
 - `command.json`
 - `output.jsonl`
+- `progress.jsonl`
+
+`progress.jsonl` is a compact liveness stream, not success evidence. Timeout
+safe-failure means containment and preserved evidence; it is not task success
+and does not mean `DONE`.
+
+Patchlet Codex defaults to `gpt-5.4-mini` with reasoning `medium`.
+Non-patchlet/orchestrator Codex profiles default to `gpt-5.5` with reasoning
+`medium`.
 
 If the preserved artifacts do not justify a narrower claim, the diagnosis
 should stay at `unknown_codex_nonzero_exit`.

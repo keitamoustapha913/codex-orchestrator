@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+import os
 from pathlib import Path
 
+from codex_orchestrator.codex_execution_policy import resolve_patchlet_timeout_seconds, soft_deadline_seconds
 from codex_orchestrator.jsonio import write_json
 from codex_orchestrator.patchlet_run_context import PatchletRunContext
 from codex_orchestrator.paths import relative_to_repo
@@ -100,6 +102,8 @@ def _task_contract_text(
     allowed_file = patchlet.get("allowed_product_runtime_file", "")
     patchlet_id = patchlet["patchlet_id"]
     attempt_id = run_context.run_dir.name
+    timeout_seconds = resolve_patchlet_timeout_seconds(os.environ)
+    soft_deadline = soft_deadline_seconds(timeout_seconds)
     return (
         "# TASK CONTRACT\n\n"
         f"- patchlet id: `{patchlet_id}`\n"
@@ -113,6 +117,9 @@ def _task_contract_text(
         f"- required probe root: `.artifacts/probes/{patchlet_id}`\n"
         f"- required stage files: `worker_stage/00_preflight.md`, `worker_stage/05_final_report.md`\n"
         "- required final status marker: `FINAL_STATUS: PASS` or explicit failure/blocking status\n"
+        f"- time budget: hard timeout of {timeout_seconds} seconds\n"
+        f"- soft deadline: Aim to finish by {soft_deadline} seconds\n"
+        "- if blocked near the budget, write `worker_stage/05_final_report.md` with explicit BLOCKED or FAILED status and preserve what you learned\n"
         "- forbidden edit paths: any product/runtime file other than the allowed file; do not edit orchestrator source paths\n"
         "- root-cause/probe contract reminder: direct probe first, then minimal fix, then deterministic proof and negative controls\n"
         "- no blind retry rule: blind retry is not allowed\n"
@@ -170,6 +177,8 @@ def ensure_worker_memory(
 ) -> None:
     live_memory = _live_memory_json(run_context, patchlet)
     allowed_paths = _allowed_paths_json(run_context, patchlet)
+    timeout_seconds = resolve_patchlet_timeout_seconds(os.environ)
+    soft_deadline = soft_deadline_seconds(timeout_seconds)
     task_contract_path = capsule.worker_memory_dir / "TASK_CONTRACT.md"
     task_contract_path.write_text(
         _task_contract_text(run_context, patchlet, worker_mode=worker_mode),
@@ -208,7 +217,12 @@ def ensure_worker_memory(
         "- `worker_stage/00_preflight.md`\n"
         "- `worker_stage/05_final_report.md`\n"
         f"- `.codex-orchestrator/reports/{patchlet['patchlet_id']}.json`\n"
-        f"- `.artifacts/probes/{patchlet['patchlet_id']}/...`\n",
+        f"- `.artifacts/probes/{patchlet['patchlet_id']}/...`\n"
+        + "\n"
+        f"Time budget: hard timeout of {timeout_seconds} seconds; aim to finish by {soft_deadline} seconds. "
+        "If you cannot complete, stop before the hard timeout and write "
+        "`worker_stage/05_final_report.md` with explicit BLOCKED or FAILED status. "
+        "Preserve what you learned. Do not keep investigating indefinitely. Do not use blind retry.\n",
         encoding="utf-8",
     )
 

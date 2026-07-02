@@ -20,6 +20,7 @@ from .stages.normalize import normalize_master_prompt
 from .stages.auto import run_auto
 from .stages.run_patchlet import run_next_patchlet
 from .run_records import load_run_manifest
+from .jsonio import read_json
 
 
 def _real_codex_contract_template_path() -> Path:
@@ -206,6 +207,9 @@ def _smoke_result(
     capsule_manifest_path = str(run_dir / "worker_capsule.json") if run_dir is not None else None
     contract_template_path = _real_codex_contract_template_path()
     contract_injected = False
+    command = {}
+    if run_dir is not None and (run_dir / "command.json").exists():
+        command = read_json(run_dir / "command.json")
     if prompt_artifact_path is not None and prompt_artifact_path.exists():
         contract_injected = "Real Codex Patchlet Contract" in prompt_artifact_path.read_text(encoding="utf-8")
     result = {
@@ -240,7 +244,13 @@ def _smoke_result(
         "stderr_path": str(run_dir / "stderr.txt") if run_dir is not None else None,
         "command_path": str(run_dir / "command.json") if run_dir is not None else None,
         "output_jsonl_path": str(run_dir / "output.jsonl") if run_dir is not None else None,
+        "progress_path": str(run_dir / "progress.jsonl") if run_dir is not None else None,
         "diff_path": str(run_dir / "diff.patch") if run_dir is not None else None,
+        "timed_out": command.get("timed_out"),
+        "timeout_seconds": command.get("timeout_seconds"),
+        "soft_deadline_seconds": command.get("soft_deadline_seconds"),
+        "selected_model": command.get("selected_model"),
+        "selected_reasoning": command.get("selected_reasoning"),
     }
     if outcome == "safe_failure" and run_manifest_entry is not None and run_manifest_entry.get("attempt_id"):
         diagnosis = diagnose_real_codex_attempt(

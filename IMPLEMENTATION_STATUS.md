@@ -117,6 +117,21 @@ a minimal durable probe example rooted at `CXOR_PROBE_ROOT`.
 
 When a real/non-mock worker exits non-zero, `run_manifest.json` should retain a `WORKER_FAILED` patchlet run entry together with preserved `stdout.txt`, `stderr.txt`, `command.json`, and `output.jsonl` artifact paths. Blind retry is not allowed.
 
+Real-Codex patchlet timeout defaults to 10 minutes / 600 seconds.
+`CODEX_TIMEOUT_SECONDS` overrides the global timeout, and
+`CODEX_PATCHLET_TIMEOUT_SECONDS` overrides patchlet execution. The patchlet
+sees `CXOR_TIMEOUT_SECONDS` and `CXOR_SOFT_DEADLINE_SECONDS`, and the generated
+Worker Capsule/subprompt tells it to write `worker_stage/05_final_report.md`
+with BLOCKED or FAILED status before timeout if it cannot finish.
+
+Real-Codex attempts write compact liveness events to `progress.jsonl`. This is
+not success evidence. Timeout safe-failure preserves evidence and containment;
+it is not task success and not `DONE`.
+
+Patchlet Codex defaults to `gpt-5.4-mini` with reasoning `medium`.
+Non-patchlet/orchestrator Codex profiles default to `gpt-5.5` with reasoning
+`medium`.
+
 Use `cxor diagnose-real-codex --repo /path/to/target-repo --attempt P0001_attempt1`
 to summarize preserved `stdout.txt`, `stderr.txt`, `output.jsonl`,
 `command.json`, `run_manifest.json`, and generated prompt artifacts into:

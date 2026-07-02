@@ -49,6 +49,22 @@ existing validators.
 
 Safe failures are expected to leave a `run_manifest.json` entry with status `WORKER_FAILED` and preserved `stdout.txt`, `stderr.txt`, `command.json`, and `output.jsonl` paths for the failed patchlet attempt. Blind retry is not allowed.
 
+Real-Codex patchlets are bounded by a default 10 minutes / 600 seconds timeout.
+`CODEX_TIMEOUT_SECONDS` overrides the global timeout, and
+`CODEX_PATCHLET_TIMEOUT_SECONDS` overrides patchlet execution specifically.
+Generated Worker Capsule files and subprompts include the hard timeout, the
+soft deadline, and instructions to write `worker_stage/05_final_report.md`
+with BLOCKED or FAILED status before timeout if the task cannot complete.
+
+`progress.jsonl` is written under each real-Codex attempt run directory as
+small liveness evidence. Progress is not success evidence. Timeout
+safe-failure is not task success and not `DONE`; it only proves containment and
+artifact preservation.
+
+Patchlet Codex defaults to `gpt-5.4-mini` with reasoning `medium`.
+Non-patchlet/orchestrator Codex profiles default to `gpt-5.5` with reasoning
+`medium`.
+
 Operator prompt contract:
 
 - `src/codex_orchestrator/prompt_templates/real_codex_patchlet_contract.md`

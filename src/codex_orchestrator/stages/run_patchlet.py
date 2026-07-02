@@ -53,6 +53,17 @@ def _read_exit_code_from_run_dir(run_dir) -> int | None:
     return None
 
 
+def _read_command_from_run_dir(run_dir) -> dict:
+    command_path = run_dir / "command.json"
+    if command_path.exists():
+        try:
+            data = json.loads(command_path.read_text(encoding="utf-8"))
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            return {}
+    return {}
+
+
 def _append_failed_worker_run_record(
     ctx: TargetRepoContext,
     *,
@@ -68,13 +79,15 @@ def _append_failed_worker_run_record(
     wrapper_gate_result: str | None,
 ) -> None:
     run_dir = run_ctx.run_dir
-    exit_code = _read_exit_code_from_run_dir(run_dir)
+    command = _read_command_from_run_dir(run_dir)
+    exit_code = command.get("exit_code")
     paths = {
         "run_dir": _record_path_for_manifest(ctx, run_dir),
         "stdout": _record_path_for_manifest(ctx, run_dir / "stdout.txt"),
         "stderr": _record_path_for_manifest(ctx, run_dir / "stderr.txt"),
         "command": _record_path_for_manifest(ctx, run_dir / "command.json"),
         "output_jsonl": _record_path_for_manifest(ctx, run_dir / "output.jsonl"),
+        "progress_jsonl": _record_path_for_manifest(ctx, run_dir / "progress.jsonl"),
         "diff": _record_path_for_manifest(ctx, run_dir / "diff.patch"),
     }
     append_run_record(ctx, {
@@ -104,6 +117,10 @@ def _append_failed_worker_run_record(
             "type": type(worker_error).__name__,
             "message": str(worker_error),
             "exit_code": exit_code,
+            "timed_out": command.get("timed_out"),
+            "timeout_seconds": command.get("timeout_seconds"),
+            "selected_model": command.get("selected_model"),
+            "selected_reasoning": command.get("selected_reasoning"),
             "retryable": False,
             "blind_retry_allowed": False,
             "failure_category": "worker_exception",
@@ -114,9 +131,15 @@ def _append_failed_worker_run_record(
             "stderr_exists": (run_dir / "stderr.txt").exists(),
             "command_exists": (run_dir / "command.json").exists(),
             "output_jsonl_exists": (run_dir / "output.jsonl").exists(),
+            "progress_jsonl_exists": (run_dir / "progress.jsonl").exists(),
             "diff_exists": (run_dir / "diff.patch").exists(),
         },
         "wrapper_gate_result": wrapper_gate_result,
+        "timed_out": command.get("timed_out"),
+        "timeout_seconds": command.get("timeout_seconds"),
+        "selected_model": command.get("selected_model"),
+        "selected_reasoning": command.get("selected_reasoning"),
+        "progress_path": paths["progress_jsonl"],
         "diff_validation": {
             "valid": None,
             "reason": "not_run_worker_failed_before_diff_validation",
@@ -462,6 +485,7 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
             "stderr": _record_path_for_manifest(ctx, run_dir / "stderr.txt"),
             "command": _record_path_for_manifest(ctx, run_dir / "command.json"),
             "output_jsonl": _record_path_for_manifest(ctx, run_dir / "output.jsonl"),
+            "progress_jsonl": _record_path_for_manifest(ctx, run_dir / "progress.jsonl"),
             "diff": _record_path_for_manifest(ctx, diff_path),
         },
         "diff_allowed": diff_result.allowed,
@@ -485,6 +509,11 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
         "wrapper_gate_result": wrapper_gate_result_path,
         "report_valid": report_valid,
         "report_error": report_error,
+        "timed_out": _read_command_from_run_dir(run_dir).get("timed_out"),
+        "timeout_seconds": _read_command_from_run_dir(run_dir).get("timeout_seconds"),
+        "selected_model": _read_command_from_run_dir(run_dir).get("selected_model"),
+        "selected_reasoning": _read_command_from_run_dir(run_dir).get("selected_reasoning"),
+        "progress_path": _record_path_for_manifest(ctx, run_dir / "progress.jsonl"),
     })
 
     if not diff_result.allowed:

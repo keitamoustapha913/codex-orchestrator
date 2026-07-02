@@ -17,6 +17,8 @@ The orchestrator provides these `CXOR_` paths and identifiers:
 - `CXOR_RUN_DIR`
 - `CXOR_PATCHLET_ID`
 - `CXOR_ATTEMPT_ID`
+- `CXOR_TIMEOUT_SECONDS`
+- `CXOR_SOFT_DEADLINE_SECONDS`
 - `CXOR_ALLOWED_PRODUCT_RUNTIME_FILE`
 - `CXOR_REPORT_PATH`
 - `CXOR_PROBE_ROOT`
@@ -27,6 +29,17 @@ artifacts must be written.
 
 Do not write report or probe artifacts into the worktree if
 `CXOR_EXECUTION_ROOT` differs from `CXOR_ARTIFACT_ROOT`.
+
+## Wall-clock Budget
+
+You have a hard timeout of 600 seconds by default. The exact timeout is exposed
+as `CXOR_TIMEOUT_SECONDS`, and the soft deadline is exposed as
+`CXOR_SOFT_DEADLINE_SECONDS`.
+
+Aim to finish by 540 seconds for the default budget. If you cannot complete,
+write `worker_stage/05_final_report.md` with an explicit BLOCKED or FAILED
+status and preserve what you learned before the timeout. Do not keep
+investigating indefinitely. Do not use blind retry.
 
 ## Allowed Edit Scope
 

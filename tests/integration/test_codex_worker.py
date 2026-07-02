@@ -198,6 +198,244 @@ time.sleep(5)
     assert "timed out after 1 seconds" in (run_dir / "stderr.txt").read_text(encoding="utf-8")
 
 
+def test_codex_worker_default_patchlet_timeout_is_ten_minutes(git_repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    ctx, patchlet = setup_patchlet_ctx(git_repo)
+    fake_codex = tmp_path / "codex"
+    write_fake_codex(
+        fake_codex,
+        """#!/usr/bin/env python3
+import json
+import os
+from pathlib import Path
+Path(os.environ["CXOR_REPORT_PATH"]).parent.mkdir(parents=True, exist_ok=True)
+Path(os.environ["CXOR_REPORT_PATH"]).write_text(json.dumps({
+    "schema_version": "1.0", "kind": "patchlet_report", "patchlet_id": "P0001",
+    "status": "VERIFIED_NO_CHANGE_NEEDED", "changed_product_runtime_file": None,
+    "changed_artifact_files": [".artifacts/probes/P0001/probe.py"],
+    "probe_commands": ["python .artifacts/probes/P0001/probe.py"],
+    "deterministic_run_counts": {"baseline": "5/5", "proof_of_fix": "5/5", "negative_controls": "5/5"},
+    "root_cause_classification": {
+        "observed_failure": "no change needed", "immediate_cause": "no change needed",
+        "why_immediate_cause_happened": "already ok", "deeper_owner_boundary": "app.py",
+        "producer_transformer_consumer_boundary": "producer app.py -> consumer probe",
+        "not_downstream_of_unprobed_state_proof": "direct probe",
+        "negative_control_proof": "negative control"
+    },
+    "before_after_state": [{"before": "ok", "after": "ok"}],
+    "row_ledger": [], "trace_ledger": [], "cleanup_proof": "cleanup ok",
+    "acceptance_criteria_result": "pass"
+}), encoding="utf-8")
+""",
+    )
+    monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ.get('PATH', '')}")
+    monkeypatch.delenv("CODEX_TIMEOUT_SECONDS", raising=False)
+    monkeypatch.delenv("CODEX_PATCHLET_TIMEOUT_SECONDS", raising=False)
+
+    run_dir = ctx.paths.runs_dir / "default_timeout"
+    CodexExecWorker().run_patchlet(ctx, patchlet, run_dir=run_dir)
+
+    command = json.loads((run_dir / "command.json").read_text(encoding="utf-8"))
+    assert command["timeout_seconds"] == 600
+
+
+def test_codex_worker_timeout_env_override_is_respected(git_repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    ctx, patchlet = setup_patchlet_ctx(git_repo)
+    fake_codex = tmp_path / "codex"
+    write_fake_codex(fake_codex, "#!/usr/bin/env python3\nprint('ok')\n")
+    monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ.get('PATH', '')}")
+    monkeypatch.setenv("CODEX_TIMEOUT_SECONDS", "37")
+    monkeypatch.delenv("CODEX_PATCHLET_TIMEOUT_SECONDS", raising=False)
+
+    run_dir = ctx.paths.runs_dir / "timeout_env"
+    with pytest.raises(WorkerExecutionError):
+        CodexExecWorker().run_patchlet(ctx, patchlet, run_dir=run_dir)
+
+    command = json.loads((run_dir / "command.json").read_text(encoding="utf-8"))
+    assert command["timeout_seconds"] == 37
+
+
+def test_codex_worker_patchlet_timeout_env_takes_precedence_if_supported(
+    git_repo: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    ctx, patchlet = setup_patchlet_ctx(git_repo)
+    fake_codex = tmp_path / "codex"
+    write_fake_codex(fake_codex, "#!/usr/bin/env python3\nprint('ok')\n")
+    monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ.get('PATH', '')}")
+    monkeypatch.setenv("CODEX_TIMEOUT_SECONDS", "37")
+    monkeypatch.setenv("CODEX_PATCHLET_TIMEOUT_SECONDS", "41")
+
+    run_dir = ctx.paths.runs_dir / "patchlet_timeout_env"
+    with pytest.raises(WorkerExecutionError):
+        CodexExecWorker().run_patchlet(ctx, patchlet, run_dir=run_dir)
+
+    command = json.loads((run_dir / "command.json").read_text(encoding="utf-8"))
+    assert command["timeout_seconds"] == 41
+
+
+def test_codex_worker_timeout_is_recorded_in_command_json(git_repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    ctx, patchlet = setup_patchlet_ctx(git_repo)
+    fake_codex = tmp_path / "codex"
+    write_fake_codex(fake_codex, "#!/usr/bin/env python3\nprint('ok')\n")
+    monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ.get('PATH', '')}")
+    monkeypatch.setenv("CODEX_PATCHLET_TIMEOUT_SECONDS", "9")
+
+    run_dir = ctx.paths.runs_dir / "timeout_command_json"
+    with pytest.raises(WorkerExecutionError):
+        CodexExecWorker().run_patchlet(ctx, patchlet, run_dir=run_dir)
+
+    command = json.loads((run_dir / "command.json").read_text(encoding="utf-8"))
+    assert command["timeout_seconds"] == 9
+    assert command["timed_out"] is False
+
+
+def test_codex_worker_timeout_failure_records_exit_code_124_and_timed_out_true(
+    git_repo: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    ctx, patchlet = setup_patchlet_ctx(git_repo)
+    fake_codex = tmp_path / "codex"
+    write_fake_codex(
+        fake_codex,
+        """#!/usr/bin/env python3
+import time
+time.sleep(5)
+""",
+    )
+    monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ.get('PATH', '')}")
+    monkeypatch.setenv("CODEX_PATCHLET_TIMEOUT_SECONDS", "1")
+
+    run_dir = ctx.paths.runs_dir / "timeout_124"
+    with pytest.raises(WorkerExecutionError, match="exit_code=124"):
+        CodexExecWorker().run_patchlet(ctx, patchlet, run_dir=run_dir)
+
+    command = json.loads((run_dir / "command.json").read_text(encoding="utf-8"))
+    assert command["exit_code"] == 124
+    assert command["timed_out"] is True
+    assert command["timeout_seconds"] == 1
+
+
+def test_patchlet_codex_worker_default_model_is_gpt_5_4_mini(git_repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    ctx, patchlet = setup_patchlet_ctx(git_repo)
+    fake_codex = tmp_path / "codex"
+    write_fake_codex(fake_codex, "#!/usr/bin/env python3\nprint('ok')\n")
+    monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ.get('PATH', '')}")
+    monkeypatch.delenv("CODEX_MODEL", raising=False)
+    monkeypatch.delenv("CODEX_PATCHLET_MODEL", raising=False)
+
+    run_dir = ctx.paths.runs_dir / "default_model"
+    with pytest.raises(WorkerExecutionError):
+        CodexExecWorker().run_patchlet(ctx, patchlet, run_dir=run_dir)
+
+    command = json.loads((run_dir / "command.json").read_text(encoding="utf-8"))
+    assert command["selected_model"] == "gpt-5.4-mini"
+    assert command["args"][command["args"].index("--model") + 1] == "gpt-5.4-mini"
+
+
+def test_patchlet_codex_worker_default_reasoning_is_medium(git_repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    ctx, patchlet = setup_patchlet_ctx(git_repo)
+    fake_codex = tmp_path / "codex"
+    write_fake_codex(fake_codex, "#!/usr/bin/env python3\nprint('ok')\n")
+    monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ.get('PATH', '')}")
+    monkeypatch.delenv("CODEX_REASONING", raising=False)
+    monkeypatch.delenv("CODEX_PATCHLET_REASONING", raising=False)
+
+    run_dir = ctx.paths.runs_dir / "default_reasoning"
+    with pytest.raises(WorkerExecutionError):
+        CodexExecWorker().run_patchlet(ctx, patchlet, run_dir=run_dir)
+
+    command = json.loads((run_dir / "command.json").read_text(encoding="utf-8"))
+    assert command["selected_reasoning"] == "medium"
+    assert "model_reasoning_effort=medium" in command["args"]
+
+
+def test_patchlet_codex_worker_respects_codex_model_env(git_repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    ctx, patchlet = setup_patchlet_ctx(git_repo)
+    fake_codex = tmp_path / "codex"
+    write_fake_codex(fake_codex, "#!/usr/bin/env python3\nprint('ok')\n")
+    monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ.get('PATH', '')}")
+    monkeypatch.setenv("CODEX_MODEL", "global-model")
+    monkeypatch.delenv("CODEX_PATCHLET_MODEL", raising=False)
+
+    run_dir = ctx.paths.runs_dir / "global_model"
+    with pytest.raises(WorkerExecutionError):
+        CodexExecWorker().run_patchlet(ctx, patchlet, run_dir=run_dir)
+
+    command = json.loads((run_dir / "command.json").read_text(encoding="utf-8"))
+    assert command["selected_model"] == "global-model"
+
+
+def test_patchlet_codex_worker_respects_codex_reasoning_env(git_repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    ctx, patchlet = setup_patchlet_ctx(git_repo)
+    fake_codex = tmp_path / "codex"
+    write_fake_codex(fake_codex, "#!/usr/bin/env python3\nprint('ok')\n")
+    monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ.get('PATH', '')}")
+    monkeypatch.setenv("CODEX_REASONING", "high")
+    monkeypatch.delenv("CODEX_PATCHLET_REASONING", raising=False)
+
+    run_dir = ctx.paths.runs_dir / "global_reasoning"
+    with pytest.raises(WorkerExecutionError):
+        CodexExecWorker().run_patchlet(ctx, patchlet, run_dir=run_dir)
+
+    command = json.loads((run_dir / "command.json").read_text(encoding="utf-8"))
+    assert command["selected_reasoning"] == "high"
+
+
+def test_patchlet_specific_model_env_overrides_global_codex_model(git_repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    ctx, patchlet = setup_patchlet_ctx(git_repo)
+    fake_codex = tmp_path / "codex"
+    write_fake_codex(fake_codex, "#!/usr/bin/env python3\nprint('ok')\n")
+    monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ.get('PATH', '')}")
+    monkeypatch.setenv("CODEX_MODEL", "global-model")
+    monkeypatch.setenv("CODEX_PATCHLET_MODEL", "patchlet-model")
+
+    run_dir = ctx.paths.runs_dir / "patchlet_model"
+    with pytest.raises(WorkerExecutionError):
+        CodexExecWorker().run_patchlet(ctx, patchlet, run_dir=run_dir)
+
+    command = json.loads((run_dir / "command.json").read_text(encoding="utf-8"))
+    assert command["selected_model"] == "patchlet-model"
+
+
+def test_patchlet_specific_reasoning_env_overrides_global_codex_reasoning(
+    git_repo: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    ctx, patchlet = setup_patchlet_ctx(git_repo)
+    fake_codex = tmp_path / "codex"
+    write_fake_codex(fake_codex, "#!/usr/bin/env python3\nprint('ok')\n")
+    monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ.get('PATH', '')}")
+    monkeypatch.setenv("CODEX_REASONING", "low")
+    monkeypatch.setenv("CODEX_PATCHLET_REASONING", "high")
+
+    run_dir = ctx.paths.runs_dir / "patchlet_reasoning"
+    with pytest.raises(WorkerExecutionError):
+        CodexExecWorker().run_patchlet(ctx, patchlet, run_dir=run_dir)
+
+    command = json.loads((run_dir / "command.json").read_text(encoding="utf-8"))
+    assert command["selected_reasoning"] == "high"
+
+
+def test_command_json_records_selected_model_and_reasoning(git_repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    ctx, patchlet = setup_patchlet_ctx(git_repo)
+    fake_codex = tmp_path / "codex"
+    write_fake_codex(fake_codex, "#!/usr/bin/env python3\nprint('ok')\n")
+    monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ.get('PATH', '')}")
+    monkeypatch.setenv("CODEX_PATCHLET_MODEL", "patchlet-model")
+    monkeypatch.setenv("CODEX_PATCHLET_REASONING", "xhigh")
+
+    run_dir = ctx.paths.runs_dir / "record_model_reasoning"
+    with pytest.raises(WorkerExecutionError):
+        CodexExecWorker().run_patchlet(ctx, patchlet, run_dir=run_dir)
+
+    command = json.loads((run_dir / "command.json").read_text(encoding="utf-8"))
+    assert command["selected_model"] == "patchlet-model"
+    assert command["selected_reasoning"] == "xhigh"
+
+
 def test_codex_worker_does_not_write_into_orchestrator_source_repo(git_repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     ctx, patchlet = setup_patchlet_ctx(git_repo)
     fake_codex = tmp_path / "codex"

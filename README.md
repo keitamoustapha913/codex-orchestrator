@@ -124,6 +124,25 @@ Operator rules:
 - on safe failure, expect a `WORKER_FAILED` run-manifest entry plus preserved `stdout.txt`, `stderr.txt`, `command.json`, and `output.jsonl`;
 - blind retry is not allowed.
 
+Patchlet real-Codex execution uses a bounded 10 minutes / 600 seconds by
+default. `CODEX_TIMEOUT_SECONDS` overrides the global timeout, and
+`CODEX_PATCHLET_TIMEOUT_SECONDS` overrides the patchlet timeout specifically.
+The Worker Capsule and generated subprompt include the hard timeout plus a soft
+deadline of `timeout - 60` seconds. The subprocess receives
+`CXOR_TIMEOUT_SECONDS` and `CXOR_SOFT_DEADLINE_SECONDS` and is instructed to
+write `worker_stage/05_final_report.md` with a BLOCKED or FAILED status before
+the hard timeout if it cannot complete.
+
+Real-Codex liveness is written to
+`.codex-orchestrator/runs/<attempt>/progress.jsonl`. This compact progress is
+liveness, not success; timeout safe-failure is containment evidence, not task
+success and not `DONE`.
+
+Patchlet Codex defaults to `gpt-5.4-mini` with `CODEX_REASONING=medium`.
+Non-patchlet/orchestrator Codex profiles default to `gpt-5.5` with
+`CODEX_REASONING=medium`. `CODEX_MODEL`/`CODEX_REASONING` override both when
+specific patchlet or orchestrator variables are absent.
+
 Operator prompt contract:
 
 - `src/codex_orchestrator/prompt_templates/real_codex_patchlet_contract.md`

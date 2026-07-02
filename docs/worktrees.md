@@ -36,6 +36,19 @@ not guaranteed; it depends on real Codex output quality and prompt-following.
 
 If the worker fails before diff or report validation, inspect `run_manifest.json` for a `WORKER_FAILED` entry and then inspect the preserved `stdout.txt`, `stderr.txt`, `command.json`, and `output.jsonl` files for that attempt. Blind retry is not allowed.
 
+Real-Codex patchlet attempts default to a 10 minutes / 600 seconds timeout.
+`CODEX_TIMEOUT_SECONDS` overrides the global timeout, and
+`CODEX_PATCHLET_TIMEOUT_SECONDS` overrides patchlet execution. The generated
+prompt and Worker Capsule include the hard timeout and soft deadline, and
+Codex is told to stop before timeout by writing `worker_stage/05_final_report.md`
+with BLOCKED or FAILED status if needed.
+
+Attempt-local `progress.jsonl` records compact liveness only, not success.
+Timeout safe-failure means the worktree attempt was contained and evidence was
+preserved; it is not task success and not `DONE`. Patchlet Codex defaults to
+`gpt-5.4-mini` with reasoning `medium`, while non-patchlet/orchestrator Codex
+profiles default to `gpt-5.5` with reasoning `medium`.
+
 Use `src/codex_orchestrator/prompt_templates/real_codex_patchlet_contract.md`
 when you need an operator-facing contract for what the real Codex subprocess
 must write.

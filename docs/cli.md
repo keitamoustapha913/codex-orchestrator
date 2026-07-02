@@ -105,6 +105,22 @@ Operator rules:
 - on safe failure, expect a `WORKER_FAILED` run-manifest entry plus preserved `stdout.txt`, `stderr.txt`, `command.json`, and `output.jsonl`;
 - treat contained failure evidence as acceptable smoke output when real Codex does not reach `DONE`.
 
+Patchlet real-Codex runs default to a 10 minutes / 600 seconds timeout.
+`CODEX_TIMEOUT_SECONDS` overrides the global timeout, while
+`CODEX_PATCHLET_TIMEOUT_SECONDS` wins for patchlet execution. The generated
+Worker Capsule and subprompt tell Codex the hard timeout and soft deadline
+(`timeout - 60` seconds) and require a durable final report before timeout if
+the task cannot complete.
+
+`progress.jsonl` under the attempt run directory records compact real-Codex
+liveness signals. It is not success evidence. A timeout safe-failure means the
+orchestrator contained the failed attempt and preserved artifacts; it is not
+task success and it is not `DONE`.
+
+Patchlet Codex defaults to `gpt-5.4-mini` and reasoning `medium`.
+Non-patchlet/orchestrator Codex profiles default to `gpt-5.5` and reasoning
+`medium`.
+
 Prompt contract artifact:
 
 - `src/codex_orchestrator/prompt_templates/real_codex_patchlet_contract.md`

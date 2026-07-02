@@ -4,6 +4,7 @@ import os
 import re
 from pathlib import Path, PurePosixPath
 
+from codex_orchestrator.codex_execution_policy import resolve_patchlet_timeout_seconds, soft_deadline_seconds
 from codex_orchestrator.jsonio import read_json, write_json
 from codex_orchestrator.state import load_state, transition
 from codex_orchestrator.target_repo import TargetRepoContext
@@ -53,6 +54,8 @@ def compile_patchlets(ctx: TargetRepoContext) -> dict:
     invariants = _load_invariants(ctx)
     existing_patchlets = _existing_patchlets(ctx)
     real_codex_contract = _real_codex_contract_text()
+    timeout_seconds = resolve_patchlet_timeout_seconds(os.environ)
+    soft_deadline = soft_deadline_seconds(timeout_seconds)
     patchlets: list[dict] = []
     transaction_groups: list[dict] = []
 
@@ -126,6 +129,12 @@ def compile_patchlets(ctx: TargetRepoContext) -> dict:
             f"Write `.codex-orchestrator/reports/{patchlet_id}.json` with status COMPLETE, "
             "VERIFIED_NO_CHANGE_NEEDED, BLOCKED_WITH_EVIDENCE, or FAILED_WITH_EVIDENCE, "
             "and include valid `probe_artifact_refs`.\n"
+            "\n## Wall-clock budget\n\n"
+            f"You have a hard timeout of {timeout_seconds} seconds. "
+            f"Aim to finish by {soft_deadline} seconds. "
+            "If you cannot complete, write `worker_stage/05_final_report.md` with an explicit "
+            "BLOCKED or FAILED status and preserve what you learned. "
+            "Do not keep investigating indefinitely. Do not use blind retry.\n"
             + real_codex_contract,
             encoding="utf-8",
         )

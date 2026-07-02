@@ -3,8 +3,11 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import sys
 from pathlib import Path
 
+from codex_orchestrator.codex_execution_policy import resolve_patchlet_timeout_seconds, soft_deadline_seconds
+from codex_orchestrator.codex_model_profile import resolve_codex_model_profile
 from codex_orchestrator.command_runner import CommandRunner
 from codex_orchestrator.errors import WorkerExecutionError, WorkerPreconditionError
 from codex_orchestrator.git_guard import repo_head
@@ -17,9 +20,11 @@ from .base import Worker, WorkerResult, ensure_run_context
 class CodexExecWorker(Worker):
     def __init__(self, codex_binary: str | None = None) -> None:
         self.codex_binary = codex_binary or os.environ.get("CXOR_CODEX_BINARY", "codex")
-        self.codex_model = os.environ.get("CODEX_MODEL", "gpt-5.4-mini")
-        self.codex_reasoning = os.environ.get("CODEX_REASONING", "medium")
-        self.timeout_seconds = int(os.environ.get("CODEX_TIMEOUT_SECONDS", "120"))
+        self.model_profile = resolve_codex_model_profile("patchlet", os.environ)
+        self.codex_model = self.model_profile.model
+        self.codex_reasoning = self.model_profile.reasoning
+        self.timeout_seconds = resolve_patchlet_timeout_seconds(os.environ)
+        self.soft_deadline_seconds = soft_deadline_seconds(self.timeout_seconds)
 
     def run_patchlet(
         self,
@@ -43,6 +48,7 @@ class CodexExecWorker(Worker):
         preflight_stage_path = run_dir / "worker_stage" / "00_preflight.md"
         final_report_stage_path = run_dir / "worker_stage" / "05_final_report.md"
         attempt_prompt_path = run_dir / "codex_task_prompt.md"
+        progress_path = run_dir / "progress.jsonl"
         attempt_prompt_text = (
             "Before doing any task work, read:\n"
             f"- {task_contract_path}\n"
@@ -52,6 +58,11 @@ class CodexExecWorker(Worker):
             f"- {preflight_stage_path}\n\n"
             "Before final response, write:\n"
             f"- {final_report_stage_path}\n\n"
+            f"You have a hard timeout of {self.timeout_seconds} seconds. "
+            f"Aim to finish by {self.soft_deadline_seconds} seconds. "
+            "If you cannot complete, write worker_stage/05_final_report.md with an explicit "
+            "BLOCKED or FAILED status and preserve what you learned. "
+            "Do not keep investigating indefinitely. Do not use blind retry.\n\n"
             "Do not write gate results. The orchestrator writes gates.\n\n"
             "Use those files as the attempt-local contract. Then continue with the patchlet instructions below.\n\n"
             + prompt_path.read_text(encoding="utf-8")
@@ -86,6 +97,48 @@ class CodexExecWorker(Worker):
         patchlet_id = patchlet["patchlet_id"]
         report_path = run_ctx.reports_dir / f"{patchlet_id}.json"
         probe_root = run_ctx.probe_dir / patchlet_id
+
+        def write_progress_event(payload: dict) -> None:
+            progress_path.parent.mkdir(parents=True, exist_ok=True)
+            with progress_path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(payload, sort_keys=True) + "\n")
+
+        def record_progress(raw_line: str, elapsed_seconds: float) -> None:
+            try:
+                event = json.loads(raw_line)
+            except json.JSONDecodeError:
+                return
+            if not isinstance(event, dict):
+                return
+            signal = event.get("type") or event.get("event") or event.get("kind")
+            if not isinstance(signal, str) or not signal:
+                return
+            payload = {
+                "schema_version": "1.0",
+                "kind": "codex_progress",
+                "patchlet_id": patchlet_id,
+                "attempt_id": run_dir.name,
+                "elapsed_seconds": round(elapsed_seconds, 3),
+                "signal": signal,
+                "source": "stdout_jsonl",
+            }
+            summary = event.get("summary")
+            if isinstance(summary, str) and summary:
+                payload["summary"] = summary[:200]
+            write_progress_event(payload)
+            if os.environ.get("CODEX_PROGRESS_STDERR") == "1":
+                summary_text = f": {payload['summary']}" if "summary" in payload else f": {signal}"
+                print(f"[{run_dir.name}] codex alive{summary_text}", file=sys.stderr)
+
+        write_progress_event({
+            "schema_version": "1.0",
+            "kind": "codex_progress",
+            "patchlet_id": patchlet_id,
+            "attempt_id": run_dir.name,
+            "elapsed_seconds": 0,
+            "signal": "process.started",
+            "source": "runner",
+        })
         result = CommandRunner().run(
             args,
             cwd=run_ctx.execution_root,
@@ -103,12 +156,15 @@ class CodexExecWorker(Worker):
                 "CXOR_RUN_DIR": str(run_dir),
                 "CXOR_PATCHLET_ID": patchlet_id,
                 "CXOR_ATTEMPT_ID": run_dir.name,
+                "CXOR_TIMEOUT_SECONDS": str(self.timeout_seconds),
+                "CXOR_SOFT_DEADLINE_SECONDS": str(self.soft_deadline_seconds),
                 "CXOR_ALLOWED_PRODUCT_RUNTIME_FILE": patchlet.get("allowed_product_runtime_file", ""),
                 "CXOR_REPORT_PATH": str(report_path),
                 "CXOR_PROBE_ROOT": str(probe_root),
             },
             stdout_path=run_dir / "stdout.txt",
             stderr_path=run_dir / "stderr.txt",
+            stdout_line_callback=record_progress,
         )
         repo_sha_after = repo_head(run_ctx.execution_root)
         (run_dir / "command.json").write_text(json.dumps({
@@ -128,10 +184,14 @@ class CodexExecWorker(Worker):
             "attempt_id": run_dir.name,
             "report_path": str(report_path),
             "probe_root": str(probe_root),
+            "progress_path": str(progress_path),
             "repo_sha_before": repo_sha_before,
             "repo_sha_after": repo_sha_after,
             "timed_out": result.timed_out,
             "timeout_seconds": result.timeout_seconds,
+            "soft_deadline_seconds": self.soft_deadline_seconds,
+            "selected_model": self.codex_model,
+            "selected_reasoning": self.codex_reasoning,
         }, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         (run_dir / "output.jsonl").write_text(json.dumps({
             "args": args,
@@ -154,10 +214,14 @@ class CodexExecWorker(Worker):
             "attempt_id": run_dir.name,
             "report_path": str(report_path),
             "probe_root": str(probe_root),
+            "progress_path": str(progress_path),
             "repo_sha_before": repo_sha_before,
             "repo_sha_after": repo_sha_after,
             "timed_out": result.timed_out,
             "timeout_seconds": result.timeout_seconds,
+            "soft_deadline_seconds": self.soft_deadline_seconds,
+            "selected_model": self.codex_model,
+            "selected_reasoning": self.codex_reasoning,
         }) + "\n", encoding="utf-8")
         if result.exit_code != 0:
             timeout_note = f" timed out after {result.timeout_seconds}s;" if result.timed_out else ""

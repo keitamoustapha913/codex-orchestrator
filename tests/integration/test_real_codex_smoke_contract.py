@@ -830,6 +830,57 @@ def test_real_codex_prompt_mentions_wrapper_gate_is_orchestrator_owned(
     assert "The orchestrator writes gates." in prompt_text
 
 
+def test_real_codex_prompt_mentions_ten_minute_budget(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    fake_bin_dir = tmp_path / "fake-bin"
+    fake_bin_dir.mkdir()
+    fake_codex = fake_bin_dir / "codex"
+    _write_contract_sensitive_fake_codex(fake_codex)
+    monkeypatch.setenv("PATH", f"{fake_bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+
+    ctx = resolve_target_repo(repo=git_repo)
+    result = run_real_codex_auto_worktree_smoke(
+        ctx,
+        master=git_repo / "master_prompt.md",
+        allow_real_codex=True,
+        codex_binary="codex",
+        max_iterations=25,
+    )
+
+    prompt_text = Path(result["prompt_artifact_path"]).read_text(encoding="utf-8")
+    assert "hard timeout of 600 seconds" in prompt_text
+    assert "Aim to finish by 540 seconds" in prompt_text
+
+
+def test_real_codex_prompt_mentions_write_final_report_before_timeout(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    fake_bin_dir = tmp_path / "fake-bin"
+    fake_bin_dir.mkdir()
+    fake_codex = fake_bin_dir / "codex"
+    _write_contract_sensitive_fake_codex(fake_codex)
+    monkeypatch.setenv("PATH", f"{fake_bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+
+    ctx = resolve_target_repo(repo=git_repo)
+    result = run_real_codex_auto_worktree_smoke(
+        ctx,
+        master=git_repo / "master_prompt.md",
+        allow_real_codex=True,
+        codex_binary="codex",
+        max_iterations=25,
+    )
+
+    prompt_text = Path(result["prompt_artifact_path"]).read_text(encoding="utf-8")
+    assert "worker_stage/05_final_report.md" in prompt_text
+    assert "BLOCKED or FAILED status" in prompt_text
+    assert "Do not keep investigating indefinitely" in prompt_text
+
+
 def test_contract_sensitive_fake_codex_reads_task_contract_and_reaches_done(
     git_repo: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -930,6 +981,39 @@ def test_real_codex_smoke_result_reports_worker_capsule_paths(
     assert Path(result["worker_memory_dir"]).is_dir()
     assert Path(result["worker_stage_dir"]).is_dir()
     assert Path(result["wrapper_gate_result_path"]).exists()
+
+
+def test_real_codex_smoke_result_reports_timeout_progress_and_model_metadata(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    fake_bin_dir = tmp_path / "fake-bin"
+    fake_bin_dir.mkdir()
+    fake_codex = fake_bin_dir / "codex"
+    _write_contract_sensitive_fake_codex(fake_codex)
+    monkeypatch.setenv("PATH", f"{fake_bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+    monkeypatch.delenv("CODEX_TIMEOUT_SECONDS", raising=False)
+    monkeypatch.delenv("CODEX_PATCHLET_TIMEOUT_SECONDS", raising=False)
+    monkeypatch.delenv("CODEX_MODEL", raising=False)
+    monkeypatch.delenv("CODEX_PATCHLET_MODEL", raising=False)
+
+    ctx = resolve_target_repo(repo=git_repo)
+    result = run_real_codex_auto_worktree_smoke(
+        ctx,
+        master=git_repo / "master_prompt.md",
+        allow_real_codex=True,
+        codex_binary="codex",
+        max_iterations=25,
+    )
+
+    assert result["timeout_seconds"] == 600
+    assert result["timed_out"] is False
+    assert result["progress_path"].endswith("progress.jsonl")
+    assert result["selected_model"] == "gpt-5.4-mini"
+    assert result["selected_reasoning"] == "medium"
+    assert result["run_manifest_entry"]["timeout_seconds"] == 600
+    assert result["run_manifest_entry"]["selected_model"] == "gpt-5.4-mini"
 
 
 def test_real_codex_auto_worktree_smoke_result_reports_prompt_artifact_path(

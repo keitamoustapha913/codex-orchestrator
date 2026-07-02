@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import os
+import selectors
 import shutil
 import subprocess
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Mapping
+from typing import Callable, Mapping
 
 from .atomic_io import atomic_write_text
 
@@ -42,39 +43,67 @@ class CommandRunner:
         stdout_path: Path | None = None,
         stderr_path: Path | None = None,
         check: bool = False,
+        stdout_line_callback: Callable[[str, float], None] | None = None,
     ) -> CommandResult:
         started = time.time()
         proc_env = os.environ.copy()
         if env:
             proc_env.update(env)
         timed_out = False
+        exit_code = 0
+        stdout = ""
+        stderr = ""
         try:
-            proc = subprocess.run(
+            proc = subprocess.Popen(
                 args,
                 cwd=str(cwd),
                 env=proc_env,
                 text=True,
-                input=input_text,
+                stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                timeout=timeout_seconds,
-                check=False,
+                bufsize=1,
             )
-            exit_code = proc.returncode
-            stdout = proc.stdout
-            stderr = proc.stderr
-        except subprocess.TimeoutExpired as exc:
-            timed_out = True
-            exit_code = 124
-            stdout = exc.stdout or ""
-            stderr = exc.stderr or ""
-            if isinstance(stdout, bytes):
-                stdout = stdout.decode(errors="replace")
-            if isinstance(stderr, bytes):
-                stderr = stderr.decode(errors="replace")
-            stderr = (
-                f"{stderr}\n" if stderr else ""
-            ) + f"command timed out after {timeout_seconds} seconds"
+            if proc.stdin is not None:
+                if input_text:
+                    proc.stdin.write(input_text)
+                proc.stdin.close()
+
+            stdout_chunks: list[str] = []
+            stderr_chunks: list[str] = []
+            selector = selectors.DefaultSelector()
+            if proc.stdout is not None:
+                selector.register(proc.stdout, selectors.EVENT_READ, "stdout")
+            if proc.stderr is not None:
+                selector.register(proc.stderr, selectors.EVENT_READ, "stderr")
+
+            while selector.get_map():
+                if timeout_seconds is not None and time.time() - started >= timeout_seconds and not timed_out:
+                    timed_out = True
+                    proc.kill()
+                for key, _ in selector.select(timeout=0.1):
+                    line = key.fileobj.readline()
+                    if line == "":
+                        selector.unregister(key.fileobj)
+                        key.fileobj.close()
+                        continue
+                    if key.data == "stdout":
+                        stdout_chunks.append(line)
+                        if stdout_line_callback is not None:
+                            stdout_line_callback(line, time.time() - started)
+                    else:
+                        stderr_chunks.append(line)
+                if proc.poll() is not None and not selector.get_map():
+                    break
+
+            proc.wait()
+            exit_code = 124 if timed_out else proc.returncode
+            stdout = "".join(stdout_chunks)
+            stderr = "".join(stderr_chunks)
+            if timed_out:
+                stderr = (
+                    f"{stderr}\n" if stderr else ""
+                ) + f"command timed out after {timeout_seconds} seconds"
         except FileNotFoundError as exc:
             exit_code = 127
             stdout = ""
