@@ -13,6 +13,12 @@ can set `CODEX_TIMEOUT_SECONDS`, and patchlet-specific runs can set
 `CODEX_PATCHLET_TIMEOUT_SECONDS` to take precedence. The patchlet receives
 `CXOR_TIMEOUT_SECONDS` and `CXOR_SOFT_DEADLINE_SECONDS`.
 
+Invalid timeout env values are structured errors before Codex launches.
+`CODEX_TIMEOUT_SECONDS`, `CODEX_PATCHLET_TIMEOUT_SECONDS`, and
+`CODEX_PROGRESS_INTERVAL_SECONDS` must be positive integer seconds. Invalid
+values report the env var name, the bad value, and `expected positive integer
+seconds`.
+
 That smoke exercises:
 
 ```bash
@@ -59,6 +65,17 @@ Safe failure should preserve:
 `progress.jsonl` is a compact liveness stream, not success evidence. Timeout
 safe-failure means containment and preserved evidence; it is not task success
 and does not mean `DONE`.
+
+When `command.json` or the run manifest proves `timed_out=true` with
+`exit_code=124`, `diagnose-real-codex` reports
+`orchestrator_subprocess_timeout`. This category means the orchestrator
+terminated the Codex subprocess at the configured timeout. It is not task
+success, and it links `progress.jsonl` if Codex emitted liveness before
+timeout.
+
+The explicit real-Codex smoke is an operator-run command. It is not part of the
+default test suite and should only be run when the environment is safe for an
+installed Codex invocation.
 
 Patchlet Codex defaults to `gpt-5.4-mini` with reasoning `medium`.
 Non-patchlet/orchestrator Codex profiles default to `gpt-5.5` with reasoning

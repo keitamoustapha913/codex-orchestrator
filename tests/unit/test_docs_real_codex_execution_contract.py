@@ -55,3 +55,33 @@ def test_docs_explain_timeout_safe_failure_is_not_done():
 
     assert "timeout safe-failure" in text
     assert "not task success" in text
+
+
+def test_docs_explain_invalid_timeout_env_values_are_structured_errors():
+    text = _docs_text().lower()
+
+    assert "invalid timeout" in text
+    assert "structured" in text
+    assert "expected positive integer seconds" in text
+
+
+def test_docs_explain_orchestrator_subprocess_timeout_diagnosis():
+    text = _docs_text()
+
+    assert "orchestrator_subprocess_timeout" in text
+    assert "diagnose-real-codex" in text
+
+
+def test_docs_explain_timeout_diagnosis_is_not_task_success():
+    text = _docs_text().lower()
+
+    assert "orchestrator_subprocess_timeout" in text
+    assert "not task success" in text
+
+
+def test_docs_explain_explicit_real_codex_smoke_is_operator_run():
+    text = _docs_text().lower()
+
+    assert "explicit real-codex smoke" in text
+    assert "operator-run" in text
+    assert "not part of the default test suite" in text

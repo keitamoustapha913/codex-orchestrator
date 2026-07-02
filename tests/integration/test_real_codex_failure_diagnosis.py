@@ -27,6 +27,8 @@ def _seed_failed_real_codex_attempt(
     stdout_text: str = "",
     stderr_text: str = "codex exited with code 1\n",
     output_events: list[dict] | None = None,
+    command_payload: dict | None = None,
+    progress_events: list[dict] | None = None,
 ) -> str:
     run_dir = ctx.paths.runs_dir / "P0001_attempt1"
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -41,21 +43,19 @@ def _seed_failed_real_codex_attempt(
         "".join(json.dumps(event) + "\n" for event in output_payload),
         encoding="utf-8",
     )
-    (run_dir / "command.json").write_text(
-        json.dumps(
-            {
-                "args": ["codex", "exec", "--json", "prompt.md"],
-                "cwd": str(ctx.root),
-                "exit_code": 1,
-                "patchlet_id": "P0001",
-                "attempt_id": "P0001_attempt1",
-            },
-            indent=2,
-            sort_keys=True,
+    command = command_payload or {
+        "args": ["codex", "exec", "--json", "prompt.md"],
+        "cwd": str(ctx.root),
+        "exit_code": 1,
+        "patchlet_id": "P0001",
+        "attempt_id": "P0001_attempt1",
+    }
+    (run_dir / "command.json").write_text(json.dumps(command, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    if progress_events is not None:
+        (run_dir / "progress.jsonl").write_text(
+            "".join(json.dumps(event) + "\n" for event in progress_events),
+            encoding="utf-8",
         )
-        + "\n",
-        encoding="utf-8",
-    )
     (run_dir / "worker_capsule.json").write_text(
         json.dumps(
             {
@@ -160,6 +160,7 @@ def _seed_failed_real_codex_attempt(
                 "stderr": ".codex-orchestrator/runs/P0001_attempt1/stderr.txt",
                 "command": ".codex-orchestrator/runs/P0001_attempt1/command.json",
                 "output_jsonl": ".codex-orchestrator/runs/P0001_attempt1/output.jsonl",
+                "progress_jsonl": ".codex-orchestrator/runs/P0001_attempt1/progress.jsonl",
                 "diff": ".codex-orchestrator/runs/P0001_attempt1/diff.patch",
             },
             "worktree": {
@@ -172,7 +173,9 @@ def _seed_failed_real_codex_attempt(
             "worker_failure": {
                 "type": "WorkerExecutionError",
                 "message": "codex worker failed with exit_code=1",
-                "exit_code": 1,
+                "exit_code": command.get("exit_code", 1),
+                "timed_out": command.get("timed_out"),
+                "timeout_seconds": command.get("timeout_seconds"),
                 "retryable": False,
                 "blind_retry_allowed": False,
                 "failure_category": "worker_exception",
@@ -183,6 +186,7 @@ def _seed_failed_real_codex_attempt(
                 "stderr_exists": True,
                 "command_exists": True,
                 "output_jsonl_exists": True,
+                "progress_jsonl_exists": progress_events is not None,
                 "diff_exists": False,
             },
             "diff_validation": {
@@ -473,3 +477,138 @@ def test_diagnosis_does_not_guess_when_capsule_artifacts_are_inconclusive(git_re
     diagnosis = _read_json(Path(result["diagnosis_json_path"]))
 
     assert diagnosis["diagnosis"]["primary_category"] == "unknown_codex_nonzero_exit"
+
+
+def test_diagnosis_classifies_command_json_timed_out_as_orchestrator_subprocess_timeout(git_repo: Path):
+    from codex_orchestrator.diagnostics import diagnose_real_codex_attempt
+
+    ctx = _initialized_ctx(git_repo)
+    attempt_id = _seed_failed_real_codex_attempt(
+        ctx,
+        stderr_text="command timed out after 30 seconds\n",
+        command_payload={
+            "args": ["codex", "exec", "--json", "prompt.md"],
+            "cwd": str(ctx.root),
+            "exit_code": 124,
+            "timed_out": True,
+            "timeout_seconds": 30,
+            "patchlet_id": "P0001",
+            "attempt_id": "P0001_attempt1",
+        },
+    )
+
+    result = diagnose_real_codex_attempt(ctx, attempt_id=attempt_id)
+    diagnosis = _read_json(Path(result["diagnosis_json_path"]))
+
+    assert diagnosis["diagnosis"]["primary_category"] == "orchestrator_subprocess_timeout"
+    assert "command_json_records_orchestrator_timeout" in diagnosis["observed_signals"]
+
+
+def test_diagnosis_timeout_category_takes_precedence_over_generic_network_timeout_text(git_repo: Path):
+    from codex_orchestrator.diagnostics import diagnose_real_codex_attempt
+
+    ctx = _initialized_ctx(git_repo)
+    attempt_id = _seed_failed_real_codex_attempt(
+        ctx,
+        stderr_text="API timeout while contacting model\ncommand timed out after 30 seconds\n",
+        command_payload={
+            "args": ["codex", "exec", "--json", "prompt.md"],
+            "cwd": str(ctx.root),
+            "exit_code": 124,
+            "timed_out": True,
+            "timeout_seconds": 30,
+            "patchlet_id": "P0001",
+            "attempt_id": "P0001_attempt1",
+        },
+    )
+
+    result = diagnose_real_codex_attempt(ctx, attempt_id=attempt_id)
+    diagnosis = _read_json(Path(result["diagnosis_json_path"]))
+
+    assert diagnosis["diagnosis"]["primary_category"] == "orchestrator_subprocess_timeout"
+    assert "captured_output_contains_network_or_api_error" not in diagnosis["observed_signals"]
+
+
+def test_diagnosis_timeout_summary_mentions_configured_timeout_seconds(git_repo: Path):
+    from codex_orchestrator.diagnostics import diagnose_real_codex_attempt
+
+    ctx = _initialized_ctx(git_repo)
+    attempt_id = _seed_failed_real_codex_attempt(
+        ctx,
+        command_payload={
+            "args": ["codex", "exec", "--json", "prompt.md"],
+            "cwd": str(ctx.root),
+            "exit_code": 124,
+            "timed_out": True,
+            "timeout_seconds": 30,
+            "patchlet_id": "P0001",
+            "attempt_id": "P0001_attempt1",
+        },
+    )
+
+    result = diagnose_real_codex_attempt(ctx, attempt_id=attempt_id)
+    diagnosis = _read_json(Path(result["diagnosis_json_path"]))
+
+    assert "after 30 seconds" in diagnosis["diagnosis"]["summary"]
+
+
+def test_diagnosis_timeout_recommends_increase_timeout_or_simplify_prompt(git_repo: Path):
+    from codex_orchestrator.diagnostics import diagnose_real_codex_attempt
+
+    ctx = _initialized_ctx(git_repo)
+    attempt_id = _seed_failed_real_codex_attempt(
+        ctx,
+        command_payload={
+            "args": ["codex", "exec", "--json", "prompt.md"],
+            "cwd": str(ctx.root),
+            "exit_code": 124,
+            "timed_out": True,
+            "timeout_seconds": 30,
+            "patchlet_id": "P0001",
+            "attempt_id": "P0001_attempt1",
+        },
+    )
+
+    result = diagnose_real_codex_attempt(ctx, attempt_id=attempt_id)
+    diagnosis = _read_json(Path(result["diagnosis_json_path"]))
+
+    next_action = diagnosis["recommended_next_action"].lower()
+    assert "increase timeout" in next_action
+    assert "simplify prompt" in next_action or "simplify" in next_action
+
+
+def test_diagnosis_timeout_links_progress_jsonl_when_present(git_repo: Path):
+    from codex_orchestrator.diagnostics import diagnose_real_codex_attempt
+
+    ctx = _initialized_ctx(git_repo)
+    attempt_id = _seed_failed_real_codex_attempt(
+        ctx,
+        command_payload={
+            "args": ["codex", "exec", "--json", "prompt.md"],
+            "cwd": str(ctx.root),
+            "exit_code": 124,
+            "timed_out": True,
+            "timeout_seconds": 30,
+            "patchlet_id": "P0001",
+            "attempt_id": "P0001_attempt1",
+        },
+        progress_events=[
+            {
+                "schema_version": "1.0",
+                "kind": "codex_progress",
+                "patchlet_id": "P0001",
+                "attempt_id": "P0001_attempt1",
+                "elapsed_seconds": 1,
+                "signal": "thread.started",
+                "source": "stdout_jsonl",
+            }
+        ],
+    )
+
+    result = diagnose_real_codex_attempt(ctx, attempt_id=attempt_id)
+    diagnosis = _read_json(Path(result["diagnosis_json_path"]))
+
+    assert diagnosis["artifact_presence"]["progress_jsonl"] is True
+    assert diagnosis["evidence_paths"]["progress_jsonl"].endswith("progress.jsonl")
+    assert "progress_jsonl_present" in diagnosis["observed_signals"]
+    assert "Codex was alive before timeout" in diagnosis["diagnosis"]["summary"]

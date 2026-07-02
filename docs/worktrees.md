@@ -43,11 +43,22 @@ prompt and Worker Capsule include the hard timeout and soft deadline, and
 Codex is told to stop before timeout by writing `worker_stage/05_final_report.md`
 with BLOCKED or FAILED status if needed.
 
+Invalid timeout env values fail as structured precondition errors before Codex
+launches. `CODEX_TIMEOUT_SECONDS`, `CODEX_PATCHLET_TIMEOUT_SECONDS`, and
+`CODEX_PROGRESS_INTERVAL_SECONDS` must be positive integer seconds; invalid
+messages include the env var name, bad value, and `expected positive integer
+seconds`.
+
 Attempt-local `progress.jsonl` records compact liveness only, not success.
 Timeout safe-failure means the worktree attempt was contained and evidence was
 preserved; it is not task success and not `DONE`. Patchlet Codex defaults to
 `gpt-5.4-mini` with reasoning `medium`, while non-patchlet/orchestrator Codex
 profiles default to `gpt-5.5` with reasoning `medium`.
+
+`cxor diagnose-real-codex` classifies command/run-manifest timeout evidence as
+`orchestrator_subprocess_timeout` when the orchestrator killed Codex with
+`timed_out=true` and `exit_code=124`. That diagnosis remains evidence review,
+not task success, and links `progress.jsonl` when present.
 
 Use `src/codex_orchestrator/prompt_templates/real_codex_patchlet_contract.md`
 when you need an operator-facing contract for what the real Codex subprocess

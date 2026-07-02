@@ -124,9 +124,22 @@ sees `CXOR_TIMEOUT_SECONDS` and `CXOR_SOFT_DEADLINE_SECONDS`, and the generated
 Worker Capsule/subprompt tells it to write `worker_stage/05_final_report.md`
 with BLOCKED or FAILED status before timeout if it cannot finish.
 
+Invalid timeout env values are structured errors before Codex launches.
+`CODEX_TIMEOUT_SECONDS`, `CODEX_PATCHLET_TIMEOUT_SECONDS`, and
+`CODEX_PROGRESS_INTERVAL_SECONDS` must be positive integer seconds. The error
+includes the env var name, the bad value, and `expected positive integer
+seconds`.
+
 Real-Codex attempts write compact liveness events to `progress.jsonl`. This is
 not success evidence. Timeout safe-failure preserves evidence and containment;
 it is not task success and not `DONE`.
+
+Diagnosis classifies command/run-manifest evidence with `timed_out=true` and
+`exit_code=124` as `orchestrator_subprocess_timeout`. The category documents
+bounded containment, not task success, and links `progress.jsonl` when present.
+
+The explicit real-Codex smoke remains an operator-run command, not part of the
+default test suite.
 
 Patchlet Codex defaults to `gpt-5.4-mini` with reasoning `medium`.
 Non-patchlet/orchestrator Codex profiles default to `gpt-5.5` with reasoning

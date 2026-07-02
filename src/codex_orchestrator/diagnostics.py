@@ -52,17 +52,66 @@ def _load_jsonl_events(path: Path | None) -> list[dict[str, Any]]:
     return events
 
 
+def _load_json_object(path: Path | None) -> dict[str, Any]:
+    if path is None or not path.exists():
+        return {}
+    try:
+        parsed = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
 def _contains_any(text: str, patterns: list[str]) -> bool:
     haystack = text.lower()
     return any(pattern in haystack for pattern in patterns)
 
 
-def _analyze_signals(stderr_text: str, stdout_text: str, output_events: list[dict[str, Any]], artifact_presence: dict[str, bool]) -> tuple[list[str], dict[str, Any], list[str], str]:
+def _analyze_signals(
+    stderr_text: str,
+    stdout_text: str,
+    output_events: list[dict[str, Any]],
+    artifact_presence: dict[str, bool],
+    *,
+    command: dict[str, Any],
+    run: dict[str, Any],
+) -> tuple[list[str], dict[str, Any], list[str], str]:
     observed_signals: list[str] = []
     supported_by: list[str] = []
     known_unknowns: list[str] = []
 
     combined_output = "\n".join([stdout_text, stderr_text] + [json.dumps(event, sort_keys=True) for event in output_events]).strip()
+
+    worker_failure = run.get("worker_failure", {})
+    command_timed_out = command.get("timed_out") is True and command.get("exit_code") == 124
+    manifest_timed_out = worker_failure.get("timed_out") is True and worker_failure.get("exit_code") == 124
+    if command_timed_out or manifest_timed_out:
+        timeout_seconds = command.get("timeout_seconds") or worker_failure.get("timeout_seconds")
+        observed_signals.append("command_json_records_orchestrator_timeout" if command_timed_out else "run_manifest_records_orchestrator_timeout")
+        supported_by.append("command.json" if command_timed_out else "run_manifest.json")
+        if command_timed_out and manifest_timed_out:
+            supported_by.append("run_manifest.json")
+        progress_note = ""
+        if artifact_presence.get("progress_jsonl"):
+            observed_signals.append("progress_jsonl_present")
+            supported_by.append("progress.jsonl")
+            progress_note = " Codex was alive before timeout."
+        timeout_text = f"{timeout_seconds} seconds" if timeout_seconds is not None else "the configured timeout"
+        return (
+            observed_signals,
+            {
+                "primary_category": "orchestrator_subprocess_timeout",
+                "confidence": "high",
+                "summary": (
+                    f"The orchestrator terminated the Codex subprocess after {timeout_text}. "
+                    "This is bounded containment, not task success."
+                    f"{progress_note}"
+                ),
+                "supported_by": sorted(set(supported_by)),
+            },
+            known_unknowns,
+            "Increase timeout or simplify prompt/task before rerunning; keep validators intact and blind retry disabled.",
+        )
 
     if _contains_any(stderr_text, ["auth", "authentication", "session", "token", "login"]):
         observed_signals.append("stderr_contains_auth_or_session_error")
@@ -222,6 +271,7 @@ def diagnose_real_codex_attempt(ctx: TargetRepoContext, *, attempt_id: str, prom
     stderr_path = _path_from_manifest(ctx, paths.get("stderr"))
     output_jsonl_path = _path_from_manifest(ctx, paths.get("output_jsonl"))
     command_path = _path_from_manifest(ctx, paths.get("command"))
+    progress_jsonl_path = _path_from_manifest(ctx, paths.get("progress_jsonl"))
     diff_path = _path_from_manifest(ctx, paths.get("diff"))
     report_path = ctx.paths.reports_dir / f"{run['patchlet_id']}.json"
     probe_run_path = ctx.paths.probe_dir / run["patchlet_id"] / "run_001"
@@ -237,6 +287,7 @@ def diagnose_real_codex_attempt(ctx: TargetRepoContext, *, attempt_id: str, prom
         "stderr": bool(stderr_path and stderr_path.exists()),
         "output_jsonl": bool(output_jsonl_path and output_jsonl_path.exists()),
         "command": bool(command_path and command_path.exists()),
+        "progress_jsonl": bool(progress_jsonl_path and progress_jsonl_path.exists()),
         "prompt_artifact": bool(prompt_path and prompt_path.exists()),
         "report": report_path.exists(),
         "probe_run": probe_run_path.exists(),
@@ -254,6 +305,7 @@ def diagnose_real_codex_attempt(ctx: TargetRepoContext, *, attempt_id: str, prom
 
     stdout_text = _load_text(stdout_path)
     stderr_text = _load_text(stderr_path)
+    command = _load_json_object(command_path)
     output_events = _load_jsonl_events(output_jsonl_path)
     worker_events = _load_jsonl_events(worker_events_path)
     observed_signals, diagnosis_block, known_unknowns, next_action = _analyze_signals(
@@ -261,6 +313,8 @@ def diagnose_real_codex_attempt(ctx: TargetRepoContext, *, attempt_id: str, prom
         stdout_text,
         output_events,
         artifact_presence,
+        command=command,
+        run=run,
     )
     if artifact_presence["worker_capsule"]:
         observed_signals.append("worker_capsule_present")
@@ -272,7 +326,7 @@ def diagnose_real_codex_attempt(ctx: TargetRepoContext, *, attempt_id: str, prom
         observed_signals.append("final_report_stage_missing")
     if artifact_presence["wrapper_gate_result"]:
         observed_signals.append("wrapper_gate_result_present")
-    if not artifact_presence["preflight_stage"]:
+    if not artifact_presence["preflight_stage"] and diagnosis_block["primary_category"] != "orchestrator_subprocess_timeout":
         next_action = (
             "Inspect the generated prompt artifact and TASK_CONTRACT.md path usage before rerunning the opt-in smoke."
         )
@@ -282,6 +336,7 @@ def diagnose_real_codex_attempt(ctx: TargetRepoContext, *, attempt_id: str, prom
         "stderr": relative_to_repo(ctx.root, stderr_path) if stderr_path else None,
         "output_jsonl": relative_to_repo(ctx.root, output_jsonl_path) if output_jsonl_path else None,
         "command": relative_to_repo(ctx.root, command_path) if command_path else None,
+        "progress_jsonl": relative_to_repo(ctx.root, progress_jsonl_path) if progress_jsonl_path else None,
         "run_manifest": relative_to_repo(ctx.root, ctx.paths.run_manifest),
         "prompt_artifact": relative_to_repo(ctx.root, prompt_path) if prompt_path else None,
         "worker_capsule": relative_to_repo(ctx.root, worker_capsule_path) if worker_capsule_path else None,

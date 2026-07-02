@@ -317,6 +317,87 @@ time.sleep(5)
     assert command["timeout_seconds"] == 1
 
 
+def test_invalid_timeout_does_not_launch_fake_codex(
+    git_repo: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    ctx, patchlet = setup_patchlet_ctx(git_repo)
+    marker = tmp_path / "launched.txt"
+    fake_codex = tmp_path / "codex"
+    write_fake_codex(
+        fake_codex,
+        f"""#!/usr/bin/env python3
+from pathlib import Path
+Path({str(marker)!r}).write_text("launched", encoding="utf-8")
+""",
+    )
+    monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ.get('PATH', '')}")
+    monkeypatch.setenv("CODEX_PATCHLET_TIMEOUT_SECONDS", "abc")
+
+    with pytest.raises(WorkerPreconditionError) as exc:
+        CodexExecWorker().run_patchlet(ctx, patchlet, run_dir=ctx.paths.runs_dir / "invalid_timeout")
+
+    message = str(exc.value)
+    assert "CODEX_PATCHLET_TIMEOUT_SECONDS" in message
+    assert "abc" in message
+    assert "expected positive integer seconds" in message
+    assert not marker.exists()
+
+
+def test_invalid_timeout_does_not_mutate_target_product_file(
+    git_repo: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    ctx, patchlet = setup_patchlet_ctx(git_repo)
+    app_path = git_repo / "app.py"
+    app_before = app_path.read_text(encoding="utf-8")
+    fake_codex = tmp_path / "codex"
+    write_fake_codex(
+        fake_codex,
+        """#!/usr/bin/env python3
+from pathlib import Path
+Path("app.py").write_text("mutated = True\\n", encoding="utf-8")
+""",
+    )
+    monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ.get('PATH', '')}")
+    monkeypatch.setenv("CODEX_TIMEOUT_SECONDS", "0")
+
+    with pytest.raises(WorkerPreconditionError):
+        CodexExecWorker().run_patchlet(ctx, patchlet, run_dir=ctx.paths.runs_dir / "zero_timeout")
+
+    assert app_path.read_text(encoding="utf-8") == app_before
+
+
+def test_invalid_progress_interval_reports_structured_error(
+    git_repo: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    ctx, patchlet = setup_patchlet_ctx(git_repo)
+    marker = tmp_path / "progress_interval_launched.txt"
+    fake_codex = tmp_path / "codex"
+    write_fake_codex(
+        fake_codex,
+        f"""#!/usr/bin/env python3
+from pathlib import Path
+Path({str(marker)!r}).write_text("launched", encoding="utf-8")
+""",
+    )
+    monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ.get('PATH', '')}")
+    monkeypatch.setenv("CODEX_PROGRESS_INTERVAL_SECONDS", "fast")
+
+    with pytest.raises(WorkerPreconditionError) as exc:
+        CodexExecWorker().run_patchlet(ctx, patchlet, run_dir=ctx.paths.runs_dir / "invalid_progress")
+
+    message = str(exc.value)
+    assert "CODEX_PROGRESS_INTERVAL_SECONDS" in message
+    assert "fast" in message
+    assert "expected positive integer seconds" in message
+    assert not marker.exists()
+
+
 def test_patchlet_codex_worker_default_model_is_gpt_5_4_mini(git_repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     ctx, patchlet = setup_patchlet_ctx(git_repo)
     fake_codex = tmp_path / "codex"

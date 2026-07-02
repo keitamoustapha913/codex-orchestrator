@@ -1206,6 +1206,41 @@ raise SystemExit(17)
     assert result["run_manifest_entry"]["worker_failure"]["blind_retry_allowed"] is False
 
 
+def test_smoke_safe_failure_reports_timeout_diagnosis_category(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    fake_bin_dir = tmp_path / "fake-bin"
+    fake_bin_dir.mkdir()
+    fake_codex = fake_bin_dir / "codex"
+    _write_fake_codex(
+        fake_codex,
+        """#!/usr/bin/env python3
+import json
+import time
+print(json.dumps({"type": "thread.started"}), flush=True)
+time.sleep(5)
+""",
+    )
+    monkeypatch.setenv("PATH", f"{fake_bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+    monkeypatch.setenv("CODEX_PATCHLET_TIMEOUT_SECONDS", "1")
+
+    ctx = resolve_target_repo(repo=git_repo)
+    result = run_real_codex_auto_worktree_smoke(
+        ctx,
+        master=git_repo / "master_prompt.md",
+        allow_real_codex=True,
+        codex_binary="codex",
+        max_iterations=25,
+    )
+
+    assert result["outcome"] == "safe_failure"
+    assert result["timed_out"] is True
+    assert result["diagnosis_primary_category"] == "orchestrator_subprocess_timeout"
+    assert Path(result["diagnosis_json_path"]).exists()
+
+
 def test_real_codex_auto_worktree_safe_failure_writes_diagnosis_artifacts_with_fake_codex(
     git_repo: Path,
     monkeypatch: pytest.MonkeyPatch,

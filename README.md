@@ -133,10 +133,23 @@ deadline of `timeout - 60` seconds. The subprocess receives
 write `worker_stage/05_final_report.md` with a BLOCKED or FAILED status before
 the hard timeout if it cannot complete.
 
+Invalid timeout values such as non-integers, zero, or negative seconds fail as
+structured precondition errors before Codex launches. The stable error text
+includes the env var name, the bad value, and `expected positive integer seconds`.
+
 Real-Codex liveness is written to
 `.codex-orchestrator/runs/<attempt>/progress.jsonl`. This compact progress is
 liveness, not success; timeout safe-failure is containment evidence, not task
 success and not `DONE`.
+
+`cxor diagnose-real-codex` classifies command evidence with `timed_out=true`
+and `exit_code=124` as `orchestrator_subprocess_timeout`. That category means
+the orchestrator killed the subprocess at the configured timeout; it is not
+task success. If `progress.jsonl` exists, the diagnosis links it as evidence
+that Codex was alive before timeout.
+
+The explicit real-Codex smoke is an operator-run check and is not part of the
+default test suite.
 
 Patchlet Codex defaults to `gpt-5.4-mini` with `CODEX_REASONING=medium`.
 Non-patchlet/orchestrator Codex profiles default to `gpt-5.5` with

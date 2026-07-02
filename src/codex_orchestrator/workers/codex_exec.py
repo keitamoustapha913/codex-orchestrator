@@ -6,7 +6,12 @@ import shutil
 import sys
 from pathlib import Path
 
-from codex_orchestrator.codex_execution_policy import resolve_patchlet_timeout_seconds, soft_deadline_seconds
+from codex_orchestrator.codex_execution_policy import (
+    ExecutionPolicyError,
+    resolve_patchlet_timeout_seconds,
+    resolve_progress_interval_seconds,
+    soft_deadline_seconds,
+)
 from codex_orchestrator.codex_model_profile import resolve_codex_model_profile
 from codex_orchestrator.command_runner import CommandRunner
 from codex_orchestrator.errors import WorkerExecutionError, WorkerPreconditionError
@@ -23,7 +28,11 @@ class CodexExecWorker(Worker):
         self.model_profile = resolve_codex_model_profile("patchlet", os.environ)
         self.codex_model = self.model_profile.model
         self.codex_reasoning = self.model_profile.reasoning
-        self.timeout_seconds = resolve_patchlet_timeout_seconds(os.environ)
+        try:
+            self.timeout_seconds = resolve_patchlet_timeout_seconds(os.environ)
+            self.progress_interval_seconds = resolve_progress_interval_seconds(os.environ)
+        except ExecutionPolicyError as exc:
+            raise WorkerPreconditionError(str(exc)) from exc
         self.soft_deadline_seconds = soft_deadline_seconds(self.timeout_seconds)
 
     def run_patchlet(
