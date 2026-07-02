@@ -39,6 +39,14 @@ class CodexExecWorker(Worker):
         result = CommandRunner().run(
             args,
             cwd=run_ctx.execution_root,
+            env={
+                "CXOR_TARGET_REPO_ROOT": str(run_ctx.target_root),
+                "CXOR_EXECUTION_ROOT": str(run_ctx.execution_root),
+                "CXOR_ARTIFACT_ROOT": str(run_ctx.artifact_root),
+                "CXOR_RUN_DIR": str(run_dir),
+                "CXOR_PATCHLET_ID": patchlet["patchlet_id"],
+                "CXOR_ALLOWED_PRODUCT_RUNTIME_FILE": patchlet.get("allowed_product_runtime_file", ""),
+            },
             stdout_path=run_dir / "stdout.txt",
             stderr_path=run_dir / "stderr.txt",
         )

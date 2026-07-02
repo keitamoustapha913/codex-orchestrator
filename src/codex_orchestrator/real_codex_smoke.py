@@ -4,7 +4,7 @@ import os
 import shutil
 from pathlib import Path
 
-from codex_orchestrator.errors import WorkerPreconditionError
+from codex_orchestrator.errors import CxorError, WorkerPreconditionError
 from codex_orchestrator.git_guard import snapshot_status
 from codex_orchestrator.state import load_state
 from codex_orchestrator.target_repo import TargetRepoContext
@@ -16,11 +16,19 @@ from .stages.compile_patchlets import compile_patchlets
 from .stages.extract_invariants import extract_invariants
 from .stages.init import init_workflow
 from .stages.normalize import normalize_master_prompt
+from .stages.auto import run_auto
 from .stages.run_patchlet import run_next_patchlet
 
 
 def real_codex_smoke_enabled(explicit_flag: bool) -> bool:
     return bool(explicit_flag)
+
+
+def describe_real_codex_auto_worktree_opt_in_command() -> str:
+    return (
+        "uv run --no-sync pytest -q "
+        "tests/smoke/test_real_codex_auto_worktree.py --run-real-codex -s"
+    )
 
 
 def ensure_real_codex_smoke_prereqs(
@@ -83,3 +91,140 @@ def run_real_codex_smoke(
         "output_jsonl_path": str(run_dir / "output.jsonl"),
         "diff_path": str(run_dir / "diff.patch"),
     }
+
+
+def build_real_codex_auto_worktree_smoke_command(
+    ctx: TargetRepoContext,
+    *,
+    master: str | Path,
+    until: str = "DONE",
+    max_iterations: int = 150,
+) -> list[str]:
+    return [
+        "cxor",
+        "auto",
+        "--repo",
+        str(ctx.root),
+        "--master",
+        str(Path(master)),
+        "--until",
+        until,
+        "--worker-mode",
+        "real_codex",
+        "--use-worktree",
+        "--max-iterations",
+        str(max_iterations),
+    ]
+
+
+def _latest_run_dir(ctx: TargetRepoContext) -> Path | None:
+    run_dirs = sorted(
+        [path for path in ctx.paths.runs_dir.glob("*") if path.is_dir()],
+        key=lambda path: path.name,
+    )
+    if not run_dirs:
+        return None
+    return run_dirs[-1]
+
+
+def _smoke_result(
+    ctx: TargetRepoContext,
+    *,
+    master: str | Path,
+    until: str,
+    max_iterations: int,
+    outcome: str,
+    state_stage: str,
+    error_type: str | None = None,
+    error_message: str | None = None,
+) -> dict:
+    run_dir = _latest_run_dir(ctx)
+    return {
+        "worker_mode": "real_codex",
+        "use_worktree": True,
+        "command": build_real_codex_auto_worktree_smoke_command(
+            ctx,
+            master=master,
+            until=until,
+            max_iterations=max_iterations,
+        ),
+        "outcome": outcome,
+        "state_stage": state_stage,
+        "error_type": error_type,
+        "error_message": error_message,
+        "target_repo_root": str(ctx.root),
+        "run_manifest_path": str(ctx.paths.run_manifest),
+        "final_verification_path": str(ctx.paths.final_verification_json),
+        "reports_dir": str(ctx.paths.reports_dir),
+        "probes_dir": str(ctx.paths.probe_dir),
+        "runs_dir": str(ctx.paths.runs_dir),
+        "run_dir": str(run_dir) if run_dir is not None else None,
+        "stdout_path": str(run_dir / "stdout.txt") if run_dir is not None else None,
+        "stderr_path": str(run_dir / "stderr.txt") if run_dir is not None else None,
+        "command_path": str(run_dir / "command.json") if run_dir is not None else None,
+        "output_jsonl_path": str(run_dir / "output.jsonl") if run_dir is not None else None,
+        "diff_path": str(run_dir / "diff.patch") if run_dir is not None else None,
+    }
+
+
+def run_real_codex_auto_worktree_smoke(
+    ctx: TargetRepoContext,
+    *,
+    master: str | Path,
+    codex_binary: str = "codex",
+    allow_real_codex: bool = False,
+    until: str = "DONE",
+    max_iterations: int = 150,
+) -> dict:
+    ensure_real_codex_smoke_prereqs(
+        ctx,
+        codex_binary=codex_binary,
+        allow_real_codex=allow_real_codex,
+    )
+    init_workflow(
+        ctx,
+        master=master,
+        invocation_argv=["pytest", "--run-real-codex"],
+        mode="manual",
+        until="DONE",
+    )
+
+    previous_binary = os.environ.get("CXOR_CODEX_BINARY")
+    os.environ["CXOR_CODEX_BINARY"] = codex_binary
+    try:
+        try:
+            state = run_auto(
+                ctx,
+                master=master,
+                resume=True,
+                until=until,
+                worker_mode="real_codex",
+                use_worktree=True,
+                max_iterations=max_iterations,
+            )
+        except (CxorError, RuntimeError, FileNotFoundError) as exc:
+            state = load_state(ctx)
+            return _smoke_result(
+                ctx,
+                master=master,
+                until=until,
+                max_iterations=max_iterations,
+                outcome="safe_failure",
+                state_stage=state.stage,
+                error_type=type(exc).__name__,
+                error_message=str(exc),
+            )
+    finally:
+        if previous_binary is None:
+            os.environ.pop("CXOR_CODEX_BINARY", None)
+        else:
+            os.environ["CXOR_CODEX_BINARY"] = previous_binary
+
+    return _smoke_result(
+        ctx,
+        master=master,
+        until=until,
+        max_iterations=max_iterations,
+        outcome="success",
+        state_stage=state.stage,
+    )

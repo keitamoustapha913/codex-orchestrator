@@ -36,6 +36,7 @@ Implemented capabilities:
 - durable rediscovery records and inventory rebuild routing;
 - optional worktree execution with validated merge and unauthorized diff isolation;
 - `cxor auto --use-worktree` routing through the validated worktree patchlet execution path;
+- opt-in `real_codex` smoke harness for `cxor auto --use-worktree`;
 - `cxor auto` mock-mode autonomous loop that initializes, discovers, compiles, runs, verifies, and reaches `DONE`.
 
 ## TDD status
@@ -73,6 +74,7 @@ This is not the full final orchestrator. The following are intentionally still s
 - Repair planning records structured intent but does not yet synthesize enriched repair patchlets automatically.
 - CI/documentation contract coverage still needs expansion around all newly added commands and worker modes.
 - Root-cause validation is strict for report fields but does not yet perform secondary model/human semantic verification.
+- Real Codex success remains model- and environment-dependent, so the smoke accepts contained safe failure as long as validators remain strict and evidence is preserved.
 
 ## Current command surface
 
@@ -86,9 +88,12 @@ cxor rediscover --repo /path/to/target-repo --scope impacted
 cxor rebuild-inventory --repo /path/to/target-repo --scope impacted
 cxor run-next --repo /path/to/target-repo --worker-mode mock --use-worktree
 cxor auto --repo /path/to/target-repo --master /path/to/master_prompt.md --until DONE --worker-mode mock --use-worktree
+uv run --no-sync pytest -q tests/smoke/test_real_codex_auto_worktree.py --run-real-codex -s
 ```
 
 `No blind retry` remains a required contract.
+
+The default suite does not run real Codex. Do not weaken validators for real Codex smoke runs. Inspect `.codex-orchestrator/runs/`, `.codex-orchestrator/failures/`, and `.artifacts/probes/` after each opt-in real_codex smoke run.
 
 ## Verified commands
 

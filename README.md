@@ -92,6 +92,26 @@ Unauthorized worktree diffs are isolated as failure evidence and do not mutate t
 
 No source is copied into the target repo beyond durable workflow artifacts and validated target-file edits.
 
+## Opt-in real Codex smoke
+
+Real Codex smoke is opt-in only. The default suite does not run real Codex and the smoke is not part of the default test suite.
+
+Run it explicitly:
+
+```bash
+export UV_CACHE_DIR=/tmp/uv-cache
+uv run --no-sync pytest -q tests/smoke/test_real_codex_auto_worktree.py --run-real-codex -s
+```
+
+The smoke drives `cxor auto --repo /path/to/target-repo --master /path/to/master_prompt.md --until DONE --worker-mode real_codex --use-worktree`.
+
+Operator rules:
+
+- do not weaken validators to make real Codex pass;
+- real Codex runs inside an isolated worktree and only validated diffs may merge back to the target repo;
+- real Codex failure is acceptable only when it stays contained and preserves evidence;
+- inspect `.codex-orchestrator/runs/`, `.codex-orchestrator/failures/`, and `.artifacts/probes/` after each smoke run.
+
 ## CI-safe commands
 
 ```bash

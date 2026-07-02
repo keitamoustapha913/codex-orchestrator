@@ -80,6 +80,20 @@ cxor auto --repo /path/to/target-repo --master /path/to/master_prompt.md --until
 
 Worktree mode is optional, not default. It requires a clean target repo apart from volatile workflow artifacts and isolates unauthorized diffs before any target product/runtime merge.
 
+Opt-in real Codex smoke:
+
+```bash
+uv run --no-sync pytest -q tests/smoke/test_real_codex_auto_worktree.py --run-real-codex -s
+```
+
+This smoke is not part of the default test suite. It exercises `cxor auto --repo /path/to/target-repo --master /path/to/master_prompt.md --until DONE --worker-mode real_codex --use-worktree`.
+
+Operator rules:
+
+- do not weaken validators for real Codex;
+- inspect `.codex-orchestrator/runs/`, `.codex-orchestrator/failures/`, and `.artifacts/probes/`;
+- treat contained failure evidence as acceptable smoke output when real Codex does not reach `DONE`.
+
 CI-friendly commands that exist:
 
 ```bash

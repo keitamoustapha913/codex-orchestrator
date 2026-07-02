@@ -107,3 +107,30 @@ def test_docs_cover_ci_only_read_only_with_auto():
     text = _docs_text().lower()
     assert "ci_only" in text
     assert "read-only" in text
+
+
+def test_docs_cover_real_codex_auto_worktree_smoke_opt_in():
+    text = _docs_text()
+    assert "real_codex" in text
+    assert "--run-real-codex" in text
+    assert "cxor auto --repo" in text
+    assert "--use-worktree" in text
+
+
+def test_docs_warn_real_codex_smoke_is_not_default_suite():
+    text = _docs_text().lower()
+    assert "not part of the default test suite" in text or "default suite does not run real codex" in text
+    assert "opt-in" in text
+
+
+def test_docs_warn_not_to_weaken_validators_for_real_codex():
+    text = _docs_text().lower()
+    assert "do not weaken validators" in text
+    assert "real codex" in text
+
+
+def test_docs_explain_real_codex_smoke_artifact_inspection():
+    text = _docs_text()
+    assert ".codex-orchestrator/runs/" in text
+    assert ".codex-orchestrator/failures/" in text
+    assert ".artifacts/probes/" in text
