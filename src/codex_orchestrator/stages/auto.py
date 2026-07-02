@@ -37,11 +37,19 @@ def run_auto(
     resume: bool = False,
     until: str = "DONE",
     worker_mode: str = "mock",
+    use_worktree: bool = False,
     max_iterations: int = 100,
     use_lock: bool = False,
 ) -> WorkflowState:
     def _run() -> WorkflowState:
         state = _state_or_none(ctx)
+        if worker_mode == "ci_only" and use_worktree:
+            raise StagePreconditionError(
+                "auto",
+                current_stage=state.stage if state is not None else "UNINITIALIZED",
+                target_repo=str(ctx.root),
+                detail="ci_only worker is read-only and does not support use_worktree patchlet execution",
+            )
         if state is None:
             if resume:
                 raise FileNotFoundError(f"Cannot resume; missing state file: {ctx.paths.state}")
@@ -50,9 +58,9 @@ def run_auto(
             state = init_workflow(ctx, master=master, invocation_argv=["cxor", "auto"], mode="auto", until=until)
 
         state = load_state(ctx)
+        if state.stage == until:
+            return state
         if worker_mode == "ci_only":
-            if state.stage == until:
-                return state
             raise StagePreconditionError(
                 "auto",
                 current_stage=state.stage,
@@ -104,7 +112,7 @@ def run_auto(
             # Pending patchlets are run before verification.
             state = load_state(ctx)
             if state.pending_patchlets or stage == "PATCHLETS_READY":
-                run_all_patchlets(ctx, worker_mode=worker_mode)
+                run_all_patchlets(ctx, worker_mode=worker_mode, use_worktree=use_worktree)
                 state = load_state(ctx)
                 if state.stage == "FAILURE_CLASSIFICATION_REQUIRED":
                     continue

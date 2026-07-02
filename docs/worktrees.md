@@ -6,6 +6,7 @@ Command:
 
 ```bash
 cxor run-next --repo /path/to/target-repo --worker-mode mock --use-worktree
+cxor auto --repo /path/to/target-repo --master /path/to/master_prompt.md --until DONE --worker-mode mock --use-worktree
 ```
 
 Safety contract:

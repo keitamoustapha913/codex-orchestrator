@@ -75,6 +75,7 @@ Optional worktree execution with validated merge:
 
 ```bash
 cxor run-next --repo /path/to/target-repo --worker-mode mock --use-worktree
+cxor auto --repo /path/to/target-repo --master /path/to/master_prompt.md --until DONE --worker-mode mock --use-worktree
 ```
 
 Worktree mode is optional, not default. It requires a clean target repo apart from volatile workflow artifacts and isolates unauthorized diffs before any target product/runtime merge.

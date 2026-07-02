@@ -35,6 +35,7 @@ Implemented capabilities:
 - advanced repair classifications for inside-known-graph, outside-known-graph, inventory contradiction, repeated repair failure, master-goal change, and excessive impacted scope;
 - durable rediscovery records and inventory rebuild routing;
 - optional worktree execution with validated merge and unauthorized diff isolation;
+- `cxor auto --use-worktree` routing through the validated worktree patchlet execution path;
 - `cxor auto` mock-mode autonomous loop that initializes, discovers, compiles, runs, verifies, and reaches `DONE`.
 
 ## TDD status
@@ -84,6 +85,7 @@ cxor verify-global --repo /path/to/target-repo
 cxor rediscover --repo /path/to/target-repo --scope impacted
 cxor rebuild-inventory --repo /path/to/target-repo --scope impacted
 cxor run-next --repo /path/to/target-repo --worker-mode mock --use-worktree
+cxor auto --repo /path/to/target-repo --master /path/to/master_prompt.md --until DONE --worker-mode mock --use-worktree
 ```
 
 `No blind retry` remains a required contract.

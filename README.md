@@ -83,6 +83,7 @@ Validated merge flow:
 
 ```bash
 cxor run-next --repo /path/to/target-repo --worker-mode mock --use-worktree
+cxor auto --repo /path/to/target-repo --master /path/to/master_prompt.md --until DONE --worker-mode mock --use-worktree
 ```
 
 The target repo must be clean apart from volatile workflow artifacts before worktree execution starts.

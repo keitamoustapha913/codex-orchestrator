@@ -76,3 +76,34 @@ def test_docs_do_not_claim_worktrees_are_default():
     text = _docs_text().lower()
     assert "worktrees are default" not in text
     assert "worktree mode is optional" in text or "use-worktree" in text
+
+
+def test_docs_cover_auto_use_worktree_command():
+    text = _docs_text()
+    assert "cxor auto --repo" in text
+    assert "--use-worktree" in text
+
+
+def test_docs_state_worktrees_are_optional_not_default_for_auto():
+    text = _docs_text().lower()
+    assert "auto --use-worktree" in text
+    assert "optional" in text
+    assert "not default" in text or "not the default" in text
+
+
+def test_docs_cover_auto_worktree_clean_repo_precondition():
+    text = _docs_text().lower()
+    assert "clean target repo" in text
+    assert "auto --use-worktree" in text
+
+
+def test_docs_cover_auto_worktree_unauthorized_diff_isolation():
+    text = _docs_text().lower()
+    assert "unauthorized" in text
+    assert "do not mutate target product/runtime files" in text or "does not mutate target product/runtime files" in text
+
+
+def test_docs_cover_ci_only_read_only_with_auto():
+    text = _docs_text().lower()
+    assert "ci_only" in text
+    assert "read-only" in text

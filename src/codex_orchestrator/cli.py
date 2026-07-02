@@ -260,6 +260,7 @@ def cmd_auto(args: argparse.Namespace) -> int:
         resume=args.resume,
         until=args.until,
         worker_mode=args.worker_mode,
+        use_worktree=args.use_worktree,
         max_iterations=args.max_iterations,
         use_lock=True,
     )
@@ -339,6 +340,7 @@ def build_parser() -> argparse.ArgumentParser:
     auto.add_argument("--resume", action="store_true")
     auto.add_argument("--until", default="DONE")
     auto.add_argument("--worker-mode", default="mock", choices=["mock", "real_codex", "manual", "ci_only"])
+    auto.add_argument("--use-worktree", action="store_true")
     auto.add_argument("--max-iterations", type=int, default=100)
     auto.set_defaults(func=cmd_auto)
 

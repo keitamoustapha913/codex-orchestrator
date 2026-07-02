@@ -6,6 +6,7 @@ Primary autonomous command:
 
 ```bash
 cxor auto --repo /path/to/target-repo --master /path/to/master_prompt.md --until DONE --worker-mode mock
+cxor auto --repo /path/to/target-repo --master /path/to/master_prompt.md --until DONE --worker-mode mock --use-worktree
 ```
 
 The autonomous loop is probe-gated and evidence-bound:
@@ -29,3 +30,5 @@ No blind retry is allowed.
 ```bash
 cxor auto --repo /path/to/target-repo --resume --until DONE --worker-mode ci_only
 ```
+
+`--use-worktree` is optional, not default. When enabled for patchlet-executing worker modes, the target repo must be clean apart from volatile workflow artifacts before worktree execution starts.
