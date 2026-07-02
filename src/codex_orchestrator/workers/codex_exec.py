@@ -36,16 +36,27 @@ class CodexExecWorker(Worker):
         run_dir.mkdir(parents=True, exist_ok=True)
         repo_sha_before = repo_head(run_ctx.execution_root)
         args = [self.codex_binary, "exec", "--json", str(prompt_path)]
+        patchlet_id = patchlet["patchlet_id"]
+        report_path = run_ctx.reports_dir / f"{patchlet_id}.json"
+        probe_root = run_ctx.probe_dir / patchlet_id
         result = CommandRunner().run(
             args,
             cwd=run_ctx.execution_root,
             env={
+                "CXOR_TARGET_ROOT": str(run_ctx.target_root),
                 "CXOR_TARGET_REPO_ROOT": str(run_ctx.target_root),
                 "CXOR_EXECUTION_ROOT": str(run_ctx.execution_root),
                 "CXOR_ARTIFACT_ROOT": str(run_ctx.artifact_root),
+                "CXOR_WORKFLOW_DIR": str(run_ctx.workflow_dir),
+                "CXOR_PROBE_DIR": str(run_ctx.probe_dir),
+                "CXOR_REPORTS_DIR": str(run_ctx.reports_dir),
+                "CXOR_RUNS_DIR": str(run_ctx.runs_dir),
                 "CXOR_RUN_DIR": str(run_dir),
-                "CXOR_PATCHLET_ID": patchlet["patchlet_id"],
+                "CXOR_PATCHLET_ID": patchlet_id,
+                "CXOR_ATTEMPT_ID": run_dir.name,
                 "CXOR_ALLOWED_PRODUCT_RUNTIME_FILE": patchlet.get("allowed_product_runtime_file", ""),
+                "CXOR_REPORT_PATH": str(report_path),
+                "CXOR_PROBE_ROOT": str(probe_root),
             },
             stdout_path=run_dir / "stdout.txt",
             stderr_path=run_dir / "stderr.txt",
@@ -54,9 +65,18 @@ class CodexExecWorker(Worker):
         (run_dir / "command.json").write_text(json.dumps({
             **result.to_json(),
             "target_repo_root": str(run_ctx.target_root),
+            "target_root": str(run_ctx.target_root),
             "execution_root": str(run_ctx.execution_root),
             "artifact_root": str(run_ctx.artifact_root),
-            "patchlet_id": patchlet["patchlet_id"],
+            "workflow_dir": str(run_ctx.workflow_dir),
+            "probe_dir": str(run_ctx.probe_dir),
+            "reports_dir": str(run_ctx.reports_dir),
+            "runs_dir": str(run_ctx.runs_dir),
+            "run_dir": str(run_dir),
+            "patchlet_id": patchlet_id,
+            "attempt_id": run_dir.name,
+            "report_path": str(report_path),
+            "probe_root": str(probe_root),
             "repo_sha_before": repo_sha_before,
             "repo_sha_after": repo_sha_after,
         }, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -67,8 +87,18 @@ class CodexExecWorker(Worker):
             "stdout_path": str(run_dir / "stdout.txt"),
             "stderr_path": str(run_dir / "stderr.txt"),
             "target_repo_root": str(run_ctx.target_root),
+            "target_root": str(run_ctx.target_root),
             "execution_root": str(run_ctx.execution_root),
             "artifact_root": str(run_ctx.artifact_root),
+            "workflow_dir": str(run_ctx.workflow_dir),
+            "probe_dir": str(run_ctx.probe_dir),
+            "reports_dir": str(run_ctx.reports_dir),
+            "runs_dir": str(run_ctx.runs_dir),
+            "run_dir": str(run_dir),
+            "patchlet_id": patchlet_id,
+            "attempt_id": run_dir.name,
+            "report_path": str(report_path),
+            "probe_root": str(probe_root),
             "repo_sha_before": repo_sha_before,
             "repo_sha_after": repo_sha_after,
         }) + "\n", encoding="utf-8")
@@ -77,7 +107,6 @@ class CodexExecWorker(Worker):
                 f"codex worker failed with exit_code={result.exit_code}; "
                 f"cwd={run_ctx.execution_root}; target repo={run_ctx.target_root}"
             )
-        report_path = run_ctx.reports_dir / f"{patchlet['patchlet_id']}.json"
         if not report_path.exists():
             raise WorkerExecutionError(f"codex worker did not produce report: {report_path}")
         return WorkerResult(

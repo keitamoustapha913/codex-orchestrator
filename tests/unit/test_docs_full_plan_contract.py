@@ -149,3 +149,29 @@ def test_docs_explain_real_codex_failed_attempt_artifact_paths():
     assert "stderr.txt" in text
     assert "command.json" in text
     assert "output.jsonl" in text
+
+
+def test_docs_explain_fake_success_parity_for_real_codex_path():
+    text = _docs_text().lower()
+    assert "fake-success parity" in text
+    assert "worker_mode real_codex" in text or "worker_mode=real_codex" in text
+    assert "auto --use-worktree" in text
+
+
+def test_docs_explain_real_codex_success_depends_on_valid_report_and_probe_output():
+    text = _docs_text().lower()
+    assert "valid report" in text
+    assert "durable probe artifacts" in text
+    assert "real codex success to done is not guaranteed" in text
+    assert "do not weaken validators" in text
+
+
+def test_docs_link_real_codex_failure_to_run_manifest_evidence():
+    text = _docs_text()
+    assert "run_manifest.json" in text
+    assert "WORKER_FAILED" in text
+
+
+def test_docs_reference_real_codex_patchlet_contract_prompt():
+    text = _docs_text()
+    assert "real_codex_patchlet_contract.md" in text

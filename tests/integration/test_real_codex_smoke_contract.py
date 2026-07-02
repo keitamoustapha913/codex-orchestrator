@@ -30,6 +30,80 @@ def _write_fake_codex(path: Path, body: str) -> None:
     path.chmod(0o755)
 
 
+def _write_fake_success_codex_from_cxor_env(path: Path) -> None:
+    path.write_text(
+        """#!/usr/bin/env python3
+import json
+import os
+from pathlib import Path
+
+execution_root = Path(os.environ["CXOR_EXECUTION_ROOT"])
+run_dir = Path(os.environ["CXOR_RUN_DIR"])
+patchlet_id = os.environ["CXOR_PATCHLET_ID"]
+allowed_file = os.environ["CXOR_ALLOWED_PRODUCT_RUNTIME_FILE"]
+report_path = Path(os.environ["CXOR_REPORT_PATH"])
+probe_root = Path(os.environ["CXOR_PROBE_ROOT"])
+
+run_dir.mkdir(parents=True, exist_ok=True)
+(run_dir / "env.json").write_text(json.dumps(dict(os.environ), indent=2, sort_keys=True), encoding="utf-8")
+(execution_root / allowed_file).write_text("def main():\\n    return 'ok'\\n# fake codex real-worker parity\\n", encoding="utf-8")
+(probe_root / "run_001").mkdir(parents=True, exist_ok=True)
+(probe_root / "probe.py").write_text("print('probe')\\n", encoding="utf-8")
+(probe_root / "run_001" / "row_ledger.jsonl").write_text(json.dumps({"row": 1}) + "\\n", encoding="utf-8")
+(probe_root / "run_001" / "trace_ledger.jsonl").write_text(json.dumps({"trace": 1}) + "\\n", encoding="utf-8")
+(probe_root / "run_001" / "before_state.json").write_text(json.dumps({"value": "before"}) + "\\n", encoding="utf-8")
+(probe_root / "run_001" / "after_state.json").write_text(json.dumps({"value": "after"}) + "\\n", encoding="utf-8")
+(probe_root / "run_001" / "cleanup_proof.json").write_text(json.dumps({"cleanup_passed": True}) + "\\n", encoding="utf-8")
+report_path.parent.mkdir(parents=True, exist_ok=True)
+report_path.write_text(json.dumps({
+    "schema_version": "1.0",
+    "kind": "patchlet_report",
+    "patchlet_id": patchlet_id,
+    "status": "COMPLETE",
+    "changed_product_runtime_file": allowed_file,
+    "changed_artifact_files": [
+        f".artifacts/probes/{patchlet_id}/probe.py",
+        f".artifacts/probes/{patchlet_id}/run_001/row_ledger.jsonl",
+        f".artifacts/probes/{patchlet_id}/run_001/trace_ledger.jsonl",
+        f".artifacts/probes/{patchlet_id}/run_001/before_state.json",
+        f".artifacts/probes/{patchlet_id}/run_001/after_state.json",
+        f".artifacts/probes/{patchlet_id}/run_001/cleanup_proof.json"
+    ],
+    "probe_commands": [f"python .artifacts/probes/{patchlet_id}/probe.py"],
+    "deterministic_run_counts": {"baseline": "5/5", "proof_of_fix": "5/5", "negative_controls": "5/5"},
+    "root_cause_classification": {
+        "observed_failure": "baseline failed before allowed change",
+        "immediate_cause": "allowed file lacked required parity change",
+        "why_immediate_cause_happened": "fake real_codex parity path applies deterministic fix",
+        "deeper_owner_boundary": allowed_file,
+        "producer_transformer_consumer_boundary": f"producer {allowed_file} -> consumer probe",
+        "not_downstream_of_unprobed_state_proof": "probe ran directly against the changed boundary",
+        "negative_control_proof": "adjacent paths remained unchanged",
+        "recursive_why_audit": ["why1", "why2", "why3"]
+    },
+    "before_after_state": [{"before": "old", "after": "new"}],
+    "row_ledger": [],
+    "trace_ledger": [],
+    "cleanup_proof": "probe created isolated temp data and cleaned it",
+    "proof_of_fix": {
+        "summary": "direct probe passed after allowed change",
+        "deterministic_run_count": "5/5"
+    },
+    "probe_artifact_refs": [{
+        "patchlet_id": patchlet_id,
+        "probe_root": f".artifacts/probes/{patchlet_id}",
+        "run_id": "run_001"
+    }],
+    "acceptance_criteria_result": "pass"
+}, indent=2) + "\\n", encoding="utf-8")
+print(str(execution_root))
+print("fake real_codex success parity", file=__import__("sys").stderr)
+""",
+        encoding="utf-8",
+    )
+    path.chmod(0o755)
+
+
 def _last_patchlet_run(ctx) -> dict:
     manifest = read_json(ctx.paths.run_manifest)
     patchlet_runs = [run for run in manifest["runs"] if run.get("patchlet_id") == "P0001"]
@@ -200,6 +274,127 @@ print("fake codex success", file=__import__("sys").stderr)
     assert (ctx.paths.reports_dir / "P0001.json").exists()
     assert (ctx.paths.probe_dir / "P0001" / "run_001" / "row_ledger.jsonl").exists()
     assert patchlet_run["execution_mode"] == "worktree"
+    assert patchlet_run["artifact_root"] == str(ctx.root)
+
+
+def test_real_codex_worker_fake_success_reaches_done_through_auto_worktree(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    fake_bin_dir = tmp_path / "fake-bin"
+    fake_bin_dir.mkdir()
+    fake_codex = fake_bin_dir / "codex"
+    _write_fake_success_codex_from_cxor_env(fake_codex)
+    monkeypatch.setenv("PATH", f"{fake_bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+
+    ctx = resolve_target_repo(repo=git_repo)
+    result = run_real_codex_auto_worktree_smoke(
+        ctx,
+        master=git_repo / "master_prompt.md",
+        allow_real_codex=True,
+        codex_binary="codex",
+    )
+
+    assert result["outcome"] == "success"
+    assert result["state_stage"] == "DONE"
+
+
+def test_real_codex_worker_fake_success_records_successful_run_manifest_entry(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    fake_bin_dir = tmp_path / "fake-bin"
+    fake_bin_dir.mkdir()
+    fake_codex = fake_bin_dir / "codex"
+    _write_fake_success_codex_from_cxor_env(fake_codex)
+    monkeypatch.setenv("PATH", f"{fake_bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+
+    ctx = resolve_target_repo(repo=git_repo)
+    run_real_codex_auto_worktree_smoke(
+        ctx,
+        master=git_repo / "master_prompt.md",
+        allow_real_codex=True,
+        codex_binary="codex",
+    )
+
+    patchlet_run = _last_patchlet_run(ctx)
+    assert patchlet_run["worker_mode"] == "real_codex"
+    assert patchlet_run["status"] == "COMPLETE"
+    assert patchlet_run["success"] is True
+
+
+def test_real_codex_worker_fake_success_records_worktree_metadata(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    fake_bin_dir = tmp_path / "fake-bin"
+    fake_bin_dir.mkdir()
+    fake_codex = fake_bin_dir / "codex"
+    _write_fake_success_codex_from_cxor_env(fake_codex)
+    monkeypatch.setenv("PATH", f"{fake_bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+
+    ctx = resolve_target_repo(repo=git_repo)
+    run_real_codex_auto_worktree_smoke(
+        ctx,
+        master=git_repo / "master_prompt.md",
+        allow_real_codex=True,
+        codex_binary="codex",
+    )
+
+    patchlet_run = _last_patchlet_run(ctx)
+    assert patchlet_run["execution_mode"] == "worktree"
+    assert patchlet_run["worktree"]["enabled"] is True
+    assert patchlet_run["worktree"]["cleanup_status"] == "removed"
+
+
+def test_real_codex_worker_fake_success_final_verification_is_done(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    fake_bin_dir = tmp_path / "fake-bin"
+    fake_bin_dir.mkdir()
+    fake_codex = fake_bin_dir / "codex"
+    _write_fake_success_codex_from_cxor_env(fake_codex)
+    monkeypatch.setenv("PATH", f"{fake_bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+
+    ctx = resolve_target_repo(repo=git_repo)
+    run_real_codex_auto_worktree_smoke(
+        ctx,
+        master=git_repo / "master_prompt.md",
+        allow_real_codex=True,
+        codex_binary="codex",
+    )
+
+    final = read_json(ctx.paths.final_verification_json)
+    assert final["status"] == "DONE"
+
+
+def test_real_codex_worker_fake_success_artifacts_are_under_target_root(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    fake_bin_dir = tmp_path / "fake-bin"
+    fake_bin_dir.mkdir()
+    fake_codex = fake_bin_dir / "codex"
+    _write_fake_success_codex_from_cxor_env(fake_codex)
+    monkeypatch.setenv("PATH", f"{fake_bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+
+    ctx = resolve_target_repo(repo=git_repo)
+    run_real_codex_auto_worktree_smoke(
+        ctx,
+        master=git_repo / "master_prompt.md",
+        allow_real_codex=True,
+        codex_binary="codex",
+    )
+
+    assert (ctx.paths.reports_dir / "P0001.json").exists()
+    assert (ctx.paths.probe_dir / "P0001" / "run_001" / "cleanup_proof.json").exists()
+    patchlet_run = _last_patchlet_run(ctx)
     assert patchlet_run["artifact_root"] == str(ctx.root)
 
 

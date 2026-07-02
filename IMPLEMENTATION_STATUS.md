@@ -95,6 +95,15 @@ uv run --no-sync pytest -q tests/smoke/test_real_codex_auto_worktree.py --run-re
 
 The default suite does not run real Codex. Do not weaken validators for real Codex smoke runs. Inspect `.codex-orchestrator/runs/`, `.codex-orchestrator/failures/`, and `.artifacts/probes/` after each opt-in real_codex smoke run.
 
+Fake-success parity now proves the exact `worker_mode=real_codex` +
+`auto --use-worktree` wiring to `DONE` with a fake Codex binary that writes a
+valid report and durable probe artifacts. Real Codex success to DONE remains
+dependent on actual Codex output quality and is not guaranteed.
+
+Use `src/codex_orchestrator/prompt_templates/real_codex_patchlet_contract.md`
+as the operator-facing patchlet contract for required paths, report fields, and
+durable probe files.
+
 When a real/non-mock worker exits non-zero, `run_manifest.json` should retain a `WORKER_FAILED` patchlet run entry together with preserved `stdout.txt`, `stderr.txt`, `command.json`, and `output.jsonl` artifact paths. Blind retry is not allowed.
 
 ## Verified commands

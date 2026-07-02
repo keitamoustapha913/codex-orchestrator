@@ -88,13 +88,23 @@ uv run --no-sync pytest -q tests/smoke/test_real_codex_auto_worktree.py --run-re
 
 This smoke is not part of the default test suite. It exercises `cxor auto --repo /path/to/target-repo --master /path/to/master_prompt.md --until DONE --worker-mode real_codex --use-worktree`.
 
+Fake-success parity also covers this exact `worker_mode=real_codex` path with a
+fake Codex binary that reaches `DONE` only by writing a valid report and
+durable probe artifacts. That proves the orchestrator wiring without claiming
+that installed real Codex will always succeed.
+
 Operator rules:
 
 - do not weaken validators for real Codex;
+- real Codex success to DONE is not guaranteed and still depends on valid report and durable probe artifact output;
 - inspect `run_manifest.json` for the failed patchlet attempt entry;
 - inspect `.codex-orchestrator/runs/`, `.codex-orchestrator/failures/`, and `.artifacts/probes/`;
 - on safe failure, expect a `WORKER_FAILED` run-manifest entry plus preserved `stdout.txt`, `stderr.txt`, `command.json`, and `output.jsonl`;
 - treat contained failure evidence as acceptable smoke output when real Codex does not reach `DONE`.
+
+Prompt contract artifact:
+
+- `src/codex_orchestrator/prompt_templates/real_codex_patchlet_contract.md`
 
 CI-friendly commands that exist:
 

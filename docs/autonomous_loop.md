@@ -41,4 +41,14 @@ uv run --no-sync pytest -q tests/smoke/test_real_codex_auto_worktree.py --run-re
 
 This command is not part of the default test suite. It runs the autonomous loop with `--worker-mode real_codex --use-worktree`. Do not weaken validators to make real Codex pass. Inspect `.codex-orchestrator/runs/`, `.codex-orchestrator/failures/`, and `.artifacts/probes/` to review contained success or failure evidence.
 
+Fake-success parity now proves that this exact `worker_mode=real_codex` +
+`auto --use-worktree` path can reach `DONE` when the subprocess produces a
+valid report and durable probe artifacts. Real Codex success to DONE is still
+not guaranteed, because real Codex must still produce output that satisfies the
+existing validators.
+
 Safe failures are expected to leave a `run_manifest.json` entry with status `WORKER_FAILED` and preserved `stdout.txt`, `stderr.txt`, `command.json`, and `output.jsonl` paths for the failed patchlet attempt. Blind retry is not allowed.
+
+Operator prompt contract:
+
+- `src/codex_orchestrator/prompt_templates/real_codex_patchlet_contract.md`
