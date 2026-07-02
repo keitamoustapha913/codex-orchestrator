@@ -44,6 +44,12 @@ Before the final response, it must write:
 
 - `.codex-orchestrator/runs/P0001_attempt1/worker_stage/05_final_report.md`
 
+The worker must use `CXOR_WORKER_STAGE_DIR`, `CXOR_PREFLIGHT_PATH`, and
+`CXOR_FINAL_REPORT_PATH` for stage files. Do not create target-root
+worker_stage/. If real Codex writes a top-level `worker_stage/`, diagnosis
+reports `worker_capsule_path_violation`. This is a Codex path-obedience issue,
+not orchestrator wiring failure. Do not weaken validators.
+
 The smoke remains validator-backed and evidence-bound:
 
 - inspect `.codex-orchestrator/runs/`, `.codex-orchestrator/failures/`, and `.artifacts/probes/`
@@ -76,6 +82,29 @@ timeout.
 The explicit real-Codex smoke is an operator-run command. It is not part of the
 default test suite and should only be run when the environment is safe for an
 installed Codex invocation.
+
+For repeatable evidence capture, use the operator runbook:
+
+```bash
+uv run --no-sync cxor real-codex-smoke-runbook --dry-run
+CODEX_PATCHLET_TIMEOUT_SECONDS=600 uv run --no-sync cxor real-codex-smoke-runbook --run-real-codex
+```
+
+Default pytest does not run real Codex. `--dry-run` does not invoke real Codex
+and writes `result.json` with outcome dry_run. `--run-real-codex` may consume
+account, network, model, token, and wall-clock resources and may run up to
+`CODEX_PATCHLET_TIMEOUT_SECONDS`.
+
+The runbook writes
+`.operator-runs/real-codex-smoke/<timestamp>-real-codex-smoke/` with
+`README.md`, `environment.txt`, `git_status.txt`, `codex_version.txt`,
+`selected_policy.json`, `default_skip_stdout.txt`, `default_skip_stderr.txt`,
+`explicit_smoke_stdout.txt`, `explicit_smoke_stderr.txt`, `result.json`, and
+`diagnosis_paths.json`. Compare runs by diffing `selected_policy.json`,
+`result.json`, and `diagnosis_paths.json`.
+
+`safe_failure is a successful runbook capture`, not task DONE. `DONE means the
+orchestrator validators accepted the run`.
 
 Patchlet Codex defaults to `gpt-5.4-mini` with reasoning `medium`.
 Non-patchlet/orchestrator Codex profiles default to `gpt-5.5` with reasoning

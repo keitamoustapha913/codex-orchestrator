@@ -64,6 +64,33 @@ def _read_command_from_run_dir(run_dir) -> dict:
     return {}
 
 
+CAPSULE_LIKE_TARGET_ROOT_DIRS = (
+    "worker_stage",
+    "worker_memory",
+    "worker_hooks",
+    "gates",
+    "diagnostics",
+)
+
+
+def _capsule_path_violation_reasons(ctx: TargetRepoContext, run_ctx: PatchletRunContext) -> list[str]:
+    reasons: list[str] = []
+    for dirname in CAPSULE_LIKE_TARGET_ROOT_DIRS:
+        wrong_path = ctx.root / dirname
+        if not wrong_path.exists():
+            continue
+        expected = run_ctx.run_dir / dirname
+        reasons.append(
+            f"worker capsule artifact written outside run directory: {dirname}/; "
+            f"expected {dirname} artifacts under {_record_path_for_manifest(ctx, expected)}/"
+        )
+    return reasons
+
+
+def _is_capsule_path_violation_error(exc: Exception) -> bool:
+    return "worker capsule artifact written outside run directory:" in str(exc)
+
+
 def _append_failed_worker_run_record(
     ctx: TargetRepoContext,
     *,
@@ -123,7 +150,7 @@ def _append_failed_worker_run_record(
             "selected_reasoning": command.get("selected_reasoning"),
             "retryable": False,
             "blind_retry_allowed": False,
-            "failure_category": "worker_exception",
+            "failure_category": "worker_capsule_path_violation" if _is_capsule_path_violation_error(worker_error) else "worker_exception",
         },
         "artifact_preservation": {
             "run_dir_exists": run_dir.exists(),
@@ -254,6 +281,9 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
     diff_result = None
     try:
         worker_result = worker.run_patchlet(ctx, patchlet, run_dir=run_dir, run_ctx=run_ctx)
+        capsule_path_violations = _capsule_path_violation_reasons(ctx, run_ctx)
+        if capsule_path_violations:
+            raise WorkerExecutionError("; ".join(capsule_path_violations))
         append_worker_event(
             ctx,
             worker_capsule,

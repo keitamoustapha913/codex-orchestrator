@@ -15,6 +15,13 @@ The orchestrator provides these `CXOR_` paths and identifiers:
 - `CXOR_REPORTS_DIR`
 - `CXOR_RUNS_DIR`
 - `CXOR_RUN_DIR`
+- `CXOR_WORKER_STAGE_DIR`
+- `CXOR_WORKER_MEMORY_DIR`
+- `CXOR_WORKER_HOOKS_DIR`
+- `CXOR_GATES_DIR`
+- `CXOR_DIAGNOSTICS_DIR`
+- `CXOR_PREFLIGHT_PATH`
+- `CXOR_FINAL_REPORT_PATH`
 - `CXOR_PATCHLET_ID`
 - `CXOR_ATTEMPT_ID`
 - `CXOR_TIMEOUT_SECONDS`
@@ -30,6 +37,14 @@ artifacts must be written.
 Do not write report or probe artifacts into the worktree if
 `CXOR_EXECUTION_ROOT` differs from `CXOR_ARTIFACT_ROOT`.
 
+Worker Capsule files must use the exact capsule paths. Write preflight stage
+content only to `CXOR_PREFLIGHT_PATH` and final stage content only to
+`CXOR_FINAL_REPORT_PATH`. These paths are under `CXOR_WORKER_STAGE_DIR`, for
+example `.codex-orchestrator/runs/P0001_attempt1/worker_stage/`.
+
+Do not create target-root worker_stage/. Do not write `worker_stage/` relative
+to `CXOR_TARGET_ROOT` or the current shell directory.
+
 ## Wall-clock Budget
 
 You have a hard timeout of 600 seconds by default. The exact timeout is exposed
@@ -37,8 +52,8 @@ as `CXOR_TIMEOUT_SECONDS`, and the soft deadline is exposed as
 `CXOR_SOFT_DEADLINE_SECONDS`.
 
 Aim to finish by 540 seconds for the default budget. If you cannot complete,
-write `worker_stage/05_final_report.md` with an explicit BLOCKED or FAILED
-status and preserve what you learned before the timeout. Do not keep
+write `CXOR_FINAL_REPORT_PATH` with an explicit BLOCKED or FAILED status and
+preserve what you learned before the timeout. Do not keep
 investigating indefinitely. Do not use blind retry.
 
 ## Allowed Edit Scope
@@ -53,6 +68,7 @@ Do not invent extra artifact locations outside:
 - `CXOR_REPORTS_DIR`
 - `CXOR_RUNS_DIR`
 - `CXOR_PROBE_DIR`
+- `CXOR_WORKER_STAGE_DIR`
 
 ## Required Report Output
 

@@ -6,4 +6,5 @@ dist/
 build/
 *.egg-info/
 .venv/
+.operator-runs/
 codex-orchestrator-tdd-mvp.zip

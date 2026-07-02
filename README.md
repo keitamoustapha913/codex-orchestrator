@@ -151,6 +151,22 @@ that Codex was alive before timeout.
 The explicit real-Codex smoke is an operator-run check and is not part of the
 default test suite.
 
+For repeatable operator evidence capture, prefer the runbook command:
+
+```bash
+uv run --no-sync cxor real-codex-smoke-runbook --dry-run
+CODEX_PATCHLET_TIMEOUT_SECONDS=600 uv run --no-sync cxor real-codex-smoke-runbook --run-real-codex
+```
+
+The runbook writes `.operator-runs/real-codex-smoke/<timestamp>-real-codex-smoke/`
+with `selected_policy.json`, `result.json`, `diagnosis_paths.json`,
+`explicit_smoke_stdout.txt`, and `explicit_smoke_stderr.txt`. Dry-run mode does
+not invoke real Codex. Explicit mode may consume account, network, model, token,
+and wall-clock resources. `safe_failure is a successful runbook capture`, not
+task DONE; `DONE means the orchestrator validators accepted the run`.
+
+See `docs/runbooks/real_codex_smoke_runbook.md` for how to compare runs.
+
 Patchlet Codex defaults to `gpt-5.4-mini` with `CODEX_REASONING=medium`.
 Non-patchlet/orchestrator Codex profiles default to `gpt-5.5` with
 `CODEX_REASONING=medium`. `CODEX_MODEL`/`CODEX_REASONING` override both when
@@ -207,6 +223,12 @@ It contains:
 Worker memory is context, not proof. Codex may read and write attempt-local
 memory and stage files, but the orchestrator writes gate results and decides
 whether the attempt is accepted.
+
+Worker stage files must be written under `CXOR_WORKER_STAGE_DIR`, for example
+`.codex-orchestrator/runs/P0001_attempt1/worker_stage/`. Do not create
+target-root worker_stage/. If real Codex writes a top-level `worker_stage/`,
+diagnosis reports `worker_capsule_path_violation`. This is a Codex
+path-obedience issue, not orchestrator wiring failure. Do not weaken validators.
 
 Useful read-only commands:
 

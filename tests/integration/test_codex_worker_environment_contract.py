@@ -179,3 +179,82 @@ def test_codex_worker_environment_does_not_point_artifacts_to_worktree_in_worktr
     assert not env_dump["CXOR_REPORT_PATH"].startswith(str(execution_root))
     assert not env_dump["CXOR_PROBE_ROOT"].startswith(str(execution_root))
     assert not env_dump["CXOR_RUN_DIR"].startswith(str(execution_root))
+
+
+def test_codex_worker_env_exposes_worker_stage_dir(
+    git_repo: Path,
+    tmp_path: Path,
+    monkeypatch,
+):
+    ctx, patchlet = _setup_patchlet_ctx(git_repo)
+    fake_codex = tmp_path / "codex"
+    _write_fake_codex(fake_codex)
+    monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ.get('PATH', '')}")
+
+    env_dump = _env_dump(ctx, patchlet, execution_root=ctx.root, artifact_root=ctx.root)
+
+    assert env_dump["CXOR_WORKER_STAGE_DIR"] == str(ctx.paths.runs_dir / "P0001_attempt1" / "worker_stage")
+
+
+def test_codex_worker_env_exposes_worker_memory_dir(
+    git_repo: Path,
+    tmp_path: Path,
+    monkeypatch,
+):
+    ctx, patchlet = _setup_patchlet_ctx(git_repo)
+    fake_codex = tmp_path / "codex"
+    _write_fake_codex(fake_codex)
+    monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ.get('PATH', '')}")
+
+    env_dump = _env_dump(ctx, patchlet, execution_root=ctx.root, artifact_root=ctx.root)
+
+    run_dir = ctx.paths.runs_dir / "P0001_attempt1"
+    assert env_dump["CXOR_WORKER_MEMORY_DIR"] == str(run_dir / "worker_memory")
+    assert env_dump["CXOR_WORKER_HOOKS_DIR"] == str(run_dir / "worker_hooks")
+    assert env_dump["CXOR_GATES_DIR"] == str(run_dir / "gates")
+    assert env_dump["CXOR_DIAGNOSTICS_DIR"] == str(run_dir / "diagnostics")
+
+
+def test_codex_worker_env_exposes_preflight_and_final_report_paths(
+    git_repo: Path,
+    tmp_path: Path,
+    monkeypatch,
+):
+    ctx, patchlet = _setup_patchlet_ctx(git_repo)
+    fake_codex = tmp_path / "codex"
+    _write_fake_codex(fake_codex)
+    monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ.get('PATH', '')}")
+
+    env_dump = _env_dump(ctx, patchlet, execution_root=ctx.root, artifact_root=ctx.root)
+
+    stage_dir = ctx.paths.runs_dir / "P0001_attempt1" / "worker_stage"
+    assert env_dump["CXOR_PREFLIGHT_PATH"] == str(stage_dir / "00_preflight.md")
+    assert env_dump["CXOR_FINAL_REPORT_PATH"] == str(stage_dir / "05_final_report.md")
+
+
+def test_codex_worker_env_capsule_paths_are_under_target_run_dir_not_worktree(
+    git_repo: Path,
+    tmp_path: Path,
+    monkeypatch,
+):
+    ctx, patchlet = _setup_patchlet_ctx(git_repo)
+    fake_codex = tmp_path / "codex"
+    _write_fake_codex(fake_codex)
+    monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ.get('PATH', '')}")
+    execution_root = tmp_path / "execution-root"
+    shutil.copytree(ctx.root, execution_root)
+
+    env_dump = _env_dump(
+        ctx,
+        patchlet,
+        execution_root=execution_root,
+        artifact_root=ctx.root,
+        worktree_path=execution_root,
+    )
+
+    assert env_dump["CXOR_WORKER_STAGE_DIR"].startswith(str(ctx.paths.runs_dir))
+    assert env_dump["CXOR_PREFLIGHT_PATH"].startswith(str(ctx.paths.runs_dir))
+    assert env_dump["CXOR_FINAL_REPORT_PATH"].startswith(str(ctx.paths.runs_dir))
+    assert not env_dump["CXOR_WORKER_STAGE_DIR"].startswith(str(execution_root))
+    assert not env_dump["CXOR_PREFLIGHT_PATH"].startswith(str(execution_root))
+    assert not env_dump["CXOR_FINAL_REPORT_PATH"].startswith(str(execution_root))

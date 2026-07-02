@@ -612,3 +612,54 @@ def test_diagnosis_timeout_links_progress_jsonl_when_present(git_repo: Path):
     assert diagnosis["evidence_paths"]["progress_jsonl"].endswith("progress.jsonl")
     assert "progress_jsonl_present" in diagnosis["observed_signals"]
     assert "Codex was alive before timeout" in diagnosis["diagnosis"]["summary"]
+
+
+def test_diagnosis_classifies_target_root_worker_stage_as_capsule_path_violation(git_repo: Path):
+    from codex_orchestrator.diagnostics import diagnose_real_codex_attempt
+
+    ctx = _initialized_ctx(git_repo)
+    (ctx.root / "worker_stage").mkdir()
+    attempt_id = _seed_failed_real_codex_attempt(
+        ctx,
+        stderr_text="Worktree execution requires a clean target repo; dirty paths: worker_stage/\n",
+    )
+
+    result = diagnose_real_codex_attempt(ctx, attempt_id=attempt_id)
+    diagnosis = _read_json(Path(result["diagnosis_json_path"]))
+
+    assert diagnosis["diagnosis"]["primary_category"] == "worker_capsule_path_violation"
+    assert "target_root_worker_stage_present" in diagnosis["observed_signals"]
+
+
+def test_diagnosis_capsule_path_violation_lists_expected_capsule_stage_dir(git_repo: Path):
+    from codex_orchestrator.diagnostics import diagnose_real_codex_attempt
+
+    ctx = _initialized_ctx(git_repo)
+    (ctx.root / "worker_stage").mkdir()
+    attempt_id = _seed_failed_real_codex_attempt(
+        ctx,
+        stderr_text="Worktree execution requires a clean target repo; dirty paths: worker_stage/\n",
+    )
+
+    result = diagnose_real_codex_attempt(ctx, attempt_id=attempt_id)
+    diagnosis = _read_json(Path(result["diagnosis_json_path"]))
+
+    assert ".codex-orchestrator/runs/P0001_attempt1/worker_stage/" in diagnosis["diagnosis"]["summary"]
+    assert diagnosis["capsule"]["worker_stage_dir"] == ".codex-orchestrator/runs/P0001_attempt1/worker_stage"
+
+
+def test_diagnosis_capsule_path_violation_recommends_path_instruction_fix(git_repo: Path):
+    from codex_orchestrator.diagnostics import diagnose_real_codex_attempt
+
+    ctx = _initialized_ctx(git_repo)
+    (ctx.root / "worker_stage").mkdir()
+    attempt_id = _seed_failed_real_codex_attempt(
+        ctx,
+        stderr_text="Worktree execution requires a clean target repo; dirty paths: worker_stage/\n",
+    )
+
+    result = diagnose_real_codex_attempt(ctx, attempt_id=attempt_id)
+    diagnosis = _read_json(Path(result["diagnosis_json_path"]))
+
+    assert "CXOR_WORKER_STAGE_DIR" in diagnosis["recommended_next_action"]
+    assert "target-root worker_stage/" in diagnosis["recommended_next_action"]

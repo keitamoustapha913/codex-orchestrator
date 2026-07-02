@@ -104,6 +104,10 @@ def _task_contract_text(
     attempt_id = run_context.run_dir.name
     timeout_seconds = resolve_patchlet_timeout_seconds(os.environ)
     soft_deadline = soft_deadline_seconds(timeout_seconds)
+    worker_stage_dir = run_context.run_dir / "worker_stage"
+    preflight_path = worker_stage_dir / "00_preflight.md"
+    final_report_path = worker_stage_dir / "05_final_report.md"
+    target_root_worker_stage = run_context.target_root / "worker_stage"
     return (
         "# TASK CONTRACT\n\n"
         f"- patchlet id: `{patchlet_id}`\n"
@@ -115,11 +119,15 @@ def _task_contract_text(
         f"- allowed product/runtime file: `{allowed_file}`\n"
         f"- required report path: `.codex-orchestrator/reports/{patchlet_id}.json`\n"
         f"- required probe root: `.artifacts/probes/{patchlet_id}`\n"
-        f"- required stage files: `worker_stage/00_preflight.md`, `worker_stage/05_final_report.md`\n"
+        f"- worker stage dir env: `$CXOR_WORKER_STAGE_DIR` = `{worker_stage_dir}`\n"
+        f"- required preflight stage file: `$CXOR_WORKER_STAGE_DIR/00_preflight.md` = `{preflight_path}`\n"
+        f"- required final stage file: `$CXOR_WORKER_STAGE_DIR/05_final_report.md` = `{final_report_path}`\n"
+        f"- forbidden target-root stage dir: `{target_root_worker_stage}/`\n"
         "- required final status marker: `FINAL_STATUS: PASS` or explicit failure/blocking status\n"
         f"- time budget: hard timeout of {timeout_seconds} seconds\n"
         f"- soft deadline: Aim to finish by {soft_deadline} seconds\n"
-        "- if blocked near the budget, write `worker_stage/05_final_report.md` with explicit BLOCKED or FAILED status and preserve what you learned\n"
+        "- if blocked near the budget, write `$CXOR_FINAL_REPORT_PATH` with explicit BLOCKED or FAILED status and preserve what you learned\n"
+        "- Do not create target-root worker_stage/; all Worker Capsule stage files must stay under `$CXOR_WORKER_STAGE_DIR`\n"
         "- forbidden edit paths: any product/runtime file other than the allowed file; do not edit orchestrator source paths\n"
         "- root-cause/probe contract reminder: direct probe first, then minimal fix, then deterministic proof and negative controls\n"
         "- no blind retry rule: blind retry is not allowed\n"
@@ -214,14 +222,16 @@ def ensure_worker_memory(
     )
     (capsule.worker_memory_dir / "WRITE_THESE_FILES.md").write_text(
         "# WRITE THESE FILES\n\n"
-        "- `worker_stage/00_preflight.md`\n"
-        "- `worker_stage/05_final_report.md`\n"
+        f"- `$CXOR_WORKER_STAGE_DIR/00_preflight.md` (`{capsule.worker_stage_dir / '00_preflight.md'}`)\n"
+        f"- `$CXOR_WORKER_STAGE_DIR/05_final_report.md` (`{capsule.worker_stage_dir / '05_final_report.md'}`)\n"
         f"- `.codex-orchestrator/reports/{patchlet['patchlet_id']}.json`\n"
         f"- `.artifacts/probes/{patchlet['patchlet_id']}/...`\n"
         + "\n"
+        f"Do not create target-root worker_stage/ at `{ctx.root}/worker_stage/`. "
+        "All Worker Capsule stage artifacts must be written under `$CXOR_WORKER_STAGE_DIR`.\n\n"
         f"Time budget: hard timeout of {timeout_seconds} seconds; aim to finish by {soft_deadline} seconds. "
         "If you cannot complete, stop before the hard timeout and write "
-        "`worker_stage/05_final_report.md` with explicit BLOCKED or FAILED status. "
+        "`$CXOR_FINAL_REPORT_PATH` with explicit BLOCKED or FAILED status. "
         "Preserve what you learned. Do not keep investigating indefinitely. Do not use blind retry.\n",
         encoding="utf-8",
     )

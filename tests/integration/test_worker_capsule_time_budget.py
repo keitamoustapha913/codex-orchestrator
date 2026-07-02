@@ -68,8 +68,46 @@ def test_write_these_files_tells_codex_to_stop_before_timeout(git_repo: Path):
     text = (capsule.worker_memory_dir / "WRITE_THESE_FILES.md").read_text(encoding="utf-8")
 
     assert "stop before the hard timeout" in text
-    assert "worker_stage/05_final_report.md" in text
+    assert "CXOR_FINAL_REPORT_PATH" in text
     assert "BLOCKED or FAILED" in text
+
+
+def test_write_these_files_uses_cxor_worker_stage_dir_for_stage_paths(git_repo: Path):
+    _, _, _, capsule = _setup(git_repo)
+
+    text = (capsule.worker_memory_dir / "WRITE_THESE_FILES.md").read_text(encoding="utf-8")
+
+    assert "$CXOR_WORKER_STAGE_DIR/00_preflight.md" in text
+    assert "$CXOR_WORKER_STAGE_DIR/05_final_report.md" in text
+
+
+def test_write_these_files_contains_absolute_worker_stage_paths(git_repo: Path):
+    _, _, _, capsule = _setup(git_repo)
+
+    text = (capsule.worker_memory_dir / "WRITE_THESE_FILES.md").read_text(encoding="utf-8")
+
+    assert str(capsule.worker_stage_dir / "00_preflight.md") in text
+    assert str(capsule.worker_stage_dir / "05_final_report.md") in text
+
+
+def test_write_these_files_forbids_target_root_worker_stage(git_repo: Path):
+    ctx, _, _, capsule = _setup(git_repo)
+
+    text = (capsule.worker_memory_dir / "WRITE_THESE_FILES.md").read_text(encoding="utf-8")
+
+    assert f"{ctx.root}/worker_stage/" in text
+    assert "Do not create target-root worker_stage/" in text
+
+
+def test_task_contract_uses_absolute_capsule_stage_paths(git_repo: Path):
+    _, _, _, capsule = _setup(git_repo)
+
+    text = (capsule.worker_memory_dir / "TASK_CONTRACT.md").read_text(encoding="utf-8")
+
+    assert str(capsule.worker_stage_dir / "00_preflight.md") in text
+    assert str(capsule.worker_stage_dir / "05_final_report.md") in text
+    assert "$CXOR_WORKER_STAGE_DIR/00_preflight.md" in text
+    assert "$CXOR_WORKER_STAGE_DIR/05_final_report.md" in text
 
 
 def test_codex_worker_env_exposes_cxor_timeout_and_soft_deadline(

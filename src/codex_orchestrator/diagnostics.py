@@ -67,6 +67,78 @@ def _contains_any(text: str, patterns: list[str]) -> bool:
     return any(pattern in haystack for pattern in patterns)
 
 
+CAPSULE_LIKE_TARGET_ROOT_DIRS = (
+    "worker_stage",
+    "worker_memory",
+    "worker_hooks",
+    "gates",
+    "diagnostics",
+)
+
+
+def _capsule_path_violation(
+    ctx: TargetRepoContext,
+    *,
+    run: dict[str, Any],
+    run_dir: Path | None,
+    wrapper_gate_path: Path | None,
+) -> tuple[list[str], dict[str, Any], list[str], str] | None:
+    observed_signals: list[str] = []
+    supported_by: list[str] = []
+    wrong_dirs: list[str] = []
+
+    for dirname in CAPSULE_LIKE_TARGET_ROOT_DIRS:
+        if (ctx.root / dirname).exists():
+            wrong_dirs.append(dirname)
+            observed_signals.append(f"target_root_{dirname}_present")
+            supported_by.append(f"{dirname}/")
+
+    worker_failure_message = str(run.get("worker_failure", {}).get("message", ""))
+    wrapper_gate = _load_json_object(wrapper_gate_path)
+    wrapper_reasons = "\n".join(str(reason) for reason in wrapper_gate.get("reasons", []) if reason)
+    evidence_text = "\n".join([worker_failure_message, wrapper_reasons])
+    for dirname in CAPSULE_LIKE_TARGET_ROOT_DIRS:
+        if (
+            f"worker capsule artifact written outside run directory: {dirname}/" in evidence_text
+            or f"dirty paths: {dirname}/" in evidence_text
+        ):
+            if dirname not in wrong_dirs:
+                wrong_dirs.append(dirname)
+            observed_signals.append(f"preserved_{dirname}_path_violation_message")
+            supported_by.append("run_manifest.json")
+            if wrapper_reasons:
+                supported_by.append("wrapper_gate_result.json")
+
+    if not wrong_dirs:
+        return None
+
+    expected_stage_dir = (
+        relative_to_repo(ctx.root, run_dir / "worker_stage") + "/"
+        if run_dir is not None
+        else ".codex-orchestrator/runs/<attempt>/worker_stage/"
+    )
+    summary = (
+        "Codex wrote Worker Capsule-like artifacts outside the run directory. "
+        f"Expected worker_stage artifacts under {expected_stage_dir}; "
+        "target-root worker_stage/ is forbidden."
+    )
+    return (
+        sorted(set(observed_signals)),
+        {
+            "primary_category": "worker_capsule_path_violation",
+            "confidence": "high",
+            "summary": summary,
+            "supported_by": sorted(set(supported_by or ["run_manifest.json"])),
+        },
+        [],
+        (
+            "Fix prompt/path instructions so Codex writes stage files to "
+            "CXOR_WORKER_STAGE_DIR and CXOR_FINAL_REPORT_PATH; do not create "
+            "target-root worker_stage/. Keep validators intact."
+        ),
+    )
+
+
 def _analyze_signals(
     stderr_text: str,
     stdout_text: str,
@@ -308,14 +380,23 @@ def diagnose_real_codex_attempt(ctx: TargetRepoContext, *, attempt_id: str, prom
     command = _load_json_object(command_path)
     output_events = _load_jsonl_events(output_jsonl_path)
     worker_events = _load_jsonl_events(worker_events_path)
-    observed_signals, diagnosis_block, known_unknowns, next_action = _analyze_signals(
-        stderr_text,
-        stdout_text,
-        output_events,
-        artifact_presence,
-        command=command,
+    capsule_violation = _capsule_path_violation(
+        ctx,
         run=run,
+        run_dir=run_dir,
+        wrapper_gate_path=wrapper_gate_path,
     )
+    if capsule_violation is not None:
+        observed_signals, diagnosis_block, known_unknowns, next_action = capsule_violation
+    else:
+        observed_signals, diagnosis_block, known_unknowns, next_action = _analyze_signals(
+            stderr_text,
+            stdout_text,
+            output_events,
+            artifact_presence,
+            command=command,
+            run=run,
+        )
     if artifact_presence["worker_capsule"]:
         observed_signals.append("worker_capsule_present")
     if artifact_presence["worker_memory"]:
@@ -326,7 +407,10 @@ def diagnose_real_codex_attempt(ctx: TargetRepoContext, *, attempt_id: str, prom
         observed_signals.append("final_report_stage_missing")
     if artifact_presence["wrapper_gate_result"]:
         observed_signals.append("wrapper_gate_result_present")
-    if not artifact_presence["preflight_stage"] and diagnosis_block["primary_category"] != "orchestrator_subprocess_timeout":
+    if not artifact_presence["preflight_stage"] and diagnosis_block["primary_category"] not in {
+        "orchestrator_subprocess_timeout",
+        "worker_capsule_path_violation",
+    }:
         next_action = (
             "Inspect the generated prompt artifact and TASK_CONTRACT.md path usage before rerunning the opt-in smoke."
         )

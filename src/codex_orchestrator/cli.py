@@ -259,6 +259,28 @@ def cmd_diagnose_real_codex(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_real_codex_smoke_runbook(args: argparse.Namespace) -> int:
+    from codex_orchestrator.real_codex_operator_runbook import (
+        DEFAULT_SKIP_COMMAND,
+        EXPLICIT_SMOKE_COMMAND,
+        command_from_string,
+        run_real_codex_smoke_runbook,
+    )
+
+    repo_root = Path.cwd()
+    result = run_real_codex_smoke_runbook(
+        repo_root=repo_root,
+        operator_root=args.operator_root,
+        timestamp=args.timestamp,
+        dry_run=args.dry_run,
+        run_real_codex=args.run_real_codex,
+        default_skip_command=command_from_string(args.default_skip_command, DEFAULT_SKIP_COMMAND),
+        explicit_smoke_command=command_from_string(args.explicit_smoke_command, EXPLICIT_SMOKE_COMMAND),
+    )
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0
+
+
 def cmd_inspect_capsule(args: argparse.Namespace) -> int:
     ctx = _ctx(args)
     run_dir = ctx.paths.runs_dir / args.attempt
@@ -438,6 +460,16 @@ def build_parser() -> argparse.ArgumentParser:
     auto.add_argument("--use-worktree", action="store_true")
     auto.add_argument("--max-iterations", type=int, default=100)
     auto.set_defaults(func=cmd_auto)
+
+    runbook = sub.add_parser("real-codex-smoke-runbook")
+    mode = runbook.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--dry-run", action="store_true")
+    mode.add_argument("--run-real-codex", action="store_true")
+    runbook.add_argument("--operator-root", type=Path, default=None)
+    runbook.add_argument("--timestamp", default=None, help=argparse.SUPPRESS)
+    runbook.add_argument("--default-skip-command", default=None, help=argparse.SUPPRESS)
+    runbook.add_argument("--explicit-smoke-command", default=None, help=argparse.SUPPRESS)
+    runbook.set_defaults(func=cmd_real_codex_smoke_runbook)
 
     return parser
 

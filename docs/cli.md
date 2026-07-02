@@ -27,6 +27,7 @@ cxor verify-global
 cxor inspect-capsule
 cxor validate-capsule
 cxor diagnose-real-codex
+cxor real-codex-smoke-runbook
 cxor classify-failures
 cxor plan-repair
 cxor apply-repair
@@ -131,6 +132,23 @@ liveness artifact exists.
 The explicit real-Codex smoke is operator-run only and is not part of the
 default test suite.
 
+Operator-controlled real-Codex smoke runbook:
+
+```bash
+uv run --no-sync cxor real-codex-smoke-runbook --dry-run
+CODEX_PATCHLET_TIMEOUT_SECONDS=600 uv run --no-sync cxor real-codex-smoke-runbook --run-real-codex
+```
+
+Dry-run mode does not invoke real Codex and records outcome dry_run. Explicit
+mode may consume account, network, model, token, and wall-clock resources up to
+`CODEX_PATCHLET_TIMEOUT_SECONDS`. Each run writes
+`.operator-runs/real-codex-smoke/<timestamp>-real-codex-smoke/` with
+`selected_policy.json`, `result.json`, `diagnosis_paths.json`,
+`explicit_smoke_stdout.txt`, and `explicit_smoke_stderr.txt`. Compare runs by
+diffing `selected_policy.json`, `result.json`, and `diagnosis_paths.json`.
+`safe_failure is a successful runbook capture`, not task DONE; `DONE means the
+orchestrator validators accepted the run`.
+
 Patchlet Codex defaults to `gpt-5.4-mini` and reasoning `medium`.
 Non-patchlet/orchestrator Codex profiles default to `gpt-5.5` and reasoning
 `medium`.
@@ -185,6 +203,12 @@ These commands are read-only for product/runtime files. `inspect-capsule`
 prints per-attempt capsule paths and presence bits. `validate-capsule`
 validates `worker_capsule.json`, `LIVE_MEMORY.json`, `ALLOWED_PATHS.json`,
 `events.jsonl`, and `wrapper_gate_result.json` when present.
+
+Real Codex must write Worker Capsule stage files under `CXOR_WORKER_STAGE_DIR`.
+Do not create target-root worker_stage/. If Codex writes a top-level
+`worker_stage/`, `diagnose-real-codex` reports
+`worker_capsule_path_violation`. This is a Codex path-obedience issue, not an
+orchestrator wiring failure. Do not weaken validators.
 
 `diagnose-real-codex` is also read-only and summarizes preserved failure
 evidence before writing diagnosis artifacts. `verify-group` and

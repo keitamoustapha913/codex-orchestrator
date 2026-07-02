@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import os
 from pathlib import Path
 
@@ -209,3 +210,84 @@ def test_run_manifest_references_wrapper_gate_result(git_repo: Path):
 
     run = read_json(ctx.paths.run_manifest)["runs"][-1]
     assert run["wrapper_gate_result"] == ".codex-orchestrator/runs/P0001_attempt1/gates/wrapper_gate_result.json"
+
+
+def _write_wrong_worker_stage_fake_codex(path: Path) -> None:
+    _write_fake_codex(
+        path,
+        """#!/usr/bin/env python3
+import json
+import os
+from pathlib import Path
+
+target_root = Path(os.environ["CXOR_TARGET_ROOT"])
+(target_root / "worker_stage").mkdir(parents=True, exist_ok=True)
+(target_root / "worker_stage" / "05_final_report.md").write_text("FINAL_STATUS: PASS\\n", encoding="utf-8")
+report_path = Path(os.environ["CXOR_REPORT_PATH"])
+report_path.parent.mkdir(parents=True, exist_ok=True)
+report_path.write_text(json.dumps({
+    "schema_version": "1.0",
+    "kind": "patchlet_report",
+    "patchlet_id": os.environ["CXOR_PATCHLET_ID"],
+    "status": "VERIFIED_NO_CHANGE_NEEDED"
+}), encoding="utf-8")
+print("wrong worker_stage path written")
+""",
+    )
+
+
+def test_wrapper_gate_reports_capsule_artifact_wrong_path(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    ctx = _compiled_ctx(git_repo)
+    fake_codex = tmp_path / "codex"
+    _write_wrong_worker_stage_fake_codex(fake_codex)
+    monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ.get('PATH', '')}")
+
+    with pytest.raises(WorkerExecutionError):
+        run_next_patchlet(ctx, worker_mode="real_codex", use_worktree=True)
+
+    gate = read_json(ctx.paths.runs_dir / "P0001_attempt1" / "gates" / "wrapper_gate_result.json")
+    expected = (
+        "worker capsule artifact written outside run directory: worker_stage/; "
+        "expected worker_stage artifacts under .codex-orchestrator/runs/P0001_attempt1/worker_stage/"
+    )
+    assert expected in gate["reasons"]
+
+
+def test_run_manifest_records_capsule_path_violation_when_worker_stage_written_to_target_root(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    ctx = _compiled_ctx(git_repo)
+    fake_codex = tmp_path / "codex"
+    _write_wrong_worker_stage_fake_codex(fake_codex)
+    monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ.get('PATH', '')}")
+
+    with pytest.raises(WorkerExecutionError):
+        run_next_patchlet(ctx, worker_mode="real_codex", use_worktree=True)
+
+    run = read_json(ctx.paths.run_manifest)["runs"][-1]
+    assert run["worker_failure"]["failure_category"] == "worker_capsule_path_violation"
+    assert "worker capsule artifact written outside run directory: worker_stage/" in run["worker_failure"]["message"]
+
+
+def test_wrong_capsule_path_failure_does_not_mutate_product_file(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    ctx = _compiled_ctx(git_repo)
+    before = hashlib.sha256((ctx.root / "app.py").read_bytes()).hexdigest()
+    fake_codex = tmp_path / "codex"
+    _write_wrong_worker_stage_fake_codex(fake_codex)
+    monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ.get('PATH', '')}")
+
+    with pytest.raises(WorkerExecutionError):
+        run_next_patchlet(ctx, worker_mode="real_codex", use_worktree=True)
+
+    after = hashlib.sha256((ctx.root / "app.py").read_bytes()).hexdigest()
+    assert after == before

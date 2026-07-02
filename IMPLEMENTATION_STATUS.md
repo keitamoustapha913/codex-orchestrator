@@ -46,7 +46,7 @@ Implemented capabilities:
 The test suite was written before/alongside implementation and currently passes:
 
 ```text
-369 passed, 2 skipped
+448 passed, 2 skipped
 ```
 
 Covered tests:
@@ -94,6 +94,8 @@ uv run --no-sync pytest -q tests/smoke/test_real_codex_auto_worktree.py --run-re
 cxor inspect-capsule --repo /path/to/target-repo --attempt P0001_attempt1
 cxor validate-capsule --repo /path/to/target-repo --attempt P0001_attempt1
 cxor diagnose-real-codex --repo /path/to/target-repo --attempt P0001_attempt1
+cxor real-codex-smoke-runbook --dry-run
+CODEX_PATCHLET_TIMEOUT_SECONDS=600 cxor real-codex-smoke-runbook --run-real-codex
 ```
 
 `No blind retry` remains a required contract.
@@ -141,6 +143,17 @@ bounded containment, not task success, and links `progress.jsonl` when present.
 The explicit real-Codex smoke remains an operator-run command, not part of the
 default test suite.
 
+The operator-controlled smoke runbook writes timestamped artifacts under
+`.operator-runs/real-codex-smoke/<timestamp>-real-codex-smoke/`, including
+`selected_policy.json`, `result.json`, `diagnosis_paths.json`,
+`explicit_smoke_stdout.txt`, and `explicit_smoke_stderr.txt`. Dry-run mode does
+not invoke real Codex and records outcome dry_run. Explicit mode may consume
+account, network, model, token, and wall-clock resources up to
+`CODEX_PATCHLET_TIMEOUT_SECONDS`. Compare runs by diffing
+`selected_policy.json`, `result.json`, and `diagnosis_paths.json`.
+`safe_failure is a successful runbook capture`, not task DONE; `DONE means the
+orchestrator validators accepted the run`.
+
 Patchlet Codex defaults to `gpt-5.4-mini` with reasoning `medium`.
 Non-patchlet/orchestrator Codex profiles default to `gpt-5.5` with reasoning
 `medium`.
@@ -184,3 +197,9 @@ Implemented and covered:
 - read-only `cxor diagnose-real-codex`
 
 Memory is context, not proof. The orchestrator writes gate results.
+
+Real Codex must write Worker Capsule stage files under `CXOR_WORKER_STAGE_DIR`
+and the exact `CXOR_PREFLIGHT_PATH` / `CXOR_FINAL_REPORT_PATH` values. Do not
+create target-root worker_stage/. A top-level `worker_stage/` is diagnosed as
+`worker_capsule_path_violation`. This is a Codex path-obedience issue, not
+orchestrator wiring failure. Do not weaken validators.

@@ -54,8 +54,14 @@ class CodexExecWorker(Worker):
         task_contract_path = run_dir / "worker_memory" / "TASK_CONTRACT.md"
         live_memory_md_path = run_dir / "worker_memory" / "LIVE_MEMORY.md"
         write_these_files_path = run_dir / "worker_memory" / "WRITE_THESE_FILES.md"
+        worker_stage_dir = run_dir / "worker_stage"
+        worker_memory_dir = run_dir / "worker_memory"
+        worker_hooks_dir = run_dir / "worker_hooks"
+        gates_dir = run_dir / "gates"
+        diagnostics_dir = run_dir / "diagnostics"
         preflight_stage_path = run_dir / "worker_stage" / "00_preflight.md"
         final_report_stage_path = run_dir / "worker_stage" / "05_final_report.md"
+        forbidden_target_worker_stage = run_ctx.target_root / "worker_stage"
         attempt_prompt_path = run_dir / "codex_task_prompt.md"
         progress_path = run_dir / "progress.jsonl"
         attempt_prompt_text = (
@@ -63,13 +69,23 @@ class CodexExecWorker(Worker):
             f"- {task_contract_path}\n"
             f"- {live_memory_md_path}\n"
             f"- {write_these_files_path}\n\n"
-            "Then write:\n"
-            f"- {preflight_stage_path}\n\n"
-            "Before final response, write:\n"
-            f"- {final_report_stage_path}\n\n"
+            "Use explicit Worker Capsule paths from the environment:\n"
+            f"- CXOR_WORKER_STAGE_DIR={worker_stage_dir}\n"
+            f"- CXOR_WORKER_MEMORY_DIR={worker_memory_dir}\n"
+            f"- CXOR_WORKER_HOOKS_DIR={worker_hooks_dir}\n"
+            f"- CXOR_GATES_DIR={gates_dir}\n"
+            f"- CXOR_DIAGNOSTICS_DIR={diagnostics_dir}\n"
+            f"- CXOR_PREFLIGHT_PATH={preflight_stage_path}\n"
+            f"- CXOR_FINAL_REPORT_PATH={final_report_stage_path}\n\n"
+            "Then write the preflight only to:\n"
+            f"- $CXOR_PREFLIGHT_PATH ({preflight_stage_path})\n\n"
+            "Before final response, write the final report only to:\n"
+            f"- $CXOR_FINAL_REPORT_PATH ({final_report_stage_path})\n\n"
+            f"Do not create target-root worker_stage/ at {forbidden_target_worker_stage}/. "
+            "All Worker Capsule stage files must stay under $CXOR_WORKER_STAGE_DIR.\n\n"
             f"You have a hard timeout of {self.timeout_seconds} seconds. "
             f"Aim to finish by {self.soft_deadline_seconds} seconds. "
-            "If you cannot complete, write worker_stage/05_final_report.md with an explicit "
+            "If you cannot complete, write $CXOR_FINAL_REPORT_PATH with an explicit "
             "BLOCKED or FAILED status and preserve what you learned. "
             "Do not keep investigating indefinitely. Do not use blind retry.\n\n"
             "Do not write gate results. The orchestrator writes gates.\n\n"
@@ -163,6 +179,13 @@ class CodexExecWorker(Worker):
                 "CXOR_REPORTS_DIR": str(run_ctx.reports_dir),
                 "CXOR_RUNS_DIR": str(run_ctx.runs_dir),
                 "CXOR_RUN_DIR": str(run_dir),
+                "CXOR_WORKER_STAGE_DIR": str(worker_stage_dir),
+                "CXOR_WORKER_MEMORY_DIR": str(worker_memory_dir),
+                "CXOR_WORKER_HOOKS_DIR": str(worker_hooks_dir),
+                "CXOR_GATES_DIR": str(gates_dir),
+                "CXOR_DIAGNOSTICS_DIR": str(diagnostics_dir),
+                "CXOR_PREFLIGHT_PATH": str(preflight_stage_path),
+                "CXOR_FINAL_REPORT_PATH": str(final_report_stage_path),
                 "CXOR_PATCHLET_ID": patchlet_id,
                 "CXOR_ATTEMPT_ID": run_dir.name,
                 "CXOR_TIMEOUT_SECONDS": str(self.timeout_seconds),

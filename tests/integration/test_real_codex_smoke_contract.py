@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import os
 import subprocess
 import sys
@@ -101,6 +102,31 @@ report_path.write_text(json.dumps({
 }, indent=2) + "\\n", encoding="utf-8")
 print(str(execution_root))
 print("fake real_codex success parity", file=__import__("sys").stderr)
+""",
+        encoding="utf-8",
+    )
+    path.chmod(0o755)
+
+
+def _write_wrong_worker_stage_fake_codex(path: Path) -> None:
+    path.write_text(
+        """#!/usr/bin/env python3
+import json
+import os
+from pathlib import Path
+
+target_root = Path(os.environ["CXOR_TARGET_ROOT"])
+(target_root / "worker_stage").mkdir(parents=True, exist_ok=True)
+(target_root / "worker_stage" / "05_final_report.md").write_text("FINAL_STATUS: PASS\\n", encoding="utf-8")
+report_path = Path(os.environ["CXOR_REPORT_PATH"])
+report_path.parent.mkdir(parents=True, exist_ok=True)
+report_path.write_text(json.dumps({
+    "schema_version": "1.0",
+    "kind": "patchlet_report",
+    "patchlet_id": os.environ["CXOR_PATCHLET_ID"],
+    "status": "VERIFIED_NO_CHANGE_NEEDED"
+}), encoding="utf-8")
+print("wrong worker_stage path written")
 """,
         encoding="utf-8",
     )
@@ -806,6 +832,32 @@ def test_real_codex_prompt_mentions_worker_stage_final_report_path(
     assert "worker_stage/05_final_report.md" in prompt_text
 
 
+def test_real_codex_prompt_forbids_top_level_worker_stage_directory(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    fake_bin_dir = tmp_path / "fake-bin"
+    fake_bin_dir.mkdir()
+    fake_codex = fake_bin_dir / "codex"
+    _write_contract_sensitive_fake_codex(fake_codex)
+    monkeypatch.setenv("PATH", f"{fake_bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+
+    ctx = resolve_target_repo(repo=git_repo)
+    result = run_real_codex_auto_worktree_smoke(
+        ctx,
+        master=git_repo / "master_prompt.md",
+        allow_real_codex=True,
+        codex_binary="codex",
+        max_iterations=25,
+    )
+
+    prompt_text = Path(result["prompt_artifact_path"]).read_text(encoding="utf-8")
+    assert "CXOR_WORKER_STAGE_DIR" in prompt_text
+    assert "Do not create target-root worker_stage/" in prompt_text
+    assert f"{ctx.root}/worker_stage/" in prompt_text
+
+
 def test_real_codex_prompt_mentions_wrapper_gate_is_orchestrator_owned(
     git_repo: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1238,6 +1290,79 @@ time.sleep(5)
     assert result["outcome"] == "safe_failure"
     assert result["timed_out"] is True
     assert result["diagnosis_primary_category"] == "orchestrator_subprocess_timeout"
+
+
+def test_fake_codex_wrong_worker_stage_path_is_rejected(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    fake_bin_dir = tmp_path / "fake-bin"
+    fake_bin_dir.mkdir()
+    fake_codex = fake_bin_dir / "codex"
+    _write_wrong_worker_stage_fake_codex(fake_codex)
+    monkeypatch.setenv("PATH", f"{fake_bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+
+    ctx = resolve_target_repo(repo=git_repo)
+    result = run_real_codex_auto_worktree_smoke(
+        ctx,
+        master=git_repo / "master_prompt.md",
+        allow_real_codex=True,
+        codex_binary="codex",
+        max_iterations=25,
+    )
+
+    assert result["outcome"] == "safe_failure"
+    assert result["error_type"] == "WorkerExecutionError"
+    assert "worker capsule artifact written outside run directory: worker_stage/" in result["error_message"]
+
+
+def test_fake_codex_wrong_worker_stage_path_preserves_product_file_hash(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    before = hashlib.sha256((git_repo / "app.py").read_bytes()).hexdigest()
+    fake_bin_dir = tmp_path / "fake-bin"
+    fake_bin_dir.mkdir()
+    fake_codex = fake_bin_dir / "codex"
+    _write_wrong_worker_stage_fake_codex(fake_codex)
+    monkeypatch.setenv("PATH", f"{fake_bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+
+    ctx = resolve_target_repo(repo=git_repo)
+    run_real_codex_auto_worktree_smoke(
+        ctx,
+        master=git_repo / "master_prompt.md",
+        allow_real_codex=True,
+        codex_binary="codex",
+        max_iterations=25,
+    )
+
+    after = hashlib.sha256((git_repo / "app.py").read_bytes()).hexdigest()
+    assert after == before
+
+
+def test_fake_codex_wrong_worker_stage_path_diagnosis_is_capsule_path_violation(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    fake_bin_dir = tmp_path / "fake-bin"
+    fake_bin_dir.mkdir()
+    fake_codex = fake_bin_dir / "codex"
+    _write_wrong_worker_stage_fake_codex(fake_codex)
+    monkeypatch.setenv("PATH", f"{fake_bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+
+    ctx = resolve_target_repo(repo=git_repo)
+    result = run_real_codex_auto_worktree_smoke(
+        ctx,
+        master=git_repo / "master_prompt.md",
+        allow_real_codex=True,
+        codex_binary="codex",
+        max_iterations=25,
+    )
+
+    assert result["diagnosis_primary_category"] == "worker_capsule_path_violation"
     assert Path(result["diagnosis_json_path"]).exists()
 
 
