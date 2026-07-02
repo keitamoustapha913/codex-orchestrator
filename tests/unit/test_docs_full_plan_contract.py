@@ -134,3 +134,18 @@ def test_docs_explain_real_codex_smoke_artifact_inspection():
     assert ".codex-orchestrator/runs/" in text
     assert ".codex-orchestrator/failures/" in text
     assert ".artifacts/probes/" in text
+
+
+def test_docs_explain_real_codex_safe_failure_run_manifest_entry():
+    text = _docs_text()
+    assert "run_manifest.json" in text
+    assert "WORKER_FAILED" in text
+    assert "blind retry is not allowed" in text.lower()
+
+
+def test_docs_explain_real_codex_failed_attempt_artifact_paths():
+    text = _docs_text()
+    assert "stdout.txt" in text
+    assert "stderr.txt" in text
+    assert "command.json" in text
+    assert "output.jsonl" in text

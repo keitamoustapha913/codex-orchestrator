@@ -110,7 +110,10 @@ Operator rules:
 - do not weaken validators to make real Codex pass;
 - real Codex runs inside an isolated worktree and only validated diffs may merge back to the target repo;
 - real Codex failure is acceptable only when it stays contained and preserves evidence;
-- inspect `.codex-orchestrator/runs/`, `.codex-orchestrator/failures/`, and `.artifacts/probes/` after each smoke run.
+- inspect `run_manifest.json` for the failed patchlet attempt entry;
+- inspect `.codex-orchestrator/runs/`, `.codex-orchestrator/failures/`, and `.artifacts/probes/` after each smoke run;
+- on safe failure, expect a `WORKER_FAILED` run-manifest entry plus preserved `stdout.txt`, `stderr.txt`, `command.json`, and `output.jsonl`;
+- blind retry is not allowed.
 
 ## CI-safe commands
 

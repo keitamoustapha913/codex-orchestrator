@@ -91,7 +91,9 @@ This smoke is not part of the default test suite. It exercises `cxor auto --repo
 Operator rules:
 
 - do not weaken validators for real Codex;
+- inspect `run_manifest.json` for the failed patchlet attempt entry;
 - inspect `.codex-orchestrator/runs/`, `.codex-orchestrator/failures/`, and `.artifacts/probes/`;
+- on safe failure, expect a `WORKER_FAILED` run-manifest entry plus preserved `stdout.txt`, `stderr.txt`, `command.json`, and `output.jsonl`;
 - treat contained failure evidence as acceptable smoke output when real Codex does not reach `DONE`.
 
 CI-friendly commands that exist:

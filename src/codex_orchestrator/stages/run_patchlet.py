@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
 import subprocess
 from dataclasses import dataclass
 
 from codex_orchestrator.codex_adapter import worker_for_mode
+from codex_orchestrator.errors import WorkerExecutionError, WorkerPreconditionError
 from codex_orchestrator.git_guard import changed_between, git_diff, snapshot_status
 from codex_orchestrator.patchlet_run_context import PatchletRunContext, build_patchlet_run_context
 from codex_orchestrator.jsonio import read_json, write_json
@@ -22,6 +24,97 @@ class PatchletExecutionResult:
     changed_paths: list[str]
     report_valid: bool
     message: str
+
+
+def _record_path_for_manifest(ctx: TargetRepoContext, path) -> str | None:
+    if path is None:
+        return None
+    try:
+        return str(path.relative_to(ctx.root))
+    except ValueError:
+        return str(path)
+
+
+def _read_exit_code_from_run_dir(run_dir) -> int | None:
+    command_path = run_dir / "command.json"
+    if command_path.exists():
+        try:
+            return json.loads(command_path.read_text(encoding="utf-8")).get("exit_code")
+        except Exception:
+            return None
+    return None
+
+
+def _append_failed_worker_run_record(
+    ctx: TargetRepoContext,
+    *,
+    patchlet: dict,
+    run_ctx: PatchletRunContext,
+    worker_mode: str,
+    use_worktree: bool,
+    worktree_ctx,
+    cleanup_status: str | None,
+    worker_error: Exception,
+    state_stage: str,
+) -> None:
+    run_dir = run_ctx.run_dir
+    exit_code = _read_exit_code_from_run_dir(run_dir)
+    paths = {
+        "run_dir": _record_path_for_manifest(ctx, run_dir),
+        "stdout": _record_path_for_manifest(ctx, run_dir / "stdout.txt"),
+        "stderr": _record_path_for_manifest(ctx, run_dir / "stderr.txt"),
+        "command": _record_path_for_manifest(ctx, run_dir / "command.json"),
+        "output_jsonl": _record_path_for_manifest(ctx, run_dir / "output.jsonl"),
+        "diff": _record_path_for_manifest(ctx, run_dir / "diff.patch"),
+    }
+    append_run_record(ctx, {
+        "stage": "PATCHLET_EXECUTION_IN_PROGRESS",
+        "worker": worker_mode,
+        "worker_mode": worker_mode,
+        "patchlet_id": patchlet["patchlet_id"],
+        "attempt_id": run_dir.name,
+        "repair_plan_id": patchlet.get("repair_plan_id"),
+        "source_failure_ids": patchlet.get("source_failure_ids", []),
+        "execution_mode": "worktree" if use_worktree else "direct",
+        "status": "WORKER_FAILED",
+        "success": False,
+        "target_root": str(run_ctx.target_root),
+        "execution_root": str(run_ctx.execution_root),
+        "artifact_root": str(run_ctx.artifact_root),
+        "paths": paths,
+        "worktree": {
+            "enabled": use_worktree,
+            "path": str(run_ctx.worktree_path) if run_ctx.worktree_path else None,
+            "base_sha": worktree_ctx.base_sha if worktree_ctx else None,
+            "cleanup_policy": worktree_ctx.cleanup_policy if worktree_ctx else None,
+            "cleanup_status": cleanup_status,
+        },
+        "worker_failure": {
+            "type": type(worker_error).__name__,
+            "message": str(worker_error),
+            "exit_code": exit_code,
+            "retryable": False,
+            "blind_retry_allowed": False,
+            "failure_category": "worker_exception",
+        },
+        "artifact_preservation": {
+            "run_dir_exists": run_dir.exists(),
+            "stdout_exists": (run_dir / "stdout.txt").exists(),
+            "stderr_exists": (run_dir / "stderr.txt").exists(),
+            "command_exists": (run_dir / "command.json").exists(),
+            "output_jsonl_exists": (run_dir / "output.jsonl").exists(),
+            "diff_exists": (run_dir / "diff.patch").exists(),
+        },
+        "diff_validation": {
+            "valid": None,
+            "reason": "not_run_worker_failed_before_diff_validation",
+        },
+        "report_validation": {
+            "valid": None,
+            "reason": "not_run_worker_failed_before_report_validation",
+        },
+        "state_after_failure": state_stage,
+    })
 
 
 def _load_patchlet_index(ctx: TargetRepoContext) -> dict:
@@ -102,19 +195,47 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
         worktree_path=worktree_ctx.path if worktree_ctx else None,
     )
     run_dir = run_ctx.run_dir
-    before = snapshot_status(run_ctx.execution_root)
     worker = worker_for_mode(worker_mode)
-    worker_result = worker.run_patchlet(ctx, patchlet, run_dir=run_dir, run_ctx=run_ctx)
-    after = snapshot_status(run_ctx.execution_root)
-    changed_paths = changed_between(before, after)
-    diff_text = git_diff(run_ctx.execution_root)
-    run_dir.mkdir(parents=True, exist_ok=True)
-    diff_path = run_dir / "diff.patch"
-    diff_path.write_text(diff_text, encoding="utf-8")
-    (run_dir / "diff_name_status.txt").write_text("\n".join(changed_paths) + "\n", encoding="utf-8")
-
-    diff_result = validate_changed_paths(changed_paths, patchlet)
     cleanup_status = None
+    worker_error: WorkerExecutionError | WorkerPreconditionError | None = None
+    before = snapshot_status(run_ctx.execution_root)
+    worker_result = None
+    changed_paths: list[str] = []
+    diff_text = ""
+    diff_path = run_dir / "diff.patch"
+    diff_result = None
+    try:
+        worker_result = worker.run_patchlet(ctx, patchlet, run_dir=run_dir, run_ctx=run_ctx)
+        after = snapshot_status(run_ctx.execution_root)
+        changed_paths = changed_between(before, after)
+        diff_text = git_diff(run_ctx.execution_root)
+        run_dir.mkdir(parents=True, exist_ok=True)
+        diff_path.write_text(diff_text, encoding="utf-8")
+        (run_dir / "diff_name_status.txt").write_text("\n".join(changed_paths) + "\n", encoding="utf-8")
+        diff_result = validate_changed_paths(changed_paths, patchlet)
+    except (WorkerExecutionError, WorkerPreconditionError) as exc:
+        worker_error = exc
+    finally:
+        if worktree_ctx is not None:
+            worktree_ctx = cleanup_patchlet_worktree(worktree_ctx)
+            cleanup_status = worktree_ctx.cleanup_status
+
+    if worker_error is not None:
+        _append_failed_worker_run_record(
+            ctx,
+            patchlet=patchlet,
+            run_ctx=run_ctx,
+            worker_mode=worker_mode,
+            use_worktree=use_worktree,
+            worktree_ctx=worktree_ctx,
+            cleanup_status=cleanup_status,
+            worker_error=worker_error,
+            state_stage=load_state(ctx).stage,
+        )
+        raise worker_error
+
+    assert worker_result is not None
+    assert diff_result is not None
     failure_id: str | None = None
     report_valid = False
     report_status = "FAILED_WITH_EVIDENCE"
@@ -148,17 +269,19 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
             if report_valid and report_status in {"COMPLETE", "VERIFIED_NO_CHANGE_NEEDED"} and diff_text:
                 _apply_validated_diff_to_target(ctx, diff_path=diff_path)
     finally:
-        if worktree_ctx is not None:
-            worktree_ctx = cleanup_patchlet_worktree(worktree_ctx)
-            cleanup_status = worktree_ctx.cleanup_status
+        pass
 
     append_run_record(ctx, {
         "stage": "PATCHLET_EXECUTION_IN_PROGRESS",
         "worker": worker_mode,
+        "worker_mode": worker_mode,
         "patchlet_id": pid,
+        "attempt_id": run_id,
         "repair_plan_id": patchlet.get("repair_plan_id"),
         "source_failure_ids": patchlet.get("source_failure_ids", []),
         "execution_mode": "worktree" if use_worktree else "direct",
+        "status": report_status,
+        "success": report_status not in {"FAILED_WITH_EVIDENCE", "BLOCKED_WITH_EVIDENCE"},
         "target_root": str(run_ctx.target_root),
         "execution_root": str(run_ctx.execution_root),
         "artifact_root": str(run_ctx.artifact_root),
@@ -166,12 +289,24 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
         "stdout": worker_result.stdout,
         "stderr": worker_result.stderr,
         "changed_files": changed_paths,
+        "paths": {
+            "run_dir": _record_path_for_manifest(ctx, run_dir),
+            "stdout": _record_path_for_manifest(ctx, run_dir / "stdout.txt"),
+            "stderr": _record_path_for_manifest(ctx, run_dir / "stderr.txt"),
+            "command": _record_path_for_manifest(ctx, run_dir / "command.json"),
+            "output_jsonl": _record_path_for_manifest(ctx, run_dir / "output.jsonl"),
+            "diff": _record_path_for_manifest(ctx, diff_path),
+        },
         "diff_allowed": diff_result.allowed,
         "diff_validation": {
             "valid": diff_result.allowed,
             "changed_product_runtime_files": diff_result.product_runtime_paths,
             "artifact_files": diff_result.artifact_paths,
             "unauthorized_files": diff_result.unauthorized_paths,
+        },
+        "report_validation": {
+            "valid": report_valid,
+            "reason": None if report_valid else report_error,
         },
         "worktree": {
             "enabled": use_worktree,

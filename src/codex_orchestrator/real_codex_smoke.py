@@ -18,6 +18,7 @@ from .stages.init import init_workflow
 from .stages.normalize import normalize_master_prompt
 from .stages.auto import run_auto
 from .stages.run_patchlet import run_next_patchlet
+from .run_records import load_run_manifest
 
 
 def real_codex_smoke_enabled(explicit_flag: bool) -> bool:
@@ -127,6 +128,14 @@ def _latest_run_dir(ctx: TargetRepoContext) -> Path | None:
     return run_dirs[-1]
 
 
+def _latest_patchlet_run_entry(ctx: TargetRepoContext) -> dict | None:
+    manifest = load_run_manifest(ctx)
+    patchlet_runs = [run for run in manifest.get("runs", []) if run.get("patchlet_id")]
+    if not patchlet_runs:
+        return None
+    return patchlet_runs[-1]
+
+
 def _smoke_result(
     ctx: TargetRepoContext,
     *,
@@ -139,6 +148,7 @@ def _smoke_result(
     error_message: str | None = None,
 ) -> dict:
     run_dir = _latest_run_dir(ctx)
+    run_manifest_entry = _latest_patchlet_run_entry(ctx)
     return {
         "worker_mode": "real_codex",
         "use_worktree": True,
@@ -158,6 +168,7 @@ def _smoke_result(
         "reports_dir": str(ctx.paths.reports_dir),
         "probes_dir": str(ctx.paths.probe_dir),
         "runs_dir": str(ctx.paths.runs_dir),
+        "run_manifest_entry": run_manifest_entry,
         "run_dir": str(run_dir) if run_dir is not None else None,
         "stdout_path": str(run_dir / "stdout.txt") if run_dir is not None else None,
         "stderr_path": str(run_dir / "stderr.txt") if run_dir is not None else None,

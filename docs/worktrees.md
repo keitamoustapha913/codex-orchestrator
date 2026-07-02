@@ -28,3 +28,5 @@ uv run --no-sync pytest -q tests/smoke/test_real_codex_auto_worktree.py --run-re
 ```
 
 The real_codex smoke uses `cxor auto --use-worktree` so that Codex edits happen in the worktree first. The default suite does not run real Codex. Do not weaken validators to make the smoke pass. After the run, inspect `.codex-orchestrator/runs/`, `.codex-orchestrator/failures/`, and `.artifacts/probes/`.
+
+If the worker fails before diff or report validation, inspect `run_manifest.json` for a `WORKER_FAILED` entry and then inspect the preserved `stdout.txt`, `stderr.txt`, `command.json`, and `output.jsonl` files for that attempt. Blind retry is not allowed.

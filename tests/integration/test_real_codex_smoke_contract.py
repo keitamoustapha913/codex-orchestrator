@@ -240,6 +240,78 @@ raise SystemExit(17)
     assert Path(result["output_jsonl_path"]).exists()
 
 
+def test_real_codex_auto_worktree_safe_failure_contract_records_run_manifest_entry_with_fake_codex(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    fake_bin_dir = tmp_path / "fake-bin"
+    fake_bin_dir.mkdir()
+    fake_codex = fake_bin_dir / "codex"
+    _write_fake_codex(
+        fake_codex,
+        """#!/usr/bin/env python3
+import sys
+print("fake codex worker failure", file=sys.stderr)
+raise SystemExit(17)
+""",
+    )
+    monkeypatch.setenv("PATH", f"{fake_bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+
+    ctx = resolve_target_repo(repo=git_repo)
+    result = run_real_codex_auto_worktree_smoke(
+        ctx,
+        master=git_repo / "master_prompt.md",
+        allow_real_codex=True,
+        codex_binary="codex",
+        max_iterations=25,
+    )
+
+    manifest = read_json(Path(result["run_manifest_path"]))
+    patchlet_runs = [run for run in manifest["runs"] if run.get("patchlet_id") == "P0001"]
+
+    assert result["outcome"] == "safe_failure"
+    assert len(patchlet_runs) == 1
+    assert patchlet_runs[0]["status"] == "WORKER_FAILED"
+    assert patchlet_runs[0]["worker_failure"]["type"] == "WorkerExecutionError"
+    assert patchlet_runs[0]["execution_mode"] == "worktree"
+    assert patchlet_runs[0]["worktree"]["enabled"] is True
+
+
+def test_real_codex_auto_worktree_safe_failure_result_reports_manifest_entry(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    fake_bin_dir = tmp_path / "fake-bin"
+    fake_bin_dir.mkdir()
+    fake_codex = fake_bin_dir / "codex"
+    _write_fake_codex(
+        fake_codex,
+        """#!/usr/bin/env python3
+import sys
+print("fake codex worker failure", file=sys.stderr)
+raise SystemExit(17)
+""",
+    )
+    monkeypatch.setenv("PATH", f"{fake_bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+
+    ctx = resolve_target_repo(repo=git_repo)
+    result = run_real_codex_auto_worktree_smoke(
+        ctx,
+        master=git_repo / "master_prompt.md",
+        allow_real_codex=True,
+        codex_binary="codex",
+        max_iterations=25,
+    )
+
+    assert result["outcome"] == "safe_failure"
+    assert result["run_manifest_path"]
+    assert result["run_manifest_entry"]["patchlet_id"] == "P0001"
+    assert result["run_manifest_entry"]["status"] == "WORKER_FAILED"
+    assert result["run_manifest_entry"]["worker_failure"]["blind_retry_allowed"] is False
+
+
 def test_real_codex_auto_worktree_smoke_preserves_target_on_unauthorized_fake_codex_diff(
     git_repo: Path,
     monkeypatch: pytest.MonkeyPatch,
