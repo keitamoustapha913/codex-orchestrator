@@ -2,20 +2,47 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Goal Spec",
   "type": "object",
-  "required": ["schema_version", "kind", "master_goal", "success_goals", "target_invariants", "forbidden_actions", "runtime_constraints", "validation_commands", "allowed_edit_scope", "must_preserve", "known_failure_modes", "proof_requirements"],
+  "required": ["schema_version", "kind", "master_goal", "master_prompt_sha256", "success_goals", "target_invariants", "forbidden_actions", "runtime_constraints", "validation_commands", "allowed_edit_scope", "must_preserve", "known_failure_modes", "proof_requirements"],
   "properties": {
     "schema_version": {"const": "1.0"},
     "kind": {"const": "goal_spec"},
     "master_goal": {"type": "string"},
-    "success_goals": {"type": "array"},
-    "target_invariants": {"type": "array"},
-    "forbidden_actions": {"type": "array"},
-    "runtime_constraints": {"type": "array"},
-    "validation_commands": {"type": "array"},
-    "allowed_edit_scope": {"type": "array"},
-    "must_preserve": {"type": "array"},
-    "known_failure_modes": {"type": "array"},
-    "proof_requirements": {"type": "array"}
+    "master_prompt_sha256": {"type": "string"},
+    "success_goals": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["goal_id", "description", "status"],
+        "properties": {
+          "goal_id": {"type": "string"},
+          "description": {"type": "string"},
+          "status": {"enum": ["PENDING", "COMPLETE", "BLOCKED"]}
+        },
+        "additionalProperties": true
+      }
+    },
+    "target_invariants": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["invariant_id", "description", "status"],
+        "properties": {
+          "invariant_id": {"type": "string"},
+          "description": {"type": "string"},
+          "status": {"enum": ["PENDING", "COMPLETE", "BLOCKED"]}
+        },
+        "additionalProperties": true
+      }
+    },
+    "forbidden_actions": {"type": "array", "items": {"type": "string"}},
+    "runtime_constraints": {"type": "array", "items": {"type": "string"}},
+    "validation_commands": {"type": "array", "items": {"type": "string"}},
+    "allowed_edit_scope": {"type": "array", "items": {"type": "string"}},
+    "must_preserve": {"type": "array", "items": {"type": "string"}},
+    "known_failure_modes": {"type": "array", "items": {"type": "string"}},
+    "proof_requirements": {"type": "array", "items": {"type": "string"}}
   },
   "additionalProperties": true
 }

@@ -59,13 +59,28 @@ from pathlib import Path
 repo = Path.cwd()
 report_path = repo / ".codex-orchestrator" / "reports" / "P0001.json"
 report_path.parent.mkdir(parents=True, exist_ok=True)
+probe_root = repo / ".artifacts" / "probes" / "P0001"
+(probe_root / "run_001").mkdir(parents=True, exist_ok=True)
+(probe_root / "probe.py").write_text("print('probe')\\n", encoding="utf-8")
+(probe_root / "run_001" / "row_ledger.jsonl").write_text(json.dumps({"row": 1}) + "\\n", encoding="utf-8")
+(probe_root / "run_001" / "trace_ledger.jsonl").write_text(json.dumps({"trace": 1}) + "\\n", encoding="utf-8")
+(probe_root / "run_001" / "before_state.json").write_text(json.dumps({"value": "before"}) + "\\n", encoding="utf-8")
+(probe_root / "run_001" / "after_state.json").write_text(json.dumps({"value": "after"}) + "\\n", encoding="utf-8")
+(probe_root / "run_001" / "cleanup_proof.json").write_text(json.dumps({"cleanup_passed": True}) + "\\n", encoding="utf-8")
 report_path.write_text(json.dumps({
     "schema_version": "1.0",
     "kind": "patchlet_report",
     "patchlet_id": "P0001",
     "status": "VERIFIED_NO_CHANGE_NEEDED",
     "changed_product_runtime_file": None,
-    "changed_artifact_files": [".artifacts/probes/P0001/probe.py"],
+    "changed_artifact_files": [
+        ".artifacts/probes/P0001/probe.py",
+        ".artifacts/probes/P0001/run_001/row_ledger.jsonl",
+        ".artifacts/probes/P0001/run_001/trace_ledger.jsonl",
+        ".artifacts/probes/P0001/run_001/before_state.json",
+        ".artifacts/probes/P0001/run_001/after_state.json",
+        ".artifacts/probes/P0001/run_001/cleanup_proof.json"
+    ],
     "probe_commands": ["python .artifacts/probes/P0001/probe.py"],
     "deterministic_run_counts": {"baseline": "5/5", "proof_of_fix": "5/5", "negative_controls": "5/5"},
     "root_cause_classification": {
@@ -81,6 +96,11 @@ report_path.write_text(json.dumps({
     "row_ledger": [],
     "trace_ledger": [],
     "cleanup_proof": "probe created isolated temp data and cleaned it",
+    "probe_artifact_refs": [{
+        "patchlet_id": "P0001",
+        "probe_root": ".artifacts/probes/P0001",
+        "run_id": "run_001"
+    }],
     "acceptance_criteria_result": "pass"
 }, indent=2) + "\\n", encoding="utf-8")
 print(str(repo))

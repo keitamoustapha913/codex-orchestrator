@@ -33,8 +33,36 @@ def _default_report(patchlet: dict) -> dict:
         "row_ledger": [],
         "trace_ledger": [],
         "cleanup_proof": "mock probe writes no persistent product state",
+        "probe_artifact_refs": [{
+            "patchlet_id": pid,
+            "probe_root": f".artifacts/probes/{pid}",
+            "run_id": "run_001",
+        }],
         "acceptance_criteria_result": "pass",
     }
+
+
+def _write_probe_run_artifacts(ctx: TargetRepoContext, patchlet_id: str) -> list[str]:
+    probe_root = ctx.paths.probe_dir / patchlet_id
+    probe_root.mkdir(parents=True, exist_ok=True)
+    probe = probe_root / "probe.py"
+    probe.write_text("print('mock probe passed')\n", encoding="utf-8")
+
+    run_root = probe_root / "run_001"
+    run_root.mkdir(parents=True, exist_ok=True)
+    files_and_contents = {
+        "row_ledger.jsonl": json.dumps({"row": 1}) + "\n",
+        "trace_ledger.jsonl": json.dumps({"trace": 1}) + "\n",
+        "before_state.json": json.dumps({"state": "before"}) + "\n",
+        "after_state.json": json.dumps({"state": "after"}) + "\n",
+        "cleanup_proof.json": json.dumps({"cleanup_passed": True}) + "\n",
+    }
+    changed = [f".artifacts/probes/{patchlet_id}/probe.py"]
+    for name, content in files_and_contents.items():
+        path = run_root / name
+        path.write_text(content, encoding="utf-8")
+        changed.append(f".artifacts/probes/{patchlet_id}/run_001/{name}")
+    return changed
 
 
 class MockWorker(Worker):
@@ -53,12 +81,10 @@ class MockWorker(Worker):
             with product.open("a", encoding="utf-8") as fh:
                 fh.write("\n# cxor mock allowed product change\n")
 
-        probe_dir = ctx.paths.probe_dir / pid
-        probe_dir.mkdir(parents=True, exist_ok=True)
-        probe = probe_dir / "probe.py"
-        probe.write_text("print('mock probe passed')\n", encoding="utf-8")
+        changed_probe_artifacts = _write_probe_run_artifacts(ctx, pid)
 
         report = _default_report(patchlet)
+        report["changed_artifact_files"] = changed_probe_artifacts
         if scenario.get("status") == "COMPLETE":
             report["status"] = "COMPLETE"
             report["changed_product_runtime_file"] = patchlet["allowed_product_runtime_file"]

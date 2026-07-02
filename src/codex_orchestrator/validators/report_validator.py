@@ -4,8 +4,8 @@ from pathlib import Path
 from typing import Any
 
 from codex_orchestrator.jsonio import read_json
-from codex_orchestrator.paths import relative_to_repo
 
+from .probe_artifact_validator import validate_probe_artifact_run
 from .schema_validator import validate_json
 
 
@@ -93,11 +93,14 @@ def validate_patchlet_report(report: dict, patchlet: dict | None = None) -> None
         raise ReportValidationError("Report contains forbidden timing-luck language")
 
     run_counts = report.get("deterministic_run_counts") or {}
+    probe_artifact_refs = report.get("probe_artifact_refs") or []
     if status in {"COMPLETE", "VERIFIED_NO_CHANGE_NEEDED"}:
         if not _nonempty(run_counts.get("baseline")):
             raise ReportValidationError("Report must declare baseline deterministic run count")
         if not _nonempty(run_counts.get("negative_controls")):
             raise ReportValidationError("Report must declare negative control deterministic run count")
+        if not probe_artifact_refs:
+            raise ReportValidationError("Report must include probe_artifact_refs")
 
     root = report.get("root_cause_classification") or {}
     if status == "COMPLETE":
@@ -137,4 +140,14 @@ def validate_patchlet_report(report: dict, patchlet: dict | None = None) -> None
 def validate_patchlet_report_file(path: Path, patchlet: dict | None = None) -> dict:
     report = read_json(path)
     validate_patchlet_report(report, patchlet)
+    repo_root = path.parents[2] if len(path.parents) >= 3 else path.parent
+    for ref in report.get("probe_artifact_refs") or []:
+        if ref.get("patchlet_id") != report.get("patchlet_id"):
+            raise ReportValidationError("Report probe_artifact_refs patchlet_id does not match report patchlet_id")
+        probe_root = repo_root / ref["probe_root"]
+        run_dir = probe_root / ref["run_id"]
+        result = validate_probe_artifact_run(run_dir, patchlet_id=ref["patchlet_id"])
+        if not result["valid"]:
+            codes = ", ".join(error["code"] for error in result["errors"])
+            raise ReportValidationError(f"Invalid probe artifact reference: {codes}; probe artifact validation failed")
     return report

@@ -22,6 +22,19 @@
     "row_ledger": {"type": "array"},
     "trace_ledger": {"type": "array"},
     "cleanup_proof": {"type": "string"},
+    "probe_artifact_refs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["patchlet_id", "probe_root", "run_id"],
+        "properties": {
+          "patchlet_id": {"type": "string"},
+          "probe_root": {"type": "string"},
+          "run_id": {"type": "string"}
+        },
+        "additionalProperties": true
+      }
+    },
     "acceptance_criteria_result": {"enum": ["pass", "fail", "blocked"]}
   },
   "additionalProperties": true

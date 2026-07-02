@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from codex_orchestrator.validators.diff_validator import validate_changed_paths
-from codex_orchestrator.validators.report_validator import ReportValidationError, validate_patchlet_report
+from codex_orchestrator.validators.report_validator import ReportValidationError, validate_patchlet_report, validate_patchlet_report_file
 import pytest
 
 
@@ -49,6 +50,11 @@ def complete_report() -> dict:
         "row_ledger": [],
         "trace_ledger": [],
         "cleanup_proof": "probe created isolated temp data and cleaned it",
+        "probe_artifact_refs": [{
+            "patchlet_id": "P0001",
+            "probe_root": ".artifacts/probes/P0001",
+            "run_id": "run_001",
+        }],
         "acceptance_criteria_result": "pass",
     }
 
@@ -69,6 +75,18 @@ def blocked_report() -> dict:
     report["acceptance_criteria_result"] = "blocked"
     report["blocking_boundary_reason"] = "requires external dependency boundary outside allowed scope"
     return report
+
+
+def _write_probe_artifacts(repo_root: Path, patchlet_id: str = "P0001", run_id: str = "run_001") -> None:
+    probe_root = repo_root / ".artifacts" / "probes" / patchlet_id
+    run_root = probe_root / run_id
+    run_root.mkdir(parents=True, exist_ok=True)
+    (probe_root / "probe.py").write_text("print('probe')\n", encoding="utf-8")
+    (run_root / "row_ledger.jsonl").write_text(json.dumps({"row": 1}) + "\n", encoding="utf-8")
+    (run_root / "trace_ledger.jsonl").write_text(json.dumps({"trace": 1}) + "\n", encoding="utf-8")
+    (run_root / "before_state.json").write_text(json.dumps({"value": "before"}) + "\n", encoding="utf-8")
+    (run_root / "after_state.json").write_text(json.dumps({"value": "after"}) + "\n", encoding="utf-8")
+    (run_root / "cleanup_proof.json").write_text(json.dumps({"cleanup_passed": True}) + "\n", encoding="utf-8")
 
 
 def test_diff_validator_allows_one_product_file_and_artifacts():
@@ -187,3 +205,65 @@ def test_blocked_with_evidence_requires_boundary_reason():
     report["blocking_boundary_reason"] = ""
     with pytest.raises(ReportValidationError, match="blocking_boundary_reason"):
         validate_patchlet_report(report, base_patchlet())
+
+
+def test_complete_report_requires_probe_artifact_refs():
+    report = complete_report()
+    report["probe_artifact_refs"] = []
+    with pytest.raises(ReportValidationError, match="probe_artifact_refs"):
+        validate_patchlet_report(report, base_patchlet())
+
+
+def test_complete_report_rejects_missing_probe_artifact_files(tmp_path: Path):
+    repo_root = tmp_path / "repo"
+    report_path = repo_root / ".codex-orchestrator" / "reports" / "P0001.json"
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(json.dumps(complete_report()) + "\n", encoding="utf-8")
+
+    with pytest.raises(ReportValidationError, match="probe artifact"):
+        validate_patchlet_report_file(report_path, base_patchlet())
+
+
+def test_complete_report_accepts_valid_probe_artifact_ref(tmp_path: Path):
+    repo_root = tmp_path / "repo"
+    _write_probe_artifacts(repo_root)
+    report_path = repo_root / ".codex-orchestrator" / "reports" / "P0001.json"
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(json.dumps(complete_report()) + "\n", encoding="utf-8")
+
+    validated = validate_patchlet_report_file(report_path, base_patchlet())
+
+    assert validated["patchlet_id"] == "P0001"
+
+
+def test_verified_no_change_needed_requires_valid_probe_artifact_ref(tmp_path: Path):
+    repo_root = tmp_path / "repo"
+    _write_probe_artifacts(repo_root)
+    report = complete_report()
+    report["status"] = "VERIFIED_NO_CHANGE_NEEDED"
+    report["changed_product_runtime_file"] = None
+    report_path = repo_root / ".codex-orchestrator" / "reports" / "P0001.json"
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(json.dumps(report) + "\n", encoding="utf-8")
+
+    validated = validate_patchlet_report_file(report_path, base_patchlet())
+
+    assert validated["status"] == "VERIFIED_NO_CHANGE_NEEDED"
+
+
+def test_failed_with_evidence_can_reference_failed_probe_artifacts(tmp_path: Path):
+    repo_root = tmp_path / "repo"
+    _write_probe_artifacts(repo_root)
+    report = failed_report()
+    report["probe_artifact_refs"] = [{
+        "patchlet_id": "P0001",
+        "probe_root": ".artifacts/probes/P0001",
+        "run_id": "run_001",
+    }]
+    report_path = repo_root / ".codex-orchestrator" / "reports" / "P0001.json"
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(json.dumps(report) + "\n", encoding="utf-8")
+
+    validated = validate_patchlet_report_file(report_path, base_patchlet())
+
+    assert validated["status"] == "FAILED_WITH_EVIDENCE"

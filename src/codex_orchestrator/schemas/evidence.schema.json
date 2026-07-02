@@ -2,10 +2,21 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "evidence",
   "type": "object",
-  "required": ["schema_version", "kind"],
+  "required": ["schema_version", "kind", "evidence_id", "goal_id", "role", "file", "symbol", "line_range", "found_by", "command_or_source", "why_relevant", "confidence", "connected_evidence_ids"],
   "properties": {
     "schema_version": {"const": "1.0"},
-    "kind": {"type": "string"}
+    "kind": {"const": "evidence_row"},
+    "evidence_id": {"type": "string"},
+    "goal_id": {"type": "string"},
+    "role": {"enum": ["producer", "transformer", "consumer", "adapter", "validator", "test", "config", "state_owner", "runtime_boundary", "repo_level"]},
+    "file": {"type": ["string", "null"]},
+    "symbol": {"type": ["string", "null"]},
+    "line_range": {"type": ["string", "null"]},
+    "found_by": {"enum": ["git_ls_files", "rg_files", "rg_search", "codex_classification", "deterministic_classifier"]},
+    "command_or_source": {"type": "string"},
+    "why_relevant": {"type": "string"},
+    "confidence": {"enum": ["high", "medium", "low"]},
+    "connected_evidence_ids": {"type": "array", "items": {"type": "string"}}
   },
   "additionalProperties": true
 }

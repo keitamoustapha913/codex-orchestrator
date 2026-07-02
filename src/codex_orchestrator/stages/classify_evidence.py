@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 from codex_orchestrator.jsonio import read_json
 from codex_orchestrator.state import load_state, transition
@@ -16,7 +15,36 @@ def _repo_files(ctx: TargetRepoContext) -> list[str]:
         line = line.strip()
         if line and not line.startswith(".codex-orchestrator/") and not line.startswith(".artifacts/"):
             files.append(line)
-    return files
+    return sorted(files)
+
+
+def _role_for_path(path: str, index: int) -> str:
+    if path.endswith((".toml", ".yaml", ".yml", ".json")):
+        return "config"
+    if "/test" in path or path.startswith("tests/") or path.endswith("_test.py"):
+        return "test"
+    if index == 1:
+        return "runtime_boundary"
+    return "consumer"
+
+
+def _unsupported_repo_level_rows(goal: dict) -> list[dict]:
+    rows: list[dict] = []
+    for item in sorted(goal.get("known_failure_modes", [])):
+        lowered = item.lower()
+        if "codex-only" in lowered or "unsupported" in lowered:
+            rows.append({
+                "role": "repo_level",
+                "file": None,
+                "symbol": None,
+                "line_range": None,
+                "found_by": "deterministic_classifier",
+                "command_or_source": item,
+                "why_relevant": "Known failure mode is unsupported without direct repository evidence.",
+                "confidence": "low",
+                "connected_evidence_ids": [],
+            })
+    return rows
 
 
 def classify_evidence(ctx: TargetRepoContext) -> list[dict]:
@@ -29,16 +57,17 @@ def classify_evidence(ctx: TargetRepoContext) -> list[dict]:
             "kind": "evidence_row",
             "evidence_id": f"E{idx:03d}",
             "goal_id": goal_id,
-            "role": "runtime_boundary" if idx == 1 else "consumer",
+            "role": _role_for_path(path, idx),
             "file": path,
             "symbol": None,
             "line_range": None,
-            "found_by": "git ls-files",
+            "found_by": "git_ls_files",
             "command_or_source": "git ls-files",
             "why_relevant": "Tracked target-repository file available for graph/invariant inspection.",
             "confidence": "medium",
             "connected_evidence_ids": [],
         })
+    repo_level_rows = _unsupported_repo_level_rows(goal)
     if not rows:
         rows.append({
             "schema_version": "1.0",
@@ -49,12 +78,22 @@ def classify_evidence(ctx: TargetRepoContext) -> list[dict]:
             "file": None,
             "symbol": None,
             "line_range": None,
-            "found_by": "repo_census",
+            "found_by": "deterministic_classifier",
             "command_or_source": "empty repository census",
             "why_relevant": "No tracked files were available; repo-level evidence recorded.",
             "confidence": "low",
             "connected_evidence_ids": [],
         })
+    else:
+        next_index = len(rows) + 1
+        for offset, row in enumerate(repo_level_rows, start=0):
+            rows.append({
+                "schema_version": "1.0",
+                "kind": "evidence_row",
+                "evidence_id": f"E{next_index + offset:03d}",
+                "goal_id": goal_id,
+                **row,
+            })
 
     ctx.paths.search_evidence_jsonl.parent.mkdir(parents=True, exist_ok=True)
     ctx.paths.search_evidence_jsonl.write_text("\n".join(json.dumps(row, sort_keys=True) for row in rows) + "\n", encoding="utf-8")

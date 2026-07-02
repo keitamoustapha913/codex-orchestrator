@@ -2,10 +2,52 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "invariant",
   "type": "object",
-  "required": ["schema_version", "kind"],
+  "required": ["schema_version", "kind", "invariants"],
   "properties": {
     "schema_version": {"const": "1.0"},
-    "kind": {"type": "string"}
+    "kind": {"const": "invariants"},
+    "invariants": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "invariant_id",
+          "master_goal_id",
+          "description",
+          "producer_nodes",
+          "transformer_nodes",
+          "adapter_nodes",
+          "consumer_nodes",
+          "state_owner_nodes",
+          "runtime_signal_or_condition",
+          "required_probes",
+          "negative_controls",
+          "regression_commands",
+          "evidence_ids",
+          "graph_node_ids",
+          "graph_edge_ids"
+        ],
+        "properties": {
+          "invariant_id": {"type": "string"},
+          "master_goal_id": {"type": "string"},
+          "description": {"type": "string", "minLength": 1},
+          "producer_nodes": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+          "transformer_nodes": {"type": "array", "items": {"type": "string"}},
+          "adapter_nodes": {"type": "array", "items": {"type": "string"}},
+          "consumer_nodes": {"type": "array", "items": {"type": "string"}},
+          "state_owner_nodes": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+          "runtime_signal_or_condition": {"type": "string", "minLength": 1},
+          "required_probes": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+          "negative_controls": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+          "regression_commands": {"type": "array", "items": {"type": "string"}},
+          "evidence_ids": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+          "graph_node_ids": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+          "graph_edge_ids": {"type": "array", "items": {"type": "string"}}
+        },
+        "additionalProperties": true
+      }
+    }
   },
   "additionalProperties": true
 }

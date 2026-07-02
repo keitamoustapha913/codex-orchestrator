@@ -160,6 +160,30 @@ def test_mock_run_next_creates_valid_report_and_updates_state(git_repo: Path):
     assert "P0001" in state.verified_no_change_needed
 
 
+def test_mock_patchlet_execution_writes_durable_probe_artifacts_and_valid_report_refs(git_repo: Path):
+    ctx = setup_compiled_patchlets_ctx(git_repo)
+
+    result = run_next_patchlet(ctx, worker_mode="mock")
+
+    probe_root = ctx.paths.probe_dir / result.patchlet_id
+    run_root = probe_root / "run_001"
+    report = read_json(ctx.paths.reports_dir / f"{result.patchlet_id}.json")
+
+    assert probe_root.exists()
+    assert (probe_root / "probe.py").exists()
+    assert (run_root / "row_ledger.jsonl").exists()
+    assert (run_root / "trace_ledger.jsonl").exists()
+    assert (run_root / "before_state.json").exists()
+    assert (run_root / "after_state.json").exists()
+    assert (run_root / "cleanup_proof.json").exists()
+    assert report["probe_artifact_refs"] == [{
+        "patchlet_id": result.patchlet_id,
+        "probe_root": f".artifacts/probes/{result.patchlet_id}",
+        "run_id": "run_001",
+    }]
+    assert validate_json_file(ctx.paths.reports_dir / f"{result.patchlet_id}.json", "patchlet_report.schema.json") == []
+
+
 def test_global_verifier_marks_done_after_valid_reports(git_repo: Path):
     ctx = init_ctx(git_repo)
     normalize_master_prompt(ctx)

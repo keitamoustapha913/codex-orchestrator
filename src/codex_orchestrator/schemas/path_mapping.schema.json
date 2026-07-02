@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "path_mapping",
+  "type": "object",
+  "required": ["schema_version", "kind", "goal_mappings"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "kind": {"const": "path_mapping"},
+    "goal_mappings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["goal_id", "graph_node_ids", "graph_edge_ids", "evidence_ids"],
+        "properties": {
+          "goal_id": {"type": "string"},
+          "graph_node_ids": {"type": "array", "items": {"type": "string"}},
+          "graph_edge_ids": {"type": "array", "items": {"type": "string"}},
+          "evidence_ids": {"type": "array", "items": {"type": "string"}}
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}
