@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Report Ingestion Result",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "kind",
+    "accepted",
+    "attempt_id",
+    "patchlet_id",
+    "raw_report_path",
+    "normalization_applied",
+    "normalization_kinds",
+    "raw_probe_artifact_refs",
+    "canonical_probe_artifact_refs",
+    "validation"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "kind": {"const": "report_ingestion_result"},
+    "accepted": {"type": "boolean"},
+    "attempt_id": {"type": "string"},
+    "patchlet_id": {"type": "string"},
+    "raw_report_path": {"type": "string"},
+    "canonical_report_path": {"type": ["string", "null"]},
+    "normalization_applied": {"type": "boolean"},
+    "normalization_kinds": {"type": "array", "items": {"type": "string"}},
+    "raw_probe_artifact_refs": {"type": "array"},
+    "canonical_probe_artifact_refs": {"type": "array"},
+    "validation": {
+      "type": "object",
+      "required": ["valid", "error_count", "errors_path"],
+      "properties": {
+        "valid": {"type": "boolean"},
+        "error_count": {"type": "integer", "minimum": 0},
+        "errors_path": {"type": "string"}
+      },
+      "additionalProperties": true
+    },
+    "normalized_failure_signature": {"type": ["string", "null"]},
+    "repair_hint": {"type": ["string", "null"]},
+    "operator_summary": {"type": "string"}
+  },
+  "additionalProperties": true
+}

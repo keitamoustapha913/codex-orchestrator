@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Report Validation Errors",
+  "type": "object",
+  "required": ["schema_version", "kind", "attempt_id", "patchlet_id", "valid", "errors"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "kind": {"const": "report_validation_errors"},
+    "attempt_id": {"type": "string"},
+    "patchlet_id": {"type": "string"},
+    "report_path": {"type": ["string", "null"]},
+    "canonical_report_path": {"type": ["string", "null"]},
+    "valid": {"type": "boolean"},
+    "errors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["schema_version", "kind", "error_id", "field", "message", "normalized_signature"],
+        "properties": {
+          "schema_version": {"const": "1.0"},
+          "kind": {"const": "report_validation_error"},
+          "error_id": {"type": "string"},
+          "field": {"type": "string"},
+          "json_pointer": {"type": "string"},
+          "schema_path": {"type": "string"},
+          "message": {"type": "string"},
+          "validator": {"type": ["string", "null"]},
+          "expected_type": {"type": ["string", "null"]},
+          "actual_type": {"type": ["string", "null"]},
+          "invalid_value_excerpt": {"type": ["string", "null"]},
+          "normalized_signature": {"type": "string"},
+          "repair_hint": {"type": ["string", "null"]},
+          "canonical_example": {"type": ["object", "null"]}
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}

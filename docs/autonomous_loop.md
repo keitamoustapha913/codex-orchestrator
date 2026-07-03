@@ -25,6 +25,15 @@ For advanced cases it can also route through:
 
 No blind retry is allowed.
 
+Report-contract failures are handled before wrapper-gate acceptance. Raw
+real-Codex reports are preserved, safe `.artifacts/probes/` string refs are
+normalized at ingress into canonical object-shaped `probe_artifact_refs`, and
+unsafe refs fail with structured `report_validation_errors.json` evidence.
+Report-shape-only failures use report-only repair policy when possible and do
+not imply product/runtime failure. Full patchlet repair is still used for true
+product failures, worker timeouts, target hygiene failures, or invalid probe
+evidence. See `docs/report_contract.md`.
+
 `ci_only` mode is read-only and intended for CI-safe resume and verification flows:
 
 ```bash

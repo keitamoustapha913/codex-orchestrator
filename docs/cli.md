@@ -60,6 +60,13 @@ cxor auto --repo /path/to/target-repo --resume --until DONE --worker-mode mock
 If the workflow is already `DONE`, `cxor apply-repair` and `cxor regenerate-patchlets` become terminal no-op commands. They exit successfully, report the no-op, and leave state, patchlet index, final verification, and product/runtime files unchanged.
 
 Durable probe artifacts and `probe_artifact_refs` are required for successful patchlet reports.
+Canonical reports keep `probe_artifact_refs` object-shaped. Raw real-Codex
+string refs are accepted only at report ingress when the files are safe,
+existing, and under `.artifacts/probes/`; canonical reports still reject
+string refs. Inspect `.codex-orchestrator/runs/<attempt>/gates/report_ingestion_result.json`
+and `report_validation_errors.json` for normalization or failure details. The
+specific repeated string-ref signature is `probe_artifact_refs_not_objects`,
+not `unknown_repeated_failure`. Full details are in `docs/report_contract.md`.
 
 Transaction group and global verification commands:
 

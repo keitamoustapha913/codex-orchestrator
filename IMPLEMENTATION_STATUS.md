@@ -216,6 +216,20 @@ and required fields such as `changed_product_runtime_file`,
 same contract. Product/runtime edits are restricted to `CXOR_EXECUTION_ROOT`;
 product/runtime files under `CXOR_TARGET_ROOT` are read-only to Codex workers.
 
+Implemented: real-Codex probe artifact reference hardening. Canonical
+`probe_artifact_refs` entries remain object-shaped. Raw worker reports are
+preserved under `.codex-orchestrator/reports/<PATCHLET_ID>.raw.json`, while
+the canonical report is written to `.codex-orchestrator/reports/<PATCHLET_ID>.json`.
+Safe string refs are normalized only during report ingress when they point to
+existing files under `.artifacts/probes/` for the current patchlet and do not
+escape through symlinks. Unsafe refs fail with structured
+`report_ingestion_result.json` and `report_validation_errors.json` evidence.
+The repeated string-ref shape signature is `probe_artifact_refs_not_objects`,
+not `unknown_repeated_failure`. Report-only repair policy forbids
+product/runtime edits and probe evidence mutation; full patchlet repair remains
+available for true product failures, worker timeouts, target hygiene failures,
+or invalid evidence generation. See `docs/report_contract.md`.
+
 Implemented: verified-no-change wrapper gate and transaction-group repair
 routing hardening. The final Markdown report must contain a standalone
 canonical marker line: `FINAL_STATUS: PASS`, `FINAL_STATUS: BLOCKED`, or

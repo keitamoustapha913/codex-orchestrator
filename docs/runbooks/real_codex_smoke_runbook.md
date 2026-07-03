@@ -132,6 +132,16 @@ fields such as `changed_product_runtime_file`, `deterministic_run_counts`,
 `before_after_state`, `row_ledger`, and `trace_ledger` must exist. Repair
 patchlets receive a report skeleton and must not invent new statuses.
 
+For probe artifacts, canonical `probe_artifact_refs` entries are objects.
+Raw real-Codex reports may contain string path refs only before report
+ingestion. Safe strings are normalized only when the referenced files exist
+under `.artifacts/probes/` for the current patchlet and do not escape by
+symlink. The raw report is preserved separately from the canonical report, and
+normalization or rejection is recorded in `report_ingestion_result.json` and
+`report_validation_errors.json`. The specific string-ref shape failure is
+`probe_artifact_refs_not_objects`; runbook evidence should not reduce this
+class to `unknown_repeated_failure`. See `docs/report_contract.md`.
+
 The final Markdown report has a separate wrapper gate. It must contain a
 standalone canonical marker line: `FINAL_STATUS: PASS`,
 `FINAL_STATUS: BLOCKED`, or `FINAL_STATUS: FAILED`. Non-canonical forms are

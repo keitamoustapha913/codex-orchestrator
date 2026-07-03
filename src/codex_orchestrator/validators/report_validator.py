@@ -2,15 +2,19 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
+import hashlib
 
 from codex_orchestrator.jsonio import read_json
+from codex_orchestrator.report_validation_errors import detail_from_jsonschema_error, report_validation_error_detail
 
 from .probe_artifact_validator import validate_probe_artifact_run
-from .schema_validator import validate_json
+from .schema_validator import iter_jsonschema_errors, validate_json
 
 
 class ReportValidationError(Exception):
-    pass
+    def __init__(self, message: str, errors: list[dict[str, Any]] | None = None):
+        super().__init__(message)
+        self.errors = errors or []
 
 
 VALID_STATUSES = {"COMPLETE", "VERIFIED_NO_CHANGE_NEEDED", "BLOCKED_WITH_EVIDENCE", "FAILED_WITH_EVIDENCE"}
@@ -72,82 +76,153 @@ def _contains_forbidden_timing_luck_language(report: dict) -> bool:
     return False
 
 
-def validate_patchlet_report(report: dict, patchlet: dict | None = None) -> None:
-    schema_errors = validate_json(report, "patchlet_report.schema.json")
-    if schema_errors:
-        raise ReportValidationError("; ".join(schema_errors))
+def _error(field: str, message: str, *, signature: str = "patchlet_report_schema_violation", pointer: str = "") -> dict[str, Any]:
+    return report_validation_error_detail(
+        field=field,
+        json_pointer=pointer,
+        schema_path="",
+        message=message,
+        normalized_signature=signature,
+        repair_hint=message,
+    )
 
+
+def _is_under(path: Path, parent: Path) -> bool:
+    try:
+        path.relative_to(parent)
+        return True
+    except ValueError:
+        return False
+
+
+def _semantic_probe_ref_errors(report: dict, *, patchlet: dict | None, repo_root: Path | None) -> list[dict[str, Any]]:
+    root = repo_root.resolve() if repo_root else None
+    errors: list[dict[str, Any]] = []
+    for index, ref in enumerate(report.get("probe_artifact_refs") or []):
+        pointer = f"/probe_artifact_refs/{index}"
+        if patchlet is not None and ref.get("patchlet_id") != patchlet.get("patchlet_id"):
+            errors.append(_error("probe_artifact_refs", "Report probe_artifact_refs patchlet_id does not match report patchlet_id", signature="probe_artifact_refs_patchlet_mismatch", pointer=pointer))
+        if ref.get("patchlet_id") != report.get("patchlet_id"):
+            errors.append(_error("probe_artifact_refs", "Report probe_artifact_refs patchlet_id does not match report patchlet_id", signature="probe_artifact_refs_patchlet_mismatch", pointer=pointer))
+        if root is None:
+            continue
+        probe_root = (root / ref["probe_root"]).resolve()
+        artifacts_root = root / ".artifacts" / "probes"
+        if not _is_under(probe_root, artifacts_root):
+            errors.append(_error("probe_artifact_refs", "Report probe_artifact_refs probe_root must be under .artifacts/probes/", signature="probe_artifact_refs_unsafe_path", pointer=f"{pointer}/probe_root"))
+            continue
+        files = ref.get("files")
+        if files is None:
+            run_dir = probe_root / ref["run_id"]
+            if ref["run_id"] != "default":
+                result = validate_probe_artifact_run(run_dir, patchlet_id=ref["patchlet_id"])
+                if not result["valid"]:
+                    codes = ", ".join(error["code"] for error in result["errors"])
+                    errors.append(_error("probe_artifact_refs", f"Invalid probe artifact reference: {codes}; probe artifact validation failed", pointer=pointer))
+            continue
+        for file_index, file_item in enumerate(files):
+            path = (root / file_item["path"]).resolve()
+            file_pointer = f"{pointer}/files/{file_index}"
+            if not _is_under(path, probe_root):
+                errors.append(_error("probe_artifact_refs", "Probe artifact file must be under probe_root", signature="probe_artifact_refs_unsafe_path", pointer=f"{file_pointer}/path"))
+                continue
+            if not path.exists():
+                errors.append(_error("probe_artifact_refs", f"Probe artifact file does not exist: {file_item['path']}", signature="probe_artifact_refs_missing_file", pointer=f"{file_pointer}/path"))
+                continue
+            data = path.read_bytes()
+            digest = hashlib.sha256(data).hexdigest()
+            if file_item.get("sha256") != digest:
+                errors.append(_error("probe_artifact_refs", f"Probe artifact sha256 mismatch: {file_item['path']}", signature="probe_artifact_refs_unsafe_path", pointer=f"{file_pointer}/sha256"))
+            if file_item.get("size_bytes") != path.stat().st_size:
+                errors.append(_error("probe_artifact_refs", f"Probe artifact size_bytes mismatch: {file_item['path']}", signature="probe_artifact_refs_unsafe_path", pointer=f"{file_pointer}/size_bytes"))
+    return errors
+
+
+def validate_patchlet_report_structured(report: dict, patchlet: dict | None = None, *, repo_root: Path | None = None) -> dict[str, Any]:
+    structured = [
+        detail_from_jsonschema_error(error, error_id=f"RVE{index:06d}", patchlet_id=report.get("patchlet_id") or (patchlet or {}).get("patchlet_id"))
+        for index, error in enumerate(iter_jsonschema_errors(report, "patchlet_report.schema.json"), start=1)
+    ]
+    if structured:
+        return {"valid": False, "errors": structured, "message": "; ".join(error["message"] for error in structured)}
+
+    semantic_errors: list[dict[str, Any]] = []
     status = report.get("status")
     if status not in VALID_STATUSES:
-        raise ReportValidationError(f"Invalid patchlet report status: {status}")
+        semantic_errors.append(_error("status", f"Invalid patchlet report status: {status}"))
 
     if patchlet is not None and report.get("patchlet_id") != patchlet.get("patchlet_id"):
-        raise ReportValidationError("Report patchlet_id does not match patchlet manifest")
+        semantic_errors.append(_error("patchlet_id", "Report patchlet_id does not match patchlet manifest"))
 
     if not report.get("probe_commands"):
-        raise ReportValidationError("Report must include at least one probe command")
+        semantic_errors.append(_error("probe_commands", "Report must include at least one probe command"))
 
     if not _nonempty(report.get("cleanup_proof")):
-        raise ReportValidationError("Report must include cleanup_proof")
+        semantic_errors.append(_error("cleanup_proof", "Report must include cleanup_proof"))
     if _contains_forbidden_timing_luck_language(report):
-        raise ReportValidationError("Report contains forbidden timing-luck language")
+        semantic_errors.append(_error("report", "Report contains forbidden timing-luck language"))
 
     run_counts = report.get("deterministic_run_counts") or {}
     probe_artifact_refs = report.get("probe_artifact_refs") or []
     if status in {"COMPLETE", "VERIFIED_NO_CHANGE_NEEDED"}:
         if not _nonempty(run_counts.get("baseline")):
-            raise ReportValidationError("Report must declare baseline deterministic run count")
+            semantic_errors.append(_error("deterministic_run_counts", "Report must declare baseline deterministic run count"))
         if not _nonempty(run_counts.get("negative_controls")):
-            raise ReportValidationError("Report must declare negative control deterministic run count")
+            semantic_errors.append(_error("deterministic_run_counts", "Report must declare negative control deterministic run count"))
         if not probe_artifact_refs:
-            raise ReportValidationError("Report must include probe_artifact_refs")
+            semantic_errors.append(_error("probe_artifact_refs", "Report must include probe_artifact_refs"))
 
     root = report.get("root_cause_classification") or {}
     if status == "COMPLETE":
         if not _nonempty(report.get("changed_product_runtime_file")):
-            raise ReportValidationError("COMPLETE requires changed_product_runtime_file")
+            semantic_errors.append(_error("changed_product_runtime_file", "COMPLETE requires changed_product_runtime_file"))
         if report.get("acceptance_criteria_result") != "pass":
-            raise ReportValidationError("COMPLETE requires acceptance_criteria_result=pass")
+            semantic_errors.append(_error("acceptance_criteria_result", "COMPLETE requires acceptance_criteria_result=pass"))
         if not _nonempty(run_counts.get("proof_of_fix")):
-            raise ReportValidationError("COMPLETE requires proof_of_fix deterministic run count")
+            semantic_errors.append(_error("deterministic_run_counts", "COMPLETE requires proof_of_fix deterministic run count"))
         for field in REQUIRED_ROOT_CAUSE_FIELDS:
             if not _nonempty(root.get(field)):
-                raise ReportValidationError(f"COMPLETE requires root_cause_classification.{field}")
+                semantic_errors.append(_error("root_cause_classification", f"COMPLETE requires root_cause_classification.{field}"))
 
     if status == "VERIFIED_NO_CHANGE_NEEDED":
         if report.get("changed_product_runtime_file") is not None:
-            raise ReportValidationError("VERIFIED_NO_CHANGE_NEEDED cannot include a product/runtime diff")
+            semantic_errors.append(_error("changed_product_runtime_file", "VERIFIED_NO_CHANGE_NEEDED cannot include a product/runtime diff"))
         if report.get("acceptance_criteria_result") != "pass":
-            raise ReportValidationError("VERIFIED_NO_CHANGE_NEEDED requires acceptance_criteria_result=pass")
+            semantic_errors.append(_error("acceptance_criteria_result", "VERIFIED_NO_CHANGE_NEEDED requires acceptance_criteria_result=pass"))
 
     if status == "BLOCKED_WITH_EVIDENCE":
         if report.get("acceptance_criteria_result") != "blocked":
-            raise ReportValidationError("BLOCKED_WITH_EVIDENCE requires acceptance_criteria_result=blocked")
+            semantic_errors.append(_error("acceptance_criteria_result", "BLOCKED_WITH_EVIDENCE requires acceptance_criteria_result=blocked"))
         if not _nonempty(root.get("observed_failure")):
-            raise ReportValidationError("BLOCKED_WITH_EVIDENCE requires observed_failure evidence")
+            semantic_errors.append(_error("root_cause_classification", "BLOCKED_WITH_EVIDENCE requires observed_failure evidence"))
         if not _nonempty(report.get("blocking_boundary_reason")):
-            raise ReportValidationError("BLOCKED_WITH_EVIDENCE requires blocking_boundary_reason")
+            semantic_errors.append(_error("blocking_boundary_reason", "BLOCKED_WITH_EVIDENCE requires blocking_boundary_reason"))
 
     if status == "FAILED_WITH_EVIDENCE":
         if report.get("acceptance_criteria_result") != "fail":
-            raise ReportValidationError("FAILED_WITH_EVIDENCE requires acceptance_criteria_result=fail")
+            semantic_errors.append(_error("acceptance_criteria_result", "FAILED_WITH_EVIDENCE requires acceptance_criteria_result=fail"))
         if not _nonempty(root.get("observed_failure")):
-            raise ReportValidationError("FAILED_WITH_EVIDENCE requires observed_failure evidence")
+            semantic_errors.append(_error("root_cause_classification", "FAILED_WITH_EVIDENCE requires observed_failure evidence"))
         if not _nonempty(report.get("failed_probe_evidence")):
-            raise ReportValidationError("FAILED_WITH_EVIDENCE requires failed_probe_evidence")
+            semantic_errors.append(_error("failed_probe_evidence", "FAILED_WITH_EVIDENCE requires failed_probe_evidence"))
+    semantic_errors.extend(_semantic_probe_ref_errors(report, patchlet=patchlet, repo_root=repo_root))
+    if semantic_errors:
+        for index, error in enumerate(semantic_errors, start=1):
+            error["error_id"] = f"RVE{index:06d}"
+        return {"valid": False, "errors": semantic_errors, "message": "; ".join(error["message"] for error in semantic_errors)}
+    return {"valid": True, "errors": [], "message": None}
+
+
+def validate_patchlet_report(report: dict, patchlet: dict | None = None) -> None:
+    result = validate_patchlet_report_structured(report, patchlet)
+    if not result["valid"]:
+        raise ReportValidationError(result["message"], result["errors"])
 
 
 def validate_patchlet_report_file(path: Path, patchlet: dict | None = None) -> dict:
     report = read_json(path)
-    validate_patchlet_report(report, patchlet)
     repo_root = path.parents[2] if len(path.parents) >= 3 else path.parent
-    for ref in report.get("probe_artifact_refs") or []:
-        if ref.get("patchlet_id") != report.get("patchlet_id"):
-            raise ReportValidationError("Report probe_artifact_refs patchlet_id does not match report patchlet_id")
-        probe_root = repo_root / ref["probe_root"]
-        run_dir = probe_root / ref["run_id"]
-        result = validate_probe_artifact_run(run_dir, patchlet_id=ref["patchlet_id"])
-        if not result["valid"]:
-            codes = ", ".join(error["code"] for error in result["errors"])
-            raise ReportValidationError(f"Invalid probe artifact reference: {codes}; probe artifact validation failed")
+    result = validate_patchlet_report_structured(report, patchlet, repo_root=repo_root)
+    if not result["valid"]:
+        raise ReportValidationError(result["message"], result["errors"])
     return report

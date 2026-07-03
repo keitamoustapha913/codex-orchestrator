@@ -59,6 +59,17 @@ not an object, and `changed_product_runtime_file`, `deterministic_run_counts`,
 `before_after_state`, `row_ledger`, and `trace_ledger` must be present. Repair
 patchlets receive a report skeleton with these fields.
 
+For probe artifacts, canonical reports require object-shaped
+`probe_artifact_refs`. Raw real-Codex string refs are preserved in
+`.codex-orchestrator/reports/<PATCHLET_ID>.raw.json` and may be normalized only
+by report ingestion when they point to existing files under
+`.artifacts/probes/` for the current patchlet. The canonical report remains
+`.codex-orchestrator/reports/<PATCHLET_ID>.json`. Unsafe refs write
+`report_ingestion_result.json` and `report_validation_errors.json` with
+specific signatures such as `probe_artifact_refs_not_objects` or
+`probe_artifact_refs_unsafe_path`; this class must not be reduced to
+`unknown_repeated_failure`. See `docs/report_contract.md`.
+
 Workers edit product/runtime files only in `CXOR_EXECUTION_ROOT`.
 `CXOR_TARGET_ROOT` product/runtime files are read-only to the worker; target
 root remains writable only for `.codex-orchestrator/` and `.artifacts/probes/`

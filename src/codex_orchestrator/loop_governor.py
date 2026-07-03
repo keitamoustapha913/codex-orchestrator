@@ -15,17 +15,34 @@ def loop_governor_path(repo_root: Path | str) -> Path:
 
 def normalize_failure_signature(failure: dict[str, Any] | str) -> tuple[str, str]:
     if isinstance(failure, dict):
+        explicit = failure.get("failure_signature")
+        if isinstance(explicit, str) and explicit:
+            return str(failure.get("category") or failure.get("failure_category") or failure.get("source") or "patchlet_report_schema_violation"), explicit
+        for detail in failure.get("report_validation_errors") or []:
+            if isinstance(detail, dict) and detail.get("normalized_signature"):
+                return str(failure.get("category") or failure.get("failure_category") or failure.get("source") or "patchlet_report_schema_violation"), str(detail["normalized_signature"])
+        ingestion_signature = failure.get("normalized_failure_signature")
+        if isinstance(ingestion_signature, str) and ingestion_signature:
+            return str(failure.get("category") or failure.get("failure_category") or failure.get("source") or "patchlet_report_schema_violation"), ingestion_signature
         category = str(failure.get("category") or failure.get("failure_category") or failure.get("source") or "unknown_repeated_failure")
         text = " ".join(
             str(failure.get(key) or "")
             for key in ("observed_failure", "error_message", "message", "diagnosis")
         )
+        field = str(failure.get("field") or "")
+        expected_type = str(failure.get("expected_type") or "")
+        actual_type = str(failure.get("actual_type") or "")
     else:
         category = "unknown_repeated_failure"
         text = str(failure)
+        field = ""
+        expected_type = ""
+        actual_type = ""
     lowered = re.sub(r"[\s_-]+", " ", text.lower())
+    if field == "probe_artifact_refs" and expected_type == "object" and actual_type == "string":
+        return "patchlet_report_schema_violation", "probe_artifact_refs_not_objects"
     if "probe artifact refs" in lowered or "probe_artifact_refs" in text:
-        if "json object" in lowered or "not objects" in lowered or "instead of objects" in lowered:
+        if "json object" in lowered or "not objects" in lowered or "instead of objects" in lowered or "not of type 'object'" in lowered:
             return "patchlet_report_schema_violation", "probe_artifact_refs_not_objects"
     if "patchlet report schema" in lowered:
         return "patchlet_report_schema_violation", "patchlet_report_schema_violation"

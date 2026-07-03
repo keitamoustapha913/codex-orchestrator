@@ -93,6 +93,47 @@ def _resolve_source_patchlet_ids(ctx: TargetRepoContext, *, failure: dict, state
     )
 
 
+def _report_shape_repair_guidance(failure: dict) -> str:
+    signature = failure.get("failure_signature")
+    errors = failure.get("report_validation_errors") or []
+    if not (isinstance(signature, str) and signature.startswith("probe_artifact_refs_")) and not any(
+        isinstance(error, dict) and str(error.get("normalized_signature", "")).startswith("probe_artifact_refs_")
+        for error in errors
+    ):
+        return ""
+    first = next((error for error in errors if isinstance(error, dict)), {})
+    example = first.get("canonical_example") or {
+        "patchlet_id": "<PATCHLET_ID>",
+        "probe_root": ".artifacts/probes/<PATCHLET_ID>",
+        "run_id": "default",
+        "files": [
+            {
+                "path": ".artifacts/probes/<PATCHLET_ID>/summary.json",
+                "kind": "summary",
+                "sha256": "<sha256>",
+                "size_bytes": 123,
+            }
+        ],
+    }
+    import json
+
+    return (
+        "\n## Report-shape-only correction\n\n"
+        "The previous report failed only because `probe_artifact_refs` contained string path entries.\n"
+        "Do not rewrite product/runtime files just to fix this report shape.\n"
+        "Do not mutate `.artifacts/probes/` evidence just to fix this report shape.\n"
+        "Convert each string path into an object with `patchlet_id`, `probe_root`, `run_id`, and `files` metadata.\n\n"
+        "field: probe_artifact_refs\n"
+        "expected: array of objects\n"
+        "actual: array of strings\n"
+        "normalized_signature: probe_artifact_refs_not_objects\n\n"
+        "Use this exact object shape:\n\n"
+        "```json\n"
+        f"{json.dumps(example, indent=2, sort_keys=True)}\n"
+        "```\n"
+    )
+
+
 def regenerate_patchlets(ctx: TargetRepoContext, *, from_repair_plan: str = "latest") -> dict:
     state = load_state(ctx)
     if state.stage == "DONE":
@@ -212,7 +253,8 @@ def regenerate_patchlets(ctx: TargetRepoContext, *, from_repair_plan: str = "lat
             "Do not blind retry.\n\n"
             "## ROOT-CAUSE PROBE-ONLY INVESTIGATION\n\n"
             "First prove the root cause with a direct probe before any product/runtime edit.\n"
-            "\n## Report schema contract\n\n"
+            + _report_shape_repair_guidance(failure)
+            + "\n## Report schema contract\n\n"
             + report_schema_contract_text(
                 patchlet_id=patchlet_id,
                 report_path=f".codex-orchestrator/reports/{patchlet_id}.json",

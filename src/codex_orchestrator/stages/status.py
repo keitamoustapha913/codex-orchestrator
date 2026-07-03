@@ -12,6 +12,24 @@ def status(ctx: TargetRepoContext) -> dict:
     runs = manifest.get("runs", []) if isinstance(manifest, dict) else []
     latest_run = runs[-1] if runs else {}
     activity = classify_activity(ctx.root)
+    last_report_ingestion = None
+    for run in reversed(runs):
+        attempt_id = run.get("attempt_id")
+        patchlet_id = run.get("patchlet_id")
+        if not attempt_id:
+            continue
+        result_path = ctx.paths.runs_dir / attempt_id / "gates" / "report_ingestion_result.json"
+        if result_path.exists():
+            result = read_json(result_path)
+            last_report_ingestion = {
+                "patchlet_id": result.get("patchlet_id") or patchlet_id,
+                "attempt_id": result.get("attempt_id") or attempt_id,
+                "accepted": result.get("accepted"),
+                "normalization_applied": result.get("normalization_applied"),
+                "normalized_failure_signature": result.get("normalized_failure_signature"),
+                "result_path": f".codex-orchestrator/runs/{attempt_id}/gates/report_ingestion_result.json",
+            }
+            break
     return {
         "schema_version": "1.0",
         "kind": "operator_status",
@@ -37,4 +55,5 @@ def status(ctx: TargetRepoContext) -> dict:
         "last_progress_age_seconds": activity.get("last_progress_age_seconds"),
         "classification": activity.get("classification"),
         "next_action": activity.get("next_action"),
+        "last_report_ingestion": last_report_ingestion,
     }

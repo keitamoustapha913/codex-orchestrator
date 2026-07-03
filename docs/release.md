@@ -89,6 +89,16 @@ patchlets receive a report skeleton and must edit product/runtime files under
 `CXOR_EXECUTION_ROOT`; product/runtime files under `CXOR_TARGET_ROOT` are
 read-only to Codex workers.
 
+Release checks must preserve strict canonical report validation. Canonical
+`probe_artifact_refs` entries are objects; raw real-Codex string refs are
+ingress-only and are normalized only when the referenced files exist under
+`.artifacts/probes/` without symlink escape or patchlet mismatch. Verify
+`report_ingestion_result.json`, `report_validation_errors.json`, raw report
+paths, canonical report paths, and the loop-governor signature
+`probe_artifact_refs_not_objects`. Repeated report-shape failures should not
+show `unknown_repeated_failure`; report-only repair must not edit product files
+or probe evidence. See `docs/report_contract.md`.
+
 The final Markdown report has a separate wrapper gate. It must contain a
 standalone canonical marker line: `FINAL_STATUS: PASS`,
 `FINAL_STATUS: BLOCKED`, or `FINAL_STATUS: FAILED`. Non-canonical examples such

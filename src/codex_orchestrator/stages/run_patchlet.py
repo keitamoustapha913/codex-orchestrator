@@ -19,6 +19,7 @@ from codex_orchestrator.jsonio import read_json, write_json
 from codex_orchestrator.loop_governor import record_failure_signature
 from codex_orchestrator.operator_events import append_operator_event
 from codex_orchestrator.prompt_index import upsert_prompt_index_entry
+from codex_orchestrator.report_ingestion import ingest_patchlet_report
 from codex_orchestrator.run_records import upsert_run_record
 from codex_orchestrator.state import load_state, now_iso, transition
 from codex_orchestrator.target_hygiene import run_target_hygiene_gate
@@ -204,7 +205,17 @@ def _next_pending_patchlet(index: dict) -> dict | None:
     return None
 
 
-def _record_failure(ctx: TargetRepoContext, *, source_id: str, observed_failure: str, changed_paths: list[str]) -> str:
+def _record_failure(
+    ctx: TargetRepoContext,
+    *,
+    source_id: str,
+    observed_failure: str,
+    changed_paths: list[str],
+    failure_signature: str | None = None,
+    report_validation_errors: list[dict] | None = None,
+    report_ingestion_result_path: str | None = None,
+    report_validation_errors_path: str | None = None,
+) -> str:
     existing = sorted(ctx.paths.failures_dir.glob("F*.json"))
     failure_id = f"F{len(existing) + 1:04d}"
     record = {
@@ -224,6 +235,14 @@ def _record_failure(ctx: TargetRepoContext, *, source_id: str, observed_failure:
         "required_next_step": "classify",
         "created_at": now_iso(),
     }
+    if failure_signature:
+        record["failure_signature"] = failure_signature
+    if report_validation_errors is not None:
+        record["report_validation_errors"] = report_validation_errors
+    if report_ingestion_result_path:
+        record["report_ingestion_result_path"] = report_ingestion_result_path
+    if report_validation_errors_path:
+        record["report_validation_errors_path"] = report_validation_errors_path
     write_json(ctx.paths.failures_dir / f"{failure_id}.json", record)
     (ctx.paths.failures_dir / f"{failure_id}.md").write_text(f"# {failure_id}\n\n{observed_failure}\n", encoding="utf-8")
     record_failure_signature(
@@ -245,7 +264,13 @@ def _record_failure(ctx: TargetRepoContext, *, source_id: str, observed_failure:
         patchlet_id=source_id if source_id.startswith("P") else None,
         failure_id=failure_id,
         next_action="Classifying recorded failure.",
-        details={"observed_failure": observed_failure, "changed_paths": changed_paths},
+        details={
+            "observed_failure": observed_failure,
+            "changed_paths": changed_paths,
+            "failure_signature": failure_signature,
+            "report_validation_errors_path": report_validation_errors_path,
+            "report_ingestion_result_path": report_ingestion_result_path,
+        },
     )
     return failure_id
 
@@ -447,8 +472,14 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
     prompt_path = _record_path_for_manifest(ctx, run_dir / "codex_task_prompt.md")
     attempt_prompt_path = run_dir / "codex_task_prompt.md"
     if not attempt_prompt_path.exists():
+        report_contract = worker_capsule.worker_memory_dir / "REPORT_SCHEMA_CONTRACT.md"
+        final_contract = worker_capsule.worker_memory_dir / "FINAL_REPORT_CONTRACT.md"
         attempt_prompt_path.write_text(
-            f"# Worker Prompt Pending\n\nPatchlet: {pid}\nAttempt: {run_id}\nSubprompt: {patchlet['subprompt_path']}\n",
+            f"# Worker Prompt Pending\n\nPatchlet: {pid}\nAttempt: {run_id}\nSubprompt: {patchlet['subprompt_path']}\n\n"
+            "## Report schema contract\n\n"
+            f"{report_contract.read_text(encoding='utf-8') if report_contract.exists() else ''}\n\n"
+            "## Final report contract\n\n"
+            f"{final_contract.read_text(encoding='utf-8') if final_contract.exists() else ''}\n",
             encoding="utf-8",
         )
     prompt_entry = upsert_prompt_index_entry(ctx.root, {
@@ -677,6 +708,9 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
     report_valid = False
     report_status = "FAILED_WITH_EVIDENCE"
     report_error: str | None = None
+    report_ingestion_result: dict | None = None
+    report_validation_errors: list[dict] = []
+    report_failure_signature: str | None = None
     try:
         if not diff_result.allowed:
             if not use_worktree:
@@ -692,7 +726,25 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
             try:
                 if worker_result.report_path is None:
                     raise ReportValidationError("Worker did not create a report")
-                report = validate_patchlet_report_file(worker_result.report_path, patchlet)
+                report_ingestion_result = ingest_patchlet_report(
+                    ctx,
+                    patchlet=patchlet,
+                    attempt_id=run_id,
+                    report_path=worker_result.report_path,
+                )
+                canonical_report_path = ctx.root / report_ingestion_result["canonical_report_path"] if report_ingestion_result.get("canonical_report_path") else worker_result.report_path
+                report_validation_errors = read_json(ctx.root / report_ingestion_result["validation"]["errors_path"]).get("errors", [])
+                report_failure_signature = report_ingestion_result.get("normalized_failure_signature")
+                if not report_ingestion_result["accepted"]:
+                    message = "; ".join(error.get("message", "") for error in report_validation_errors) or report_ingestion_result.get("operator_summary", "report ingestion failed")
+                    raise ReportValidationError(message, report_validation_errors)
+                worker_result = type(worker_result)(
+                    exit_code=worker_result.exit_code,
+                    stdout=worker_result.stdout,
+                    stderr=worker_result.stderr,
+                    report_path=canonical_report_path,
+                )
+                report = validate_patchlet_report_file(canonical_report_path, patchlet)
                 report_valid = True
                 report_status = report["status"]
                 append_worker_event(
@@ -714,9 +766,19 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
                     attempt_id=run_id,
                     severity="success",
                     summary=f"Report validation passed for {pid}: {report_status}.",
-                    artifact_paths=[_record_path_for_manifest(ctx, worker_result.report_path)],
+                    artifact_paths=[
+                        _record_path_for_manifest(ctx, worker_result.report_path),
+                        report_ingestion_result["raw_report_path"],
+                        _record_path_for_manifest(ctx, ctx.paths.runs_dir / run_id / "gates" / "report_ingestion_result.json"),
+                    ],
                     next_action="Evaluating wrapper gate.",
-                    details={"report_valid": True, "report_status": report_status},
+                    details={
+                        "report_valid": True,
+                        "report_status": report_status,
+                        "report_ingestion_result_path": _record_path_for_manifest(ctx, ctx.paths.runs_dir / run_id / "gates" / "report_ingestion_result.json"),
+                        "report_validation_errors_path": report_ingestion_result["validation"]["errors_path"],
+                        "normalization_applied": report_ingestion_result["normalization_applied"],
+                    },
                 )
                 _upsert_attempt(
                     ctx,
@@ -742,6 +804,13 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
                 if not use_worktree:
                     _cleanup_direct_worker_changes(ctx, changed_paths)
                 report_error = str(exc)
+                report_validation_errors = getattr(exc, "errors", report_validation_errors)
+                report_failure_signature = (
+                    report_failure_signature
+                    or (report_validation_errors[0].get("normalized_signature") if report_validation_errors else None)
+                )
+                ingestion_result_path = _record_path_for_manifest(ctx, ctx.paths.runs_dir / run_id / "gates" / "report_ingestion_result.json")
+                validation_errors_path = _record_path_for_manifest(ctx, ctx.paths.runs_dir / run_id / "gates" / "report_validation_errors.json")
                 append_worker_event(
                     ctx,
                     worker_capsule,
@@ -752,6 +821,9 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
                         "report_path": _record_path_for_manifest(ctx, worker_result.report_path) if worker_result.report_path else None,
                         "report_valid": False,
                         "report_error": report_error,
+                        "failure_signature": report_failure_signature,
+                        "report_validation_errors_path": validation_errors_path,
+                        "report_ingestion_result_path": ingestion_result_path,
                     },
                 )
                 _append_patchlet_event(
@@ -762,10 +834,21 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
                     severity="error",
                     summary=f"Report validation failed for {pid}: {report_error}.",
                     artifact_paths=[
-                        _record_path_for_manifest(ctx, worker_result.report_path) if worker_result.report_path else None
+                        _record_path_for_manifest(ctx, worker_result.report_path) if worker_result.report_path else None,
+                        ingestion_result_path,
+                        validation_errors_path,
                     ],
                     next_action="Recording failure evidence.",
-                    details={"report_valid": False, "report_error": report_error},
+                    details={
+                        "report_valid": False,
+                        "report_error": report_error,
+                        "failure_signature": report_failure_signature,
+                        "report_validation_errors_path": validation_errors_path,
+                        "report_ingestion_result_path": ingestion_result_path,
+                        "field": report_validation_errors[0].get("field") if report_validation_errors else None,
+                        "expected_type": report_validation_errors[0].get("expected_type") if report_validation_errors else None,
+                        "actual_type": report_validation_errors[0].get("actual_type") if report_validation_errors else None,
+                    },
                 )
                 _upsert_attempt(
                     ctx,
@@ -773,7 +856,12 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
                     lifecycle_status="REPORT_VALIDATED",
                     report_valid=False,
                     report_error=report_error,
-                    report_validation={"valid": False, "reason": report_error},
+                    report_validation={
+                        "valid": False,
+                        "reason": report_error,
+                        "failure_signature": report_failure_signature,
+                        "errors_path": validation_errors_path,
+                    },
                     status="FAILED_WITH_EVIDENCE",
                 )
                 failure_id = _record_failure(
@@ -781,6 +869,10 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
                     source_id=pid,
                     observed_failure=f"Invalid or missing patchlet report: {exc}",
                     changed_paths=changed_paths,
+                    failure_signature=report_failure_signature,
+                    report_validation_errors=report_validation_errors,
+                    report_ingestion_result_path=ingestion_result_path,
+                    report_validation_errors_path=validation_errors_path,
                 )
                 report_status = "FAILED_WITH_EVIDENCE"
 

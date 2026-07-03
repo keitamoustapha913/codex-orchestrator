@@ -50,6 +50,13 @@ cxor auto --repo /path/to/target-repo --resume --until DONE --worker-mode mock
 ## Durable probes and verification
 
 Patchlet reports must carry `probe_artifact_refs` that point at durable probe artifacts under `.artifacts/probes/`.
+Canonical patchlet reports require `probe_artifact_refs` entries to be objects,
+not string-only paths. Raw real-Codex reports may contain string refs only
+before report ingestion; safe refs under `.artifacts/probes/` are normalized
+into canonical objects and unsafe refs fail with
+`report_ingestion_result.json` plus `report_validation_errors.json`. See
+`docs/report_contract.md` for the canonical object shape, valid and invalid
+examples, `probe_artifact_refs_not_objects`, and the report-only repair policy.
 
 The root-cause gate is explicit:
 `ROOT-CAUSE PROBE-ONLY INVESTIGATION`

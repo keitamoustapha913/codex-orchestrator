@@ -119,7 +119,21 @@ def _minimal_report_skeleton(patchlet_id: str) -> str:
             "row_ledger": [],
             "trace_ledger": [],
             "cleanup_proof": "cleanup passed; no transient files remain",
-            "probe_artifact_refs": [],
+            "probe_artifact_refs": [
+                {
+                    "patchlet_id": patchlet_id,
+                    "probe_root": f".artifacts/probes/{patchlet_id}",
+                    "run_id": "default",
+                    "files": [
+                        {
+                            "path": f".artifacts/probes/{patchlet_id}/summary.json",
+                            "kind": "summary",
+                            "sha256": "<sha256>",
+                            "size_bytes": 123,
+                        }
+                    ],
+                }
+            ],
             "acceptance_criteria_result": "pass",
         },
         indent=2,
@@ -163,7 +177,52 @@ def report_schema_contract_text(*, patchlet_id: str, report_path: str) -> str:
         "- `deterministic_run_counts` must be present.\n"
         "- `before_after_state` must be present.\n"
         "- `row_ledger` must be present.\n"
-        "- `trace_ledger` must be present.\n\n"
+        "- `trace_ledger` must be present.\n"
+        "- `probe_artifact_refs` entries must be objects, never string-only paths.\n\n"
+        "## probe_artifact_refs MUST be object entries\n\n"
+        "Do not write probe_artifact_refs as strings.\n\n"
+        "Invalid:\n\n"
+        "```json\n"
+        "\"probe_artifact_refs\": [\n"
+        f"  \".artifacts/probes/{patchlet_id}/comparison.txt\"\n"
+        "]\n"
+        "```\n\n"
+        "Valid:\n\n"
+        "```json\n"
+        "\"probe_artifact_refs\": [\n"
+        "  {\n"
+        f"    \"patchlet_id\": \"{patchlet_id}\",\n"
+        f"    \"probe_root\": \".artifacts/probes/{patchlet_id}\",\n"
+        "    \"run_id\": \"default\",\n"
+        "    \"files\": [\n"
+        "      {\n"
+        f"        \"path\": \".artifacts/probes/{patchlet_id}/comparison.txt\",\n"
+        "        \"kind\": \"comparison\",\n"
+        "        \"sha256\": \"<sha256>\",\n"
+        "        \"size_bytes\": 123\n"
+        "      }\n"
+        "    ]\n"
+        "  }\n"
+        "]\n"
+        "```\n\n"
+        "Nested run example:\n\n"
+        "```json\n"
+        "{\n"
+        f"  \"patchlet_id\": \"{patchlet_id}\",\n"
+        f"  \"probe_root\": \".artifacts/probes/{patchlet_id}/run_001\",\n"
+        "  \"run_id\": \"run_001\",\n"
+        "  \"files\": [\n"
+        "    {\n"
+        f"      \"path\": \".artifacts/probes/{patchlet_id}/run_001/before_state.json\",\n"
+        "      \"kind\": \"before_state\",\n"
+        "      \"sha256\": \"<sha256>\",\n"
+        "      \"size_bytes\": 123\n"
+        "    }\n"
+        "  ]\n"
+        "}\n"
+        "```\n\n"
+        "If no probe artifacts are produced, use `\"probe_artifact_refs\": []`.\n"
+        "If probe artifacts are produced, every entry must be an object, never a string.\n\n"
         "## Minimal valid JSON skeleton\n\n"
         "```json\n"
         f"{_minimal_report_skeleton(patchlet_id)}\n"
