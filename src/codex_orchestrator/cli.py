@@ -291,6 +291,15 @@ def cmd_apply_results(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_validate_integration_artifacts(args: argparse.Namespace) -> int:
+    from codex_orchestrator.validators.integration_artifact_validator import validate_integration_artifacts
+
+    ctx = _ctx(args)
+    result = validate_integration_artifacts(ctx.root)
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0 if result["valid"] else 1
+
+
 def cmd_inspect_capsule(args: argparse.Namespace) -> int:
     ctx = _ctx(args)
     run_dir = ctx.paths.runs_dir / args.attempt
@@ -489,6 +498,10 @@ def build_parser() -> argparse.ArgumentParser:
     _add_repo_flags(apply_results)
     apply_results.add_argument("--mode", default="patch", choices=["patch", "branch", "working-tree"])
     apply_results.set_defaults(func=cmd_apply_results)
+
+    validate_integration = sub.add_parser("validate-integration-artifacts")
+    _add_repo_flags(validate_integration)
+    validate_integration.set_defaults(func=cmd_validate_integration_artifacts)
 
     return parser
 

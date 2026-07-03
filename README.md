@@ -260,11 +260,27 @@ files. `--mode branch` creates `cxor/results/<run_id>` without checking it out.
 `--mode working-tree` requires a clean target and mutates product/runtime files
 only because the operator explicitly requested it.
 
+Integration artifacts are schema-validated. `integration_state.json` validates
+against `integration_state.schema.json`, each `accepted_changes.jsonl` entry is
+validated line-by-line against `accepted_change.schema.json`, checkpoints
+validate against `integration_checkpoint.schema.json`, and apply-results files
+such as `patch_result.json` validate against
+`apply_results_result.schema.json`. Run the read-only validator with:
+
+```bash
+cxor validate-integration-artifacts --repo /path/to/target-repo
+```
+
+This command is read-only for product/runtime files and does not run Codex. It
+supports the integration-ref safety model by checking the durable artifacts
+that explain which accepted changes are represented by the integration SHA.
+
 Useful read-only commands:
 
 ```bash
 cxor inspect-capsule --repo /path/to/target-repo --attempt P0001_attempt1
 cxor validate-capsule --repo /path/to/target-repo --attempt P0001_attempt1
+cxor validate-integration-artifacts --repo /path/to/target-repo
 cxor diagnose-real-codex --repo /path/to/target-repo --attempt P0001_attempt1
 cxor verify-group --repo /path/to/target-repo TG001
 cxor verify-global --repo /path/to/target-repo

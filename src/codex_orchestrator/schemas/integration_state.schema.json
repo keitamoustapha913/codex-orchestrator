@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://codex-orchestrator.local/schemas/integration_state.schema.json",
+  "title": "Integration State",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "kind",
+    "target_head_sha",
+    "integration_ref",
+    "integration_sha",
+    "apply_mode",
+    "target_product_dirty_allowed",
+    "accepted_patchlets",
+    "last_checkpoint_path",
+    "final_diff_path"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "kind": {
+      "const": "integration_state"
+    },
+    "target_head_sha": {
+      "type": "string",
+      "minLength": 1
+    },
+    "integration_ref": {
+      "type": "string",
+      "pattern": "^refs/cxor/runs/.+/integration$"
+    },
+    "integration_sha": {
+      "type": "string",
+      "minLength": 1
+    },
+    "apply_mode": {
+      "const": "finalize_only"
+    },
+    "target_product_dirty_allowed": {
+      "const": false
+    },
+    "accepted_patchlets": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "last_checkpoint_path": {
+      "oneOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "final_diff_path": {
+      "const": ".codex-orchestrator/integration/final_diff.patch"
+    }
+  }
+}

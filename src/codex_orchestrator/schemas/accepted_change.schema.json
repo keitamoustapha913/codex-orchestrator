@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://codex-orchestrator.local/schemas/accepted_change.schema.json",
+  "title": "Accepted Change",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "kind",
+    "run_id",
+    "patchlet_id",
+    "attempt_id",
+    "previous_integration_sha",
+    "new_integration_sha",
+    "integration_ref",
+    "allowed_product_runtime_files",
+    "changed_product_runtime_files",
+    "diff_path",
+    "report_path",
+    "probe_root",
+    "wrapper_gate_result",
+    "accepted_at"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "kind": {
+      "const": "accepted_change"
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "patchlet_id": {
+      "type": "string",
+      "pattern": "^P[0-9]+$"
+    },
+    "attempt_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "previous_integration_sha": {
+      "type": "string",
+      "minLength": 1
+    },
+    "new_integration_sha": {
+      "type": "string",
+      "minLength": 1
+    },
+    "integration_ref": {
+      "type": "string",
+      "pattern": "^refs/cxor/runs/.+/integration$"
+    },
+    "allowed_product_runtime_files": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "changed_product_runtime_files": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "diff_path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "report_path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "probe_root": {
+      "type": "string",
+      "minLength": 1
+    },
+    "wrapper_gate_result": {
+      "type": "string",
+      "minLength": 1
+    },
+    "accepted_at": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

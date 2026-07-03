@@ -8,6 +8,7 @@ from codex_orchestrator.integration_state import target_product_runtime_clean, w
 from codex_orchestrator.jsonio import read_json, write_json
 from codex_orchestrator.state import load_state, now_iso
 from codex_orchestrator.target_repo import TargetRepoContext
+from codex_orchestrator.validators.integration_artifact_validator import validate_integration_artifacts
 
 
 def apply_results(ctx: TargetRepoContext, *, mode: str = "patch") -> dict:
@@ -57,6 +58,10 @@ def apply_results(ctx: TargetRepoContext, *, mode: str = "patch") -> dict:
     result_dir = ctx.paths.integration_dir / "apply_results"
     result_dir.mkdir(parents=True, exist_ok=True)
     write_json(result_dir / f"{mode}_result.json", result)
+    validation = validate_integration_artifacts(ctx.root)
+    write_json(result_dir / f"{mode}_validation_result.json", validation)
+    if not validation["valid"]:
+        raise RuntimeError("apply-results integration artifact validation failed")
     return result
 
 

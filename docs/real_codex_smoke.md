@@ -129,3 +129,17 @@ target repo remains clean between patchlets and the next worktree starts from
 the integration SHA. DONE verifies that integration SHA. Use
 `cxor apply-results --mode patch`, `cxor apply-results --mode branch`, or
 `cxor apply-results --mode working-tree` after DONE to consume results.
+
+The integration artifacts used by those steps are schema-validated:
+`integration_state.json` uses `integration_state.schema.json`,
+`accepted_changes.jsonl` is validated line-by-line with
+`accepted_change.schema.json`, checkpoints use
+`integration_checkpoint.schema.json`, and apply-results files such as
+`patch_result.json` use `apply_results_result.schema.json`.
+
+```bash
+cxor validate-integration-artifacts --repo /path/to/target-repo
+```
+
+The validator is read-only, does not run Codex, and helps compare whether a
+safe failure preserved structurally valid integration evidence.

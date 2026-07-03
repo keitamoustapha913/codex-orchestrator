@@ -1,0 +1,106 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://codex-orchestrator.local/schemas/apply_results_result.schema.json",
+  "title": "Apply Results Result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "kind",
+    "mode",
+    "target_head_sha",
+    "integration_sha",
+    "integration_ref",
+    "final_diff_path",
+    "mutated_working_tree",
+    "created_branch",
+    "created_at"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "kind": {
+      "const": "apply_results_result"
+    },
+    "mode": {
+      "enum": ["patch", "branch", "working-tree"]
+    },
+    "target_head_sha": {
+      "type": "string",
+      "minLength": 1
+    },
+    "integration_sha": {
+      "type": "string",
+      "minLength": 1
+    },
+    "integration_ref": {
+      "type": "string",
+      "pattern": "^refs/cxor/runs/.+/integration$"
+    },
+    "final_diff_path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "mutated_working_tree": {
+      "type": "boolean"
+    },
+    "created_branch": {
+      "oneOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "created_at": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "oneOf": [
+    {
+      "properties": {
+        "mode": {
+          "const": "patch"
+        },
+        "mutated_working_tree": {
+          "const": false
+        },
+        "created_branch": {
+          "type": "null"
+        }
+      }
+    },
+    {
+      "properties": {
+        "mode": {
+          "const": "branch"
+        },
+        "mutated_working_tree": {
+          "const": false
+        },
+        "created_branch": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    {
+      "properties": {
+        "mode": {
+          "const": "working-tree"
+        },
+        "mutated_working_tree": {
+          "const": true
+        },
+        "created_branch": {
+          "type": "null"
+        }
+      }
+    }
+  ]
+}

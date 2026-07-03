@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://codex-orchestrator.local/schemas/integration_checkpoint.schema.json",
+  "title": "Integration Checkpoint",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "kind",
+    "run_id",
+    "patchlet_id",
+    "attempt_id",
+    "previous_integration_sha",
+    "new_integration_sha",
+    "integration_ref",
+    "changed_product_runtime_files",
+    "diff_path",
+    "wrapper_gate_result",
+    "target_working_tree_clean_after_checkpoint"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "kind": {
+      "const": "integration_checkpoint"
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "patchlet_id": {
+      "type": "string",
+      "pattern": "^P[0-9]+$"
+    },
+    "attempt_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "previous_integration_sha": {
+      "type": "string",
+      "minLength": 1
+    },
+    "new_integration_sha": {
+      "type": "string",
+      "minLength": 1
+    },
+    "integration_ref": {
+      "type": "string",
+      "pattern": "^refs/cxor/runs/.+/integration$"
+    },
+    "changed_product_runtime_files": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "diff_path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "wrapper_gate_result": {
+      "type": "string",
+      "minLength": 1
+    },
+    "target_working_tree_clean_after_checkpoint": {
+      "const": true
+    }
+  }
+}

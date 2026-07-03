@@ -218,3 +218,12 @@ integration SHA, and final verification writes
 Implemented: explicit finalization through `cxor apply-results --mode patch`,
 `cxor apply-results --mode branch`, and `cxor apply-results --mode
 working-tree`.
+
+Implemented: schema validation for integration artifacts.
+`integration_state.json` uses `integration_state.schema.json`,
+`accepted_changes.jsonl` entries validate line-by-line with
+`accepted_change.schema.json`, checkpoint files use
+`integration_checkpoint.schema.json`, and apply-results outputs such as
+`patch_result.json` use `apply_results_result.schema.json`. Operators can run
+`cxor validate-integration-artifacts --repo /path/to/target-repo`; the command
+is read-only and does not run Codex.

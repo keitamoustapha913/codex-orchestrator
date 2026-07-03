@@ -27,6 +27,7 @@ from codex_orchestrator.worker_capsule import (
     write_wrapper_gate_result,
 )
 from codex_orchestrator.validators.diff_validator import validate_changed_paths
+from codex_orchestrator.validators.integration_artifact_validator import validate_integration_artifacts
 from codex_orchestrator.validators.report_validator import ReportValidationError, validate_patchlet_report_file
 from codex_orchestrator.worktree import cleanup_patchlet_worktree, create_patchlet_worktree
 
@@ -285,6 +286,13 @@ def _is_tracked(ctx: TargetRepoContext, rel_path: str) -> bool:
     return result.returncode == 0
 
 
+def _write_integration_validation_result(ctx: TargetRepoContext) -> dict:
+    result = validate_integration_artifacts(ctx.root)
+    path = ctx.paths.integration_dir / "validation_result.json"
+    write_json(path, result)
+    return result
+
+
 def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_worktree: bool = False) -> PatchletExecutionResult:
     index = _load_patchlet_index(ctx)
     patchlet = _next_pending_patchlet(index)
@@ -330,6 +338,7 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
     diff_text = ""
     diff_path = run_dir / "diff.patch"
     diff_result = None
+    integration_validation_result: dict | None = None
     try:
         worker_result = worker.run_patchlet(ctx, patchlet, run_dir=run_dir, run_ctx=run_ctx)
         capsule_path_violations = _capsule_path_violation_reasons(ctx, run_ctx)
@@ -572,6 +581,9 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
             wrapper_gate_result=wrapper_gate_result_path,
             new_integration_sha=integration_checkpoint_sha,
         )
+        integration_validation_result = _write_integration_validation_result(ctx)
+        if not integration_validation_result["valid"]:
+            raise WorkerExecutionError("integration artifact validation failed")
     if worktree_ctx is not None:
         worktree_ctx = cleanup_patchlet_worktree(worktree_ctx)
         cleanup_status = worktree_ctx.cleanup_status
@@ -625,6 +637,12 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
             "cleanup_status": cleanup_status,
         },
         "wrapper_gate_result": wrapper_gate_result_path,
+        "integration_artifact_validation": {
+            "path": _record_path_for_manifest(ctx, ctx.paths.integration_dir / "validation_result.json")
+            if integration_validation_result is not None
+            else None,
+            "valid": integration_validation_result.get("valid") if integration_validation_result else None,
+        },
         "report_valid": report_valid,
         "report_error": report_error,
         "timed_out": _read_command_from_run_dir(run_dir).get("timed_out"),

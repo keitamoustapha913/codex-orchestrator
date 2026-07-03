@@ -145,3 +145,17 @@ SHA, and DONE is verified against the integration SHA plus
 `.codex-orchestrator/integration/final_diff.patch`. Operators finalize results
 explicitly with `cxor apply-results --mode patch`, `cxor apply-results --mode
 branch`, or `cxor apply-results --mode working-tree`.
+
+Schema validation now covers the integration-ref artifacts. The validator checks
+`integration_state.json` with `integration_state.schema.json`,
+`accepted_changes.jsonl` line-by-line with `accepted_change.schema.json`,
+checkpoints with `integration_checkpoint.schema.json`, and apply-results files
+such as `patch_result.json` with `apply_results_result.schema.json`.
+
+```bash
+cxor validate-integration-artifacts --repo /path/to/target-repo
+```
+
+This command is read-only, does not run Codex, and reinforces that DONE is
+based on validated integration-state evidence rather than a dirty target
+working tree.

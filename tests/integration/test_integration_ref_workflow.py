@@ -129,3 +129,25 @@ def test_accepted_changes_jsonl_appends_one_entry_per_accepted_patchlet(git_repo
     entries = [json.loads(line) for line in ctx.paths.accepted_changes.read_text(encoding="utf-8").splitlines() if line]
     assert len(entries) == 1
     assert entries[0]["new_integration_sha"] == read_json(ctx.paths.integration_state)["integration_sha"]
+
+
+def test_accepted_patchlet_checkpoint_runs_integration_artifact_validation(git_repo: Path):
+    ctx = _compiled_ctx(git_repo)
+
+    _run_accepted_product_change(ctx)
+
+    validation_path = ctx.paths.integration_dir / "validation_result.json"
+    validation = read_json(validation_path)
+    assert validation["kind"] == "integration_artifact_validation"
+    assert validation["valid"] is True
+
+
+def test_run_manifest_records_integration_artifact_validation(git_repo: Path):
+    ctx = _compiled_ctx(git_repo)
+
+    _run_accepted_product_change(ctx)
+
+    manifest = read_json(ctx.paths.run_manifest)
+    record = manifest["runs"][-1]
+    assert record["integration_artifact_validation"]["valid"] is True
+    assert record["integration_artifact_validation"]["path"] == ".codex-orchestrator/integration/validation_result.json"

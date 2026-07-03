@@ -111,3 +111,20 @@ Use `cxor apply-results --mode patch`, `cxor apply-results --mode branch`, or
 `cxor apply-results --mode working-tree` to consume accepted results. Patch mode
 does not mutate product files, branch mode does not checkout the branch, and
 working-tree mode requires a clean target before mutating.
+
+The integration artifact set is schema-validated:
+
+- `integration_state.json` uses `integration_state.schema.json`
+- each `accepted_changes.jsonl` entry is checked line-by-line with `accepted_change.schema.json`
+- checkpoint files use `integration_checkpoint.schema.json`
+- apply-results files such as `patch_result.json` use `apply_results_result.schema.json`
+
+Run:
+
+```bash
+cxor validate-integration-artifacts --repo /path/to/target-repo
+```
+
+The command is read-only, does not run Codex, and validates the artifacts that
+tie target cleanliness, integration SHA, accepted changes, and finalization
+together.

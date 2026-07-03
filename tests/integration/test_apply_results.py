@@ -110,6 +110,19 @@ def test_apply_results_records_apply_result_json(git_repo: Path):
     assert read_json(result_path)["integration_sha"] == result["integration_sha"]
 
 
+def test_apply_results_runs_result_schema_validation(git_repo: Path):
+    from codex_orchestrator.apply_results import apply_results
+
+    ctx = _ctx_with_integrated_change(git_repo)
+
+    apply_results(ctx, mode="patch")
+
+    validation_path = ctx.paths.integration_dir / "apply_results" / "patch_validation_result.json"
+    validation = read_json(validation_path)
+    assert validation["kind"] == "integration_artifact_validation"
+    assert validation["valid"] is True
+
+
 def test_apply_results_missing_integration_state_reports_structured_error(git_repo: Path):
     from codex_orchestrator.apply_results import apply_results
 

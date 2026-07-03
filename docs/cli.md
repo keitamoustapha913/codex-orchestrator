@@ -214,6 +214,20 @@ result branch without checkout. `--mode working-tree` requires a clean target
 and mutates only after explicit operator request. A safe failure is evidence
 capture, not DONE.
 
+Integration artifact validation:
+
+```bash
+cxor validate-integration-artifacts --repo /path/to/target-repo
+```
+
+This read-only command does not run Codex. It validates
+`integration_state.json` with `integration_state.schema.json`, validates
+`accepted_changes.jsonl` line-by-line with `accepted_change.schema.json`,
+validates checkpoint files with `integration_checkpoint.schema.json`, and
+validates apply-results artifacts such as `patch_result.json` with
+`apply_results_result.schema.json`. A non-zero exit means the integration
+artifact set is structurally invalid and should not be treated as DONE.
+
 Worker Capsule inspection:
 
 ```bash
