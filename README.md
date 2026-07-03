@@ -194,6 +194,17 @@ timeout, timeout result, diagnosis category, `result.json`, and
 `validation_result.json`. Invalid bundles are listed rather than hidden; use
 `cxor validate-real-codex-smoke-runbook --run-dir <dir>` to inspect one bundle.
 
+Export one validated bundle with:
+
+```bash
+cxor export-real-codex-smoke-runbook --run-dir .operator-runs/real-codex-smoke/<timestamp>-real-codex-smoke
+```
+
+The export command writes a zip archive under `.operator-runs/exports/` plus a
+sidecar hash manifest. It is read-only for the source bundle, does not run
+Codex, does not run pytest, uses relative archive paths, and refuses invalid
+bundles unless `--force` is passed.
+
 See `docs/runbooks/real_codex_smoke_runbook.md` for how to compare runs.
 
 Patchlet Codex defaults to `gpt-5.4-mini` with `CODEX_REASONING=medium`.
@@ -329,3 +340,8 @@ uv run --no-sync cxor validate-state --repo /path/to/target-repo
 uv run --no-sync cxor verify-global --repo /path/to/target-repo
 uv run --no-sync cxor auto --repo /path/to/target-repo --resume --until DONE --worker-mode ci_only
 ```
+
+Release checklist: see `docs/release.md`. The normal command is
+`cxor auto --repo <repo> --master <prompt> --until DONE`; mock mode is
+deterministic and CI-safe; real Codex is opt-in only; the integration ref keeps
+the target clean between patchlets; and apply-results is explicit finalization.

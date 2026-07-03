@@ -29,6 +29,7 @@ cxor validate-capsule
 cxor diagnose-real-codex
 cxor real-codex-smoke-runbook
 cxor list-real-codex-smoke-runbooks
+cxor export-real-codex-smoke-runbook
 cxor classify-failures
 cxor plan-repair
 cxor apply-repair
@@ -262,6 +263,19 @@ summarizes each bundle's outcome, validation status, model, reasoning, timeout,
 Invalid bundles are listed rather than hidden. Use
 `cxor validate-real-codex-smoke-runbook --run-dir <dir>` for one bundle's full
 validation details.
+
+Export one validated real-Codex smoke runbook bundle:
+
+```bash
+cxor export-real-codex-smoke-runbook --run-dir .operator-runs/real-codex-smoke/<timestamp>-real-codex-smoke
+cxor export-real-codex-smoke-runbook --run-dir <bundle> --out /tmp/bundle.zip
+cxor export-real-codex-smoke-runbook --run-dir <bundle> --force
+```
+
+The export command is read-only for the source bundle, does not run Codex, and
+does not run pytest. It writes a zip archive and sidecar manifest with relative
+paths, sizes, and sha256 hashes. Invalid bundles are refused unless `--force`
+is used.
 
 Worker Capsule inspection:
 

@@ -104,6 +104,19 @@ model/reasoning, timeout, `timed_out`, diagnosis category, `result.json`, and
 `cxor validate-real-codex-smoke-runbook --run-dir <dir>` for full validation of
 one bundle.
 
+Export one validated bundle for release evidence:
+
+```bash
+cxor export-real-codex-smoke-runbook --run-dir <dir>
+cxor export-real-codex-smoke-runbook --run-dir <dir> --out /tmp/runbook.zip
+cxor export-real-codex-smoke-runbook --run-dir <dir> --force
+```
+
+The export command creates a zip archive plus sidecar manifest. The manifest
+records source bundle validity, outcome, selected model/reasoning, timeout,
+diagnosis category, relative file paths, file sizes, and sha256 hashes. The
+source bundle is not modified. Invalid bundles require `--force`.
+
 `safe_failure is a successful runbook capture`, not task DONE. It means the
 runbook captured evidence for a contained real-Codex failure. `DONE means the
 orchestrator validators accepted the run`, including report validation, probe

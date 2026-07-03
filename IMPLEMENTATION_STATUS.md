@@ -244,3 +244,15 @@ control the scan. The command is read-only, does not run Codex, does not run
 pytest, summarizes outcome/model/reasoning/timeout/diagnosis/validation paths,
 and invalid bundles are listed rather than hidden. Use
 `cxor validate-real-codex-smoke-runbook --run-dir <dir>` for one bundle.
+
+Implemented: export packaging for operator-run real-Codex smoke bundles.
+`cxor export-real-codex-smoke-runbook --run-dir <bundle>` writes a zip archive
+under `.operator-runs/exports/` by default and writes a sidecar manifest with
+relative paths, sizes, and sha256 hashes. The command validates first, refuses
+invalid bundles unless `--force` is passed, does not mutate the source bundle,
+does not run Codex, and does not run pytest.
+
+Release checklist documentation is in `docs/release.md`. The normal command is
+`cxor auto --repo <repo> --master <prompt> --until DONE`; mock mode is
+deterministic and CI-safe; real Codex is opt-in only; the integration ref keeps
+the target clean between patchlets; and apply-results is explicit finalization.

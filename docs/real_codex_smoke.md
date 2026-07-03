@@ -135,6 +135,17 @@ model/reasoning, timeout, `timed_out`, diagnosis category, and paths to
 than hidden; validate one bundle with
 `cxor validate-real-codex-smoke-runbook --run-dir <dir>`.
 
+Export one validated bundle with:
+
+```bash
+cxor export-real-codex-smoke-runbook --run-dir .operator-runs/real-codex-smoke/<timestamp>-real-codex-smoke
+```
+
+The export command writes a zip archive and sidecar manifest with relative
+paths, sizes, and sha256 hashes. It is read-only for the source bundle, does
+not run Codex, does not run pytest, and refuses invalid bundles unless
+`--force` is passed.
+
 `safe_failure is a successful runbook capture`, not task DONE. `DONE means the
 orchestrator validators accepted the run`.
 

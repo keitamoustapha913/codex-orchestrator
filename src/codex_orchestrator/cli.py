@@ -327,6 +327,19 @@ def cmd_list_real_codex_smoke_runbooks(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_export_real_codex_smoke_runbook(args: argparse.Namespace) -> int:
+    from codex_orchestrator.real_codex_smoke_runbook_export import export_real_codex_smoke_runbook
+
+    result = export_real_codex_smoke_runbook(
+        args.run_dir,
+        out=args.out,
+        archive_format=args.format,
+        force=args.force,
+    )
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0 if result["exported"] else 1
+
+
 def cmd_inspect_capsule(args: argparse.Namespace) -> int:
     ctx = _ctx(args)
     run_dir = ctx.paths.runs_dir / args.attempt
@@ -541,6 +554,13 @@ def build_parser() -> argparse.ArgumentParser:
     list_runbooks.add_argument("--only-invalid", action="store_true")
     list_runbooks.add_argument("--limit", type=int, default=None)
     list_runbooks.set_defaults(func=cmd_list_real_codex_smoke_runbooks)
+
+    export_runbook = sub.add_parser("export-real-codex-smoke-runbook")
+    export_runbook.add_argument("--run-dir", type=Path, required=True)
+    export_runbook.add_argument("--out", type=Path, default=None)
+    export_runbook.add_argument("--format", choices=["zip"], default="zip")
+    export_runbook.add_argument("--force", action="store_true")
+    export_runbook.set_defaults(func=cmd_export_real_codex_smoke_runbook)
 
     return parser
 
