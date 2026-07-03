@@ -8,3 +8,13 @@ build/
 .venv/
 .operator-runs/
 codex-orchestrator-tdd-mvp.zip
+
+# Local investigation and implementation notes
+direct_auto_operator_visibility_implementation_note.md
+manual_cxor_auto_visibility_hang_artifact_index.json
+manual_cxor_auto_visibility_hang_evidence_report.md
+manual_cxor_auto_visibility_hang_raw_commands.md
+real_codex_probe_artifact_reference_loop_artifact_index.json
+real_codex_probe_artifact_reference_loop_evidence_report.md
+real_codex_probe_artifact_reference_loop_raw_commands.md
+real_codex_report_contract_hardening_implementation_note.md

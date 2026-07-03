@@ -168,6 +168,22 @@ The final release evidence bundle for the v0.1.0 release candidate is:
 This bundle reached `DONE`, validated with `errors: []` and `warnings: []`,
 and exported successfully with a hash manifest.
 
+## v0.1.0-rc3 Direct Real-Codex Report-Contract Evidence
+
+The direct real-Codex report-contract smoke for the v0.1.0 release candidate
+3 checkpoint is preserved at:
+
+```text
+/tmp/cxor-target-report-contract-smoke-20260703T203745Z
+```
+
+This fresh tiny target reached `DONE` through direct `cxor auto
+--worker-mode real_codex --use-worktree --live-progress`. Real Codex wrote
+canonical object-shaped `probe_artifact_refs` directly; report ingress
+accepted the report with `normalization_applied=false`, `errors: []`, wrapper
+gate accepted, target hygiene passed, integration validation passed, and the
+workflow reached `DONE`. No `unknown_repeated_failure` occurred.
+
 ## Direct Auto Visibility Release Guidance
 
 Manual direct auto smoke for operator visibility should use a fresh tiny target

@@ -340,6 +340,19 @@ Release evidence preserved for v0.1.0-rc1:
 The final explicit installed real-Codex operator smoke reached `DONE`; the
 bundle validated with no errors or warnings and exported successfully.
 
+Release evidence preserved for v0.1.0-rc3 direct report-contract smoke:
+
+```text
+/tmp/cxor-target-report-contract-smoke-20260703T203745Z
+```
+
+This direct `cxor auto --worker-mode real_codex --use-worktree
+--live-progress` smoke reached `DONE`. Report ingress accepted P0001 with
+`normalization_applied=false` because real Codex wrote canonical object-shaped
+`probe_artifact_refs` directly. Wrapper gate, target hygiene, integration
+validation, transaction group verification, and global verification all passed.
+No `unknown_repeated_failure` occurred.
+
 Implemented: direct auto operator visibility and long-run control. Direct
 `cxor auto` now supports `--live-progress`, `--no-live-progress`,
 `--progress-interval-seconds`, and `--progress-format compact|jsonl`. Compact
