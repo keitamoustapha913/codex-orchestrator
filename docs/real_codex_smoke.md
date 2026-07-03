@@ -118,6 +118,23 @@ evidence files such as `environment.txt`, `default_skip_stdout.txt`,
 `default_skip_stderr.txt`, `explicit_smoke_stdout.txt`, and
 `explicit_smoke_stderr.txt`.
 
+List local operator-run bundles with:
+
+```bash
+cxor list-real-codex-smoke-runbooks
+cxor list-real-codex-smoke-runbooks --root .operator-runs/real-codex-smoke --json
+cxor list-real-codex-smoke-runbooks --latest
+cxor list-real-codex-smoke-runbooks --only-invalid
+cxor list-real-codex-smoke-runbooks --limit 10
+```
+
+The list command is read-only, does not run Codex, and does not run pytest. It
+shows which bundle is latest, which bundles are valid, their outcome, selected
+model/reasoning, timeout, `timed_out`, diagnosis category, and paths to
+`result.json` and `validation_result.json`. Invalid bundles are listed rather
+than hidden; validate one bundle with
+`cxor validate-real-codex-smoke-runbook --run-dir <dir>`.
+
 `safe_failure is a successful runbook capture`, not task DONE. `DONE means the
 orchestrator validators accepted the run`.
 

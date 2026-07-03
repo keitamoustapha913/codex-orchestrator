@@ -236,3 +236,11 @@ and `validation_result.json` uses
 `real_codex_smoke_runbook_validation.schema.json`. Operators can run
 `cxor validate-real-codex-smoke-runbook --run-dir .operator-runs/real-codex-smoke/<timestamp>-real-codex-smoke`;
 the command is read-only, does not run Codex, and does not run pytest.
+
+Implemented: read-only listing for local real-Codex smoke runbook bundles.
+`cxor list-real-codex-smoke-runbooks` prints a compact table. `--json` prints
+structured summaries. `--root`, `--latest`, `--only-invalid`, and `--limit`
+control the scan. The command is read-only, does not run Codex, does not run
+pytest, summarizes outcome/model/reasoning/timeout/diagnosis/validation paths,
+and invalid bundles are listed rather than hidden. Use
+`cxor validate-real-codex-smoke-runbook --run-dir <dir>` for one bundle.

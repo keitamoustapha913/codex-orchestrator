@@ -86,6 +86,24 @@ To compare runs, diff `selected_policy.json`, `result.json`, and
 to verify what the smoke printed, and use copied diagnosis artifacts to inspect
 the preserved cause classification.
 
+List local bundles first:
+
+```bash
+cxor list-real-codex-smoke-runbooks
+cxor list-real-codex-smoke-runbooks --json
+cxor list-real-codex-smoke-runbooks --root .operator-runs/real-codex-smoke
+cxor list-real-codex-smoke-runbooks --latest
+cxor list-real-codex-smoke-runbooks --only-invalid
+cxor list-real-codex-smoke-runbooks --limit 10
+```
+
+The list command is read-only, does not run Codex, and does not run pytest. It
+summarizes each timestamped run's outcome, validation status, selected
+model/reasoning, timeout, `timed_out`, diagnosis category, `result.json`, and
+`validation_result.json`. Invalid bundles are listed rather than hidden. Use
+`cxor validate-real-codex-smoke-runbook --run-dir <dir>` for full validation of
+one bundle.
+
 `safe_failure is a successful runbook capture`, not task DONE. It means the
 runbook captured evidence for a contained real-Codex failure. `DONE means the
 orchestrator validators accepted the run`, including report validation, probe

@@ -179,6 +179,21 @@ checks `real_codex_smoke_selected_policy.schema.json`,
 files such as `environment.txt`, `default_skip_stdout.txt`, and
 `explicit_smoke_stdout.txt`.
 
+List local runbook bundles with:
+
+```bash
+cxor list-real-codex-smoke-runbooks
+cxor list-real-codex-smoke-runbooks --json
+cxor list-real-codex-smoke-runbooks --root .operator-runs/real-codex-smoke --latest
+cxor list-real-codex-smoke-runbooks --only-invalid --limit 10
+```
+
+This command is read-only, does not run Codex, and does not run pytest. It
+summarizes timestamp, outcome, validation status, selected model, reasoning,
+timeout, timeout result, diagnosis category, `result.json`, and
+`validation_result.json`. Invalid bundles are listed rather than hidden; use
+`cxor validate-real-codex-smoke-runbook --run-dir <dir>` to inspect one bundle.
+
 See `docs/runbooks/real_codex_smoke_runbook.md` for how to compare runs.
 
 Patchlet Codex defaults to `gpt-5.4-mini` with `CODEX_REASONING=medium`.

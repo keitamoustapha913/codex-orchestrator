@@ -28,6 +28,7 @@ cxor inspect-capsule
 cxor validate-capsule
 cxor diagnose-real-codex
 cxor real-codex-smoke-runbook
+cxor list-real-codex-smoke-runbooks
 cxor classify-failures
 cxor plan-repair
 cxor apply-repair
@@ -243,6 +244,24 @@ validates `validation_result.json` with
 `real_codex_smoke_runbook_validation.schema.json` when present, and checks
 required text evidence files including `environment.txt`,
 `default_skip_stdout.txt`, and `explicit_smoke_stdout.txt`.
+
+List local real-Codex smoke runbook bundles:
+
+```bash
+cxor list-real-codex-smoke-runbooks
+cxor list-real-codex-smoke-runbooks --root .operator-runs/real-codex-smoke
+cxor list-real-codex-smoke-runbooks --json
+cxor list-real-codex-smoke-runbooks --latest
+cxor list-real-codex-smoke-runbooks --only-invalid
+cxor list-real-codex-smoke-runbooks --limit 10
+```
+
+The list command is read-only, does not run Codex, and does not run pytest. It
+summarizes each bundle's outcome, validation status, model, reasoning, timeout,
+`timed_out`, diagnosis category, `result.json`, and `validation_result.json`.
+Invalid bundles are listed rather than hidden. Use
+`cxor validate-real-codex-smoke-runbook --run-dir <dir>` for one bundle's full
+validation details.
 
 Worker Capsule inspection:
 

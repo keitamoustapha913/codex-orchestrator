@@ -308,6 +308,25 @@ def cmd_validate_real_codex_smoke_runbook(args: argparse.Namespace) -> int:
     return 0 if result["valid"] else 1
 
 
+def cmd_list_real_codex_smoke_runbooks(args: argparse.Namespace) -> int:
+    from codex_orchestrator.real_codex_smoke_runbook_listing import (
+        format_real_codex_smoke_runbook_table,
+        list_real_codex_smoke_runbooks,
+    )
+
+    result = list_real_codex_smoke_runbooks(
+        args.root,
+        latest=args.latest,
+        only_invalid=args.only_invalid,
+        limit=args.limit,
+    )
+    if args.json:
+        print(json.dumps(result, indent=2, sort_keys=True))
+    else:
+        print(format_real_codex_smoke_runbook_table(result))
+    return 0
+
+
 def cmd_inspect_capsule(args: argparse.Namespace) -> int:
     ctx = _ctx(args)
     run_dir = ctx.paths.runs_dir / args.attempt
@@ -514,6 +533,14 @@ def build_parser() -> argparse.ArgumentParser:
     validate_runbook = sub.add_parser("validate-real-codex-smoke-runbook")
     validate_runbook.add_argument("--run-dir", type=Path, required=True)
     validate_runbook.set_defaults(func=cmd_validate_real_codex_smoke_runbook)
+
+    list_runbooks = sub.add_parser("list-real-codex-smoke-runbooks")
+    list_runbooks.add_argument("--root", type=Path, default=None)
+    list_runbooks.add_argument("--json", action="store_true")
+    list_runbooks.add_argument("--latest", action="store_true")
+    list_runbooks.add_argument("--only-invalid", action="store_true")
+    list_runbooks.add_argument("--limit", type=int, default=None)
+    list_runbooks.set_defaults(func=cmd_list_real_codex_smoke_runbooks)
 
     return parser
 
