@@ -329,6 +329,7 @@ def _top_level_smoke_fields(smoke: Mapping[str, object]) -> dict:
         "timed_out",
         "selected_model",
         "selected_reasoning",
+        "attempt_consistency",
     ]
     return {field: smoke[field] for field in fields if field in smoke}
 

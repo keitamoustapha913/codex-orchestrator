@@ -58,7 +58,15 @@ def _replacement_patchlet_ids_for_source_patchlet(
     return replacement_ids
 
 
-def _record_group_failure(ctx: TargetRepoContext, *, transaction_group_id: str, invariant_ids: list[str], observed_failure: str) -> str:
+def _record_group_failure(
+    ctx: TargetRepoContext,
+    *,
+    transaction_group_id: str,
+    source_patchlet_ids: list[str],
+    invariant_ids: list[str],
+    observed_failure: str,
+    gate_failure_reasons: list[str],
+) -> str:
     existing = sorted(ctx.paths.failures_dir.glob("F*.json"))
     failure_id = f"F{len(existing) + 1:04d}"
     record = {
@@ -66,8 +74,12 @@ def _record_group_failure(ctx: TargetRepoContext, *, transaction_group_id: str, 
         "kind": "failure_record",
         "failure_id": failure_id,
         "source": "TRANSACTION_GROUP_VERIFICATION_FAILED",
+        "source_type": "transaction_group",
         "source_id": transaction_group_id,
+        "source_transaction_group_id": transaction_group_id,
+        "source_patchlet_ids": source_patchlet_ids,
         "observed_failure": observed_failure,
+        "gate_failure_reasons": gate_failure_reasons,
         "blocking_invariant_ids": invariant_ids,
         "evidence_ids": [],
         "graph_node_ids": [],
@@ -141,6 +153,7 @@ def verify_group(ctx: TargetRepoContext, *, transaction_group_id: str) -> dict:
     validated_patchlet_ids: list[str] = []
     failed_patchlet_ids: list[str] = []
     validation_errors: list[str] = []
+    gate_failure_reasons: list[str] = []
     matrix_rows: list[dict] = []
     for patchlet in required_patchlets:
         patchlet_id = patchlet["patchlet_id"]
@@ -174,16 +187,15 @@ def verify_group(ctx: TargetRepoContext, *, transaction_group_id: str) -> dict:
             continue
         row["report_valid"] = True
         row["probe_valid"] = True
-        row["wrapper_gate_accepted"] = bool(
-            run_entry
-            and run_entry.get("wrapper_gate_result")
-            and (ctx.root / run_entry["wrapper_gate_result"]).exists()
-            and read_json(ctx.root / run_entry["wrapper_gate_result"]).get("accepted") is True
-        )
+        wrapper_gate = {}
+        if run_entry and run_entry.get("wrapper_gate_result") and (ctx.root / run_entry["wrapper_gate_result"]).exists():
+            wrapper_gate = read_json(ctx.root / run_entry["wrapper_gate_result"])
+        row["wrapper_gate_accepted"] = bool(wrapper_gate and wrapper_gate.get("accepted") is True)
         if not row["allowed_diff_valid"]:
             row["contradictions"].append("diff_not_validated")
         if not row["wrapper_gate_accepted"]:
             row["contradictions"].append("wrapper_gate_not_accepted")
+            gate_failure_reasons.extend(str(reason) for reason in wrapper_gate.get("reasons", []) if reason)
         if group.get("invariant_ids"):
             missing_invariants = [invariant_id for invariant_id in group.get("invariant_ids", []) if invariant_id not in patchlet.get("invariant_ids", [])]
             if missing_invariants:
@@ -220,8 +232,10 @@ def verify_group(ctx: TargetRepoContext, *, transaction_group_id: str) -> dict:
         failure_id = _record_group_failure(
             ctx,
             transaction_group_id=transaction_group_id,
+            source_patchlet_ids=source_patchlet_ids,
             invariant_ids=group.get("invariant_ids", []),
             observed_failure="; ".join(validation_errors),
+            gate_failure_reasons=gate_failure_reasons,
         )
         group["status"] = "FAILED"
         group["failure_ids"] = [failure_id]

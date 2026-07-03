@@ -31,6 +31,7 @@ def summarize_real_codex_smoke_runbook(run_dir: Path) -> dict[str, Any]:
     validation_result_exists = (run_dir / "validation_result.json").exists()
 
     explicit_smoke = result.get("explicit_smoke") if isinstance(result.get("explicit_smoke"), dict) else {}
+    attempt_consistency = result.get("attempt_consistency") if isinstance(result.get("attempt_consistency"), dict) else {}
     policy_timeout = selected_policy.get("codex_patchlet_timeout_seconds")
     result_timeout = result.get("timeout_seconds")
     return {
@@ -59,6 +60,10 @@ def summarize_real_codex_smoke_runbook(run_dir: Path) -> dict[str, Any]:
         },
         "timed_out": result.get("timed_out") if isinstance(result.get("timed_out"), bool) else None,
         "diagnosis_primary_category": _string_or_none(result.get("diagnosis_primary_category")),
+        "attempt_consistency_valid": attempt_consistency.get("valid") if isinstance(attempt_consistency.get("valid"), bool) else None,
+        "attempt_consistency_mismatches": attempt_consistency.get("mismatches")
+        if isinstance(attempt_consistency.get("mismatches"), list)
+        else [],
         "paths": {
             "result": "result.json" if result_exists else None,
             "selected_policy": "selected_policy.json" if selected_policy_exists else None,

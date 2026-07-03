@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://codex-orchestrator.local/schemas/target_cleanliness_report.schema.json",
+  "title": "Target Cleanliness Report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "kind",
+    "patchlet_id",
+    "attempt_id",
+    "checked_at",
+    "product_runtime_clean",
+    "artifact_dirs_ignored",
+    "cache_artifacts_detected",
+    "cache_artifacts_removed",
+    "unknown_dirty_paths",
+    "product_runtime_dirty_paths",
+    "whole_repo_clean_after_hygiene",
+    "target_working_tree_clean_after_checkpoint",
+    "hygiene_gate_result_path"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "kind": {"const": "target_cleanliness_report"},
+    "patchlet_id": {"type": "string", "pattern": "^P[0-9]+$"},
+    "attempt_id": {"type": "string", "minLength": 1},
+    "checked_at": {"type": "string"},
+    "product_runtime_clean": {"type": "boolean"},
+    "artifact_dirs_ignored": {"type": "array", "items": {"type": "string"}},
+    "cache_artifacts_detected": {"type": "array", "items": {"type": "string"}},
+    "cache_artifacts_removed": {"type": "array", "items": {"type": "string"}},
+    "unknown_dirty_paths": {"type": "array", "items": {"type": "string"}},
+    "product_runtime_dirty_paths": {"type": "array", "items": {"type": "string"}},
+    "whole_repo_clean_after_hygiene": {"type": "boolean"},
+    "target_working_tree_clean_after_checkpoint": {"const": true},
+    "hygiene_gate_result_path": {"type": ["string", "null"]}
+  }
+}

@@ -15,8 +15,9 @@ from codex_orchestrator.integration_state import (
 )
 from codex_orchestrator.patchlet_run_context import PatchletRunContext, build_patchlet_run_context
 from codex_orchestrator.jsonio import read_json, write_json
-from codex_orchestrator.run_records import append_run_record
+from codex_orchestrator.run_records import upsert_run_record
 from codex_orchestrator.state import load_state, now_iso, transition
+from codex_orchestrator.target_hygiene import run_target_hygiene_gate
 from codex_orchestrator.target_repo import TargetRepoContext
 from codex_orchestrator.worker_capsule import (
     append_worker_event,
@@ -115,21 +116,12 @@ def _append_failed_worker_run_record(
     run_dir = run_ctx.run_dir
     command = _read_command_from_run_dir(run_dir)
     exit_code = command.get("exit_code")
-    paths = {
-        "run_dir": _record_path_for_manifest(ctx, run_dir),
-        "stdout": _record_path_for_manifest(ctx, run_dir / "stdout.txt"),
-        "stderr": _record_path_for_manifest(ctx, run_dir / "stderr.txt"),
-        "command": _record_path_for_manifest(ctx, run_dir / "command.json"),
-        "output_jsonl": _record_path_for_manifest(ctx, run_dir / "output.jsonl"),
-        "progress_jsonl": _record_path_for_manifest(ctx, run_dir / "progress.jsonl"),
-        "diff": _record_path_for_manifest(ctx, run_dir / "diff.patch"),
-    }
-    append_run_record(ctx, {
+    paths = _base_manifest_paths(ctx, run_dir)
+    _upsert_attempt(ctx, attempt_id=run_dir.name, lifecycle_status="ATTEMPT_FAILED_WITH_EVIDENCE", **{
         "stage": "PATCHLET_EXECUTION_IN_PROGRESS",
         "worker": worker_mode,
         "worker_mode": worker_mode,
         "patchlet_id": patchlet["patchlet_id"],
-        "attempt_id": run_dir.name,
         "repair_plan_id": patchlet.get("repair_plan_id"),
         "source_failure_ids": patchlet.get("source_failure_ids", []),
         "execution_mode": "worktree" if use_worktree else "direct",
@@ -216,7 +208,9 @@ def _record_failure(ctx: TargetRepoContext, *, source_id: str, observed_failure:
         "kind": "failure_record",
         "failure_id": failure_id,
         "source": "PATCHLET_FAILED",
+        "source_type": "patchlet",
         "source_id": source_id,
+        "source_patchlet_ids": [source_id],
         "observed_failure": observed_failure,
         "blocking_invariant_ids": ["I001"],
         "evidence_ids": [],
@@ -293,6 +287,42 @@ def _write_integration_validation_result(ctx: TargetRepoContext) -> dict:
     return result
 
 
+def _base_manifest_paths(ctx: TargetRepoContext, run_dir, diff_path=None) -> dict:
+    return {
+        "run_dir": _record_path_for_manifest(ctx, run_dir),
+        "stdout": _record_path_for_manifest(ctx, run_dir / "stdout.txt"),
+        "stderr": _record_path_for_manifest(ctx, run_dir / "stderr.txt"),
+        "command": _record_path_for_manifest(ctx, run_dir / "command.json"),
+        "output_jsonl": _record_path_for_manifest(ctx, run_dir / "output.jsonl"),
+        "progress_jsonl": _record_path_for_manifest(ctx, run_dir / "progress.jsonl"),
+        "diff": _record_path_for_manifest(ctx, diff_path or (run_dir / "diff.patch")),
+    }
+
+
+def _upsert_attempt(ctx: TargetRepoContext, *, attempt_id: str, lifecycle_status: str, **record) -> None:
+    payload = {"lifecycle_status": lifecycle_status, **record}
+    upsert_run_record(ctx, attempt_id=attempt_id, record=payload)
+
+
+def _merge_hygiene_cache_evidence(final_result: dict, pre_result: dict | None) -> dict:
+    if not pre_result:
+        return final_result
+    merged = dict(final_result)
+    for key in ("cache_artifacts_detected", "cache_artifacts_removed"):
+        existing = list(merged.get(key, []))
+        seen = {
+            item.get("path")
+            for item in existing
+            if isinstance(item, dict)
+        }
+        for item in pre_result.get(key, []):
+            if isinstance(item, dict) and item.get("path") not in seen:
+                existing.append(item)
+                seen.add(item.get("path"))
+        merged[key] = existing
+    return merged
+
+
 def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_worktree: bool = False) -> PatchletExecutionResult:
     index = _load_patchlet_index(ctx)
     patchlet = _next_pending_patchlet(index)
@@ -305,6 +335,33 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
     transition(ctx, state, "PATCHLET_EXECUTION_IN_PROGRESS", reason=f"running {pid}")
 
     run_id = f"{pid}_attempt{state.attempts[pid]}"
+    initial_run_dir = ctx.paths.runs_dir / run_id
+    _upsert_attempt(
+        ctx,
+        attempt_id=run_id,
+        lifecycle_status="ATTEMPT_STARTED",
+        stage="PATCHLET_EXECUTION_IN_PROGRESS",
+        worker=worker_mode,
+        worker_mode=worker_mode,
+        patchlet_id=pid,
+        repair_plan_id=patchlet.get("repair_plan_id"),
+        source_failure_ids=patchlet.get("source_failure_ids", []),
+        execution_mode="worktree" if use_worktree else "direct",
+        status="ATTEMPT_STARTED",
+        success=False,
+        paths=_base_manifest_paths(ctx, initial_run_dir),
+    )
+    pre_hygiene = run_target_hygiene_gate(
+        target_repo_root=ctx.root,
+        workflow_dir=ctx.paths.workflow_dir,
+        probe_dir=ctx.paths.probe_dir,
+        run_dir=initial_run_dir,
+        patchlet_id=pid,
+        attempt_id=run_id,
+        allowed_product_runtime_file=patchlet.get("allowed_product_runtime_file"),
+    )
+    if not pre_hygiene["accepted"]:
+        raise WorkerPreconditionError("target hygiene gate failed: " + "; ".join(pre_hygiene.get("reasons", [])))
     worktree_ctx = create_patchlet_worktree(ctx, patchlet_id=pid) if use_worktree else None
     run_ctx = build_patchlet_run_context(
         ctx,
@@ -341,6 +398,15 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
     integration_validation_result: dict | None = None
     try:
         worker_result = worker.run_patchlet(ctx, patchlet, run_dir=run_dir, run_ctx=run_ctx)
+        _upsert_attempt(
+            ctx,
+            attempt_id=run_id,
+            lifecycle_status="WORKER_EXITED",
+            exit_code=worker_result.exit_code,
+            stdout=worker_result.stdout,
+            stderr=worker_result.stderr,
+            paths=_base_manifest_paths(ctx, run_dir, diff_path),
+        )
         capsule_path_violations = _capsule_path_violation_reasons(ctx, run_ctx)
         if capsule_path_violations:
             raise WorkerExecutionError("; ".join(capsule_path_violations))
@@ -482,6 +548,14 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
                         "report_status": report_status,
                     },
                 )
+                _upsert_attempt(
+                    ctx,
+                    attempt_id=run_id,
+                    lifecycle_status="REPORT_VALIDATED",
+                    report_valid=True,
+                    report_validation={"valid": True, "reason": None},
+                    status=report_status,
+                )
                 append_worker_event(
                     ctx,
                     worker_capsule,
@@ -509,6 +583,15 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
                         "report_valid": False,
                         "report_error": report_error,
                     },
+                )
+                _upsert_attempt(
+                    ctx,
+                    attempt_id=run_id,
+                    lifecycle_status="REPORT_VALIDATED",
+                    report_valid=False,
+                    report_error=report_error,
+                    report_validation={"valid": False, "reason": report_error},
+                    status="FAILED_WITH_EVIDENCE",
                 )
                 failure_id = _record_failure(
                     ctx,
@@ -569,7 +652,62 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
             "wrapper_gate_result": wrapper_gate_result_path,
         },
     )
+    _upsert_attempt(
+        ctx,
+        attempt_id=run_id,
+        lifecycle_status="WRAPPER_GATE_EVALUATED",
+        wrapper_gate_result=wrapper_gate_result_path,
+        wrapper_gate_accepted=gate_result["accepted"],
+    )
     if gate_result["accepted"] and report_status in {"COMPLETE", "VERIFIED_NO_CHANGE_NEEDED"}:
+        target_hygiene_result = run_target_hygiene_gate(
+            target_repo_root=ctx.root,
+            workflow_dir=ctx.paths.workflow_dir,
+            probe_dir=ctx.paths.probe_dir,
+            run_dir=run_dir,
+            patchlet_id=pid,
+            attempt_id=run_id,
+            allowed_product_runtime_file=patchlet.get("allowed_product_runtime_file"),
+        )
+        target_hygiene_result = _merge_hygiene_cache_evidence(target_hygiene_result, pre_hygiene)
+        append_worker_event(
+            ctx,
+            worker_capsule,
+            run_ctx,
+            event="after_target_hygiene",
+            worker_mode=worker_mode,
+            details={
+                "accepted": target_hygiene_result["accepted"],
+                "target_hygiene_gate_result": target_hygiene_result["result_path"],
+            },
+        )
+        if not target_hygiene_result["accepted"]:
+            _upsert_attempt(
+                ctx,
+                attempt_id=run_id,
+                lifecycle_status="TARGET_HYGIENE_EVALUATED",
+                target_hygiene_gate_result=target_hygiene_result["result_path"],
+                target_hygiene_accepted=False,
+                failed_stage="TARGET_HYGIENE_FAILED",
+            )
+            _upsert_attempt(
+                ctx,
+                attempt_id=run_id,
+                lifecycle_status="ATTEMPT_FAILED_WITH_EVIDENCE",
+                failed_stage="TARGET_HYGIENE_FAILED",
+                error_type="WorkerExecutionError",
+                error_message="target hygiene gate failed: " + "; ".join(target_hygiene_result.get("reasons", [])),
+                status="FAILED_WITH_EVIDENCE",
+                success=False,
+            )
+            raise WorkerExecutionError("target hygiene gate failed: " + "; ".join(target_hygiene_result.get("reasons", [])))
+        _upsert_attempt(
+            ctx,
+            attempt_id=run_id,
+            lifecycle_status="TARGET_HYGIENE_EVALUATED",
+            target_hygiene_gate_result=target_hygiene_result["result_path"],
+            target_hygiene_accepted=True,
+        )
         record_accepted_change(
             ctx,
             patchlet=patchlet,
@@ -580,20 +718,47 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
             probe_root=ctx.paths.probe_dir / pid,
             wrapper_gate_result=wrapper_gate_result_path,
             new_integration_sha=integration_checkpoint_sha,
+            target_hygiene_result=target_hygiene_result,
+        )
+        _upsert_attempt(
+            ctx,
+            attempt_id=run_id,
+            lifecycle_status="INTEGRATION_CHECKPOINT_WRITTEN",
+            integration_checkpoint_path=_record_path_for_manifest(ctx, ctx.paths.integration_checkpoints_dir / f"{pid}.json"),
+            target_cleanliness_report_path=_record_path_for_manifest(ctx, ctx.paths.integration_checkpoints_dir / f"{pid}_cleanliness.json"),
         )
         integration_validation_result = _write_integration_validation_result(ctx)
+        _upsert_attempt(
+            ctx,
+            attempt_id=run_id,
+            lifecycle_status="INTEGRATION_ARTIFACTS_VALIDATED",
+            integration_artifact_validation={
+                "path": _record_path_for_manifest(ctx, ctx.paths.integration_dir / "validation_result.json"),
+                "valid": integration_validation_result.get("valid"),
+                "errors": integration_validation_result.get("errors", []),
+            },
+        )
         if not integration_validation_result["valid"]:
+            _upsert_attempt(
+                ctx,
+                attempt_id=run_id,
+                lifecycle_status="ATTEMPT_FAILED_WITH_EVIDENCE",
+                failed_stage="INTEGRATION_ARTIFACTS_VALIDATION_FAILED",
+                error_type="WorkerExecutionError",
+                error_message="integration artifact validation failed",
+                status="FAILED_WITH_EVIDENCE",
+                success=False,
+            )
             raise WorkerExecutionError("integration artifact validation failed")
     if worktree_ctx is not None:
         worktree_ctx = cleanup_patchlet_worktree(worktree_ctx)
         cleanup_status = worktree_ctx.cleanup_status
 
-    append_run_record(ctx, {
+    _upsert_attempt(ctx, attempt_id=run_id, lifecycle_status="ATTEMPT_ACCEPTED" if report_status in {"COMPLETE", "VERIFIED_NO_CHANGE_NEEDED"} and gate_result["accepted"] else "ATTEMPT_FAILED_WITH_EVIDENCE", **{
         "stage": "PATCHLET_EXECUTION_IN_PROGRESS",
         "worker": worker_mode,
         "worker_mode": worker_mode,
         "patchlet_id": pid,
-        "attempt_id": run_id,
         "repair_plan_id": patchlet.get("repair_plan_id"),
         "source_failure_ids": patchlet.get("source_failure_ids", []),
         "execution_mode": "worktree" if use_worktree else "direct",

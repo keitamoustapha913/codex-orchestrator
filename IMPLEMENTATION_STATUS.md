@@ -204,6 +204,31 @@ create target-root worker_stage/. A top-level `worker_stage/` is diagnosed as
 `worker_capsule_path_violation`. This is a Codex path-obedience issue, not
 orchestrator wiring failure. Do not weaken validators.
 
+Implemented: real-Codex report contract hardening. If a worker exits `0` but
+the patchlet report fails schema validation, diagnosis reports
+`patchlet_report_schema_violation`, not `network_or_api_error`. Allowed report
+statuses remain `COMPLETE`, `VERIFIED_NO_CHANGE_NEEDED`,
+`BLOCKED_WITH_EVIDENCE`, and `FAILED_WITH_EVIDENCE`; `FIXED`, `DONE`,
+`SUCCESS`, `PASSED`, and `OK` are invalid. `cleanup_proof` must be a string,
+and required fields such as `changed_product_runtime_file`,
+`deterministic_run_counts`, `before_after_state`, `row_ledger`, and
+`trace_ledger` must exist. Repair patchlets receive a report skeleton and the
+same contract. Product/runtime edits are restricted to `CXOR_EXECUTION_ROOT`;
+product/runtime files under `CXOR_TARGET_ROOT` are read-only to Codex workers.
+
+Implemented: verified-no-change wrapper gate and transaction-group repair
+routing hardening. The final Markdown report must contain a standalone
+canonical marker line: `FINAL_STATUS: PASS`, `FINAL_STATUS: BLOCKED`, or
+`FINAL_STATUS: FAILED`. Non-canonical forms such as
+`Marker: `FINAL_STATUS: PASS`` and backticked markers are rejected with
+`wrapper_gate_final_status_marker_error`; a valid report JSON alone does not
+bypass the wrapper gate, and `network_or_api_error` does not mask structured
+gate or routing failures. Transaction group ids such as `TG001` are not
+patchlet ids. Transaction-group failure records preserve
+`source_type: transaction_group` and member `source_patchlet_ids`; regeneration
+expands those members and reports `transaction_group_source_mapping_missing`
+when mapping is unavailable.
+
 ## Live Progress And Integration State
 
 Implemented: compact live progress lines (`[cxor:<attempt> +004s] codex:
@@ -256,3 +281,36 @@ Release checklist documentation is in `docs/release.md`. The normal command is
 `cxor auto --repo <repo> --master <prompt> --until DONE`; mock mode is
 deterministic and CI-safe; real Codex is opt-in only; the integration ref keeps
 the target clean between patchlets; and apply-results is explicit finalization.
+
+Implemented: P0004 checkpoint cleanliness, manifest lifecycle, and diagnosis
+correctness hardening. Checkpoint cleanliness now has a checkpoint cleanliness
+taxonomy: `product_runtime_clean`, `artifact_dirs_ignored`,
+`cache_artifacts_detected`, `cache_artifacts_removed`, `unknown_dirty_paths`,
+and `whole_repo_clean_after_hygiene`. `target_working_tree_clean_after_checkpoint`
+remains strict and must be true. Product/runtime clean is distinct from whole
+target clean; `.codex-orchestrator/` and `.artifacts/` are evidence
+directories, while `__pycache__/`, `*.pyc`, and `*.pyo` are evidence-recorded
+and safely remediated only when known untracked cache artifacts. Unknown dirty
+paths are not deleted.
+
+Implemented: Target Hygiene Gate writes `target_hygiene_gate_result.json`,
+records cache evidence and `cache_artifacts_removed`, and prevents silent
+cleanup. Real-Codex worker environments set `PYTHONDONTWRITEBYTECODE=1`; worker
+capsule and prompt instructions require `python -B` or
+`PYTHONDONTWRITEBYTECODE=1 python` for probes that import target or execution
+code.
+
+Implemented: integration checkpoints include `target_cleanliness` and reference
+`.codex-orchestrator/integration/checkpoints/<PATCHLET>_cleanliness.json`.
+Run manifests now preserve attempt lifecycle states: `ATTEMPT_STARTED`,
+`WORKER_EXITED`, `REPORT_VALIDATED`, `WRAPPER_GATE_EVALUATED`,
+`TARGET_HYGIENE_EVALUATED`, `INTEGRATION_CHECKPOINT_WRITTEN`,
+`INTEGRATION_ARTIFACTS_VALIDATED`, `ATTEMPT_ACCEPTED`, and
+`ATTEMPT_FAILED_WITH_EVIDENCE`.
+
+Implemented: operator-run bundles record runbook attempt consistency through
+`attempt_consistency`; validate/list/export expose mismatch evidence.
+Structured diagnoses include `integration_checkpoint_target_cleanliness_error`,
+`integration_artifact_validation_error`, `run_manifest_attempt_lifecycle_error`,
+`runbook_attempt_evidence_mismatch`, and `target_cache_artifact_leak`.
+`network_or_api_error` now requires actual external error evidence.

@@ -78,6 +78,7 @@ def validate_real_codex_smoke_runbook(run_dir: Path) -> dict[str, Any]:
 
     _validate_copied_diagnosis_files(errors, warnings, run_dir=run_dir, result=result, diagnosis_paths=diagnosis_paths)
     validated["copied_diagnosis_files"] = not any(error["schema"] == "copied_diagnosis_files" for error in errors)
+    _validate_attempt_consistency(warnings, result=result)
 
     return _result(run_dir, validated, errors, warnings)
 
@@ -160,6 +161,32 @@ def _validate_copied_diagnosis_files(
                 schema="copied_diagnosis_files",
                 message="safe_failure result does not reference diagnosis artifacts",
             )
+
+
+def _validate_attempt_consistency(warnings: list[dict[str, str]], *, result: dict[str, Any] | None) -> None:
+    if result is None:
+        return
+    consistency = result.get("attempt_consistency")
+    if consistency is None:
+        _add_message(
+            warnings,
+            path="result.json",
+            schema="attempt_consistency",
+            message="attempt_consistency is missing; older bundles may not record attempt identity consistency",
+        )
+        return
+    if not isinstance(consistency, dict):
+        _add_message(warnings, path="result.json", schema="attempt_consistency", message="attempt_consistency must be an object")
+        return
+    if consistency.get("valid") is not True:
+        mismatches = consistency.get("mismatches", [])
+        details = ", ".join(str(item) for item in mismatches) if isinstance(mismatches, list) else "unknown mismatch"
+        _add_message(
+            warnings,
+            path="result.json",
+            schema="attempt_consistency",
+            message=f"attempt consistency mismatch: {details}",
+        )
 
 
 def _add_message(messages: list[dict[str, str]], *, path: str, schema: str, message: str) -> None:

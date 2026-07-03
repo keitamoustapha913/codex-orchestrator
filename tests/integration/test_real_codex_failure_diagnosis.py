@@ -30,6 +30,7 @@ def _seed_failed_real_codex_attempt(
     command_payload: dict | None = None,
     progress_events: list[dict] | None = None,
     worker_failure_message: str = "codex worker failed with exit_code=1",
+    run_overrides: dict | None = None,
 ) -> str:
     run_dir = ctx.paths.runs_dir / "P0001_attempt1"
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -141,9 +142,7 @@ def _seed_failed_real_codex_attempt(
     prompt_artifact.parent.mkdir(parents=True, exist_ok=True)
     prompt_artifact.write_text("# Real Codex Patchlet Contract\nCXOR_REPORT_PATH\n", encoding="utf-8")
 
-    append_run_record(
-        ctx,
-        {
+    run_record = {
             "stage": "PATCHLET_EXECUTION_IN_PROGRESS",
             "worker": "real_codex",
             "worker_mode": "real_codex",
@@ -199,9 +198,90 @@ def _seed_failed_real_codex_attempt(
                 "reason": "not_run_worker_failed_before_report_validation",
             },
             "state_after_failure": "PATCHLET_EXECUTION_IN_PROGRESS",
-        },
-    )
+        }
+    if run_overrides:
+        run_record.update(run_overrides)
+    append_run_record(ctx, run_record)
     return "P0001_attempt1"
+
+
+def _report_schema_violation_overrides(reason: str) -> dict:
+    return {
+        "status": "FAILED_WITH_EVIDENCE",
+        "success": False,
+        "exit_code": 0,
+        "report_valid": False,
+        "report_validation": {
+            "valid": False,
+            "reason": reason,
+        },
+        "report_error": reason,
+        "worker_failure": {
+            "type": "WorkerExecutionError",
+            "message": "invalid patchlet report",
+            "exit_code": 0,
+            "timed_out": False,
+            "timeout_seconds": 600,
+            "retryable": False,
+            "blind_retry_allowed": False,
+            "failure_category": "report_validation",
+        },
+    }
+
+
+def _write_wrapper_marker_failure(ctx, *, error: str, reason: str) -> None:
+    run_dir = ctx.paths.runs_dir / "P0001_attempt1"
+    (run_dir / "gates" / "wrapper_gate_result.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "1.0",
+                "kind": "wrapper_gate_result",
+                "patchlet_id": "P0001",
+                "attempt_id": "P0001_attempt1",
+                "accepted": False,
+                "worker_exit_gate": "pass",
+                "artifact_gate": "pass",
+                "memory_gate": "pass",
+                "stage_gate": "fail",
+                "diff_gate": "pass",
+                "report_gate": "pass",
+                "probe_gate": "pass",
+                "final_status_gate": "fail",
+                "final_status_claim": None,
+                "final_status_marker": None,
+                "final_status_marker_canonical": False,
+                "final_status_marker_noncanonical": "Marker: `FINAL_STATUS: PASS`",
+                "final_status_marker_error": error,
+                "reasons": [reason],
+                "next_state": "GROUP_VERIFICATION_REQUIRED",
+                "blind_retry_allowed": False,
+                "validator_weakening_allowed": False,
+                "worker_capsule_manifest": ".codex-orchestrator/runs/P0001_attempt1/worker_capsule.json",
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+def _stage_precondition_overrides(message: str) -> dict:
+    return {
+        "status": "WORKER_FAILED",
+        "success": False,
+        "exit_code": 0,
+        "worker_failure": {
+            "type": "StagePreconditionError",
+            "message": message,
+            "exit_code": 0,
+            "timed_out": False,
+            "timeout_seconds": 600,
+            "retryable": False,
+            "blind_retry_allowed": False,
+            "failure_category": "stage_precondition",
+        },
+    }
 
 
 def test_real_codex_failure_diagnosis_writes_json_and_markdown(git_repo: Path):
@@ -733,3 +813,302 @@ def test_target_dirty_after_integration_apply_summary_names_dirty_path_and_prior
     assert "app.py" in summary
     assert "P0001" in summary
     assert "missing integration-state management" in summary
+
+
+def test_report_schema_violation_diagnosis_precedes_network_or_api_error(git_repo: Path):
+    from codex_orchestrator.diagnostics import diagnose_real_codex_attempt
+
+    ctx = _initialized_ctx(git_repo)
+    reason = (
+        "'changed_product_runtime_file' is a required property; "
+        "'deterministic_run_counts' is a required property; "
+        "{'cleanup_passed': True} is not of type 'string'; "
+        "'FIXED' is not one of ['COMPLETE', 'VERIFIED_NO_CHANGE_NEEDED', 'BLOCKED_WITH_EVIDENCE', 'FAILED_WITH_EVIDENCE']"
+    )
+    attempt_id = _seed_failed_real_codex_attempt(
+        ctx,
+        stdout_text="API timeout model network noise\n",
+        stderr_text="connection timeout while printing unrelated status\n",
+        output_events=[{"event": "error", "message": "network timeout noise"}],
+        command_payload={
+            "args": ["codex", "exec", "--json", "prompt.md"],
+            "cwd": str(ctx.root),
+            "exit_code": 0,
+            "patchlet_id": "P0001",
+            "attempt_id": "P0001_attempt1",
+        },
+        run_overrides=_report_schema_violation_overrides(reason),
+    )
+
+    result = diagnose_real_codex_attempt(ctx, attempt_id=attempt_id)
+    diagnosis = _read_json(Path(result["diagnosis_json_path"]))
+
+    assert diagnosis["diagnosis"]["primary_category"] == "patchlet_report_schema_violation"
+    assert "captured_output_contains_network_or_api_error" not in diagnosis["observed_signals"]
+
+
+def test_report_schema_violation_diagnosis_uses_report_validation_reason(git_repo: Path):
+    from codex_orchestrator.diagnostics import diagnose_real_codex_attempt
+
+    ctx = _initialized_ctx(git_repo)
+    reason = "'changed_product_runtime_file' is a required property"
+    attempt_id = _seed_failed_real_codex_attempt(
+        ctx,
+        command_payload={
+            "args": ["codex", "exec", "--json", "prompt.md"],
+            "cwd": str(ctx.root),
+            "exit_code": 0,
+            "patchlet_id": "P0001",
+            "attempt_id": "P0001_attempt1",
+        },
+        run_overrides=_report_schema_violation_overrides(reason),
+    )
+
+    result = diagnose_real_codex_attempt(ctx, attempt_id=attempt_id)
+    diagnosis = _read_json(Path(result["diagnosis_json_path"]))
+
+    assert diagnosis["diagnosis"]["primary_category"] == "patchlet_report_schema_violation"
+    assert diagnosis["diagnosis"]["report_validation_reason"] == reason
+    assert "report_validation_failed" in diagnosis["observed_signals"]
+
+
+def test_report_schema_violation_diagnosis_handles_invalid_status_fixed(git_repo: Path):
+    from codex_orchestrator.diagnostics import diagnose_real_codex_attempt
+
+    ctx = _initialized_ctx(git_repo)
+    reason = "'FIXED' is not one of ['COMPLETE', 'VERIFIED_NO_CHANGE_NEEDED', 'BLOCKED_WITH_EVIDENCE', 'FAILED_WITH_EVIDENCE']"
+    attempt_id = _seed_failed_real_codex_attempt(
+        ctx,
+        command_payload={
+            "args": ["codex", "exec", "--json", "prompt.md"],
+            "cwd": str(ctx.root),
+            "exit_code": 0,
+            "patchlet_id": "P0001",
+            "attempt_id": "P0001_attempt1",
+        },
+        run_overrides=_report_schema_violation_overrides(reason),
+    )
+
+    result = diagnose_real_codex_attempt(ctx, attempt_id=attempt_id)
+    diagnosis = _read_json(Path(result["diagnosis_json_path"]))
+
+    assert diagnosis["diagnosis"]["primary_category"] == "patchlet_report_schema_violation"
+    assert "FIXED" in diagnosis["diagnosis"]["summary"]
+    assert "unsupported_report_status" in diagnosis["observed_signals"]
+
+
+def test_report_schema_violation_diagnosis_handles_cleanup_proof_type_error(git_repo: Path):
+    from codex_orchestrator.diagnostics import diagnose_real_codex_attempt
+
+    ctx = _initialized_ctx(git_repo)
+    reason = "{'cleanup_passed': True, 'temp_data_removed': True} is not of type 'string'"
+    attempt_id = _seed_failed_real_codex_attempt(
+        ctx,
+        command_payload={
+            "args": ["codex", "exec", "--json", "prompt.md"],
+            "cwd": str(ctx.root),
+            "exit_code": 0,
+            "patchlet_id": "P0001",
+            "attempt_id": "P0001_attempt1",
+        },
+        run_overrides=_report_schema_violation_overrides(reason),
+    )
+
+    result = diagnose_real_codex_attempt(ctx, attempt_id=attempt_id)
+    diagnosis = _read_json(Path(result["diagnosis_json_path"]))
+
+    assert diagnosis["diagnosis"]["primary_category"] == "patchlet_report_schema_violation"
+    assert "cleanup_proof" in diagnosis["recommended_next_action"]
+    assert "cleanup_proof_type_error" in diagnosis["observed_signals"]
+
+
+def test_report_schema_violation_diagnosis_requires_report_valid_false(git_repo: Path):
+    from codex_orchestrator.diagnostics import diagnose_real_codex_attempt
+
+    ctx = _initialized_ctx(git_repo)
+    attempt_id = _seed_failed_real_codex_attempt(
+        ctx,
+        stdout_text="network timeout noise\n",
+        output_events=[{"event": "error", "message": "API timeout"}],
+        command_payload={
+            "args": ["codex", "exec", "--json", "prompt.md"],
+            "cwd": str(ctx.root),
+            "exit_code": 0,
+            "patchlet_id": "P0001",
+            "attempt_id": "P0001_attempt1",
+        },
+        run_overrides={
+            "status": "FAILED_WITH_EVIDENCE",
+            "exit_code": 0,
+            "report_valid": True,
+            "report_validation": {"valid": True, "reason": None},
+            "report_error": None,
+            "worker_failure": {
+                "type": "WorkerExecutionError",
+                "message": "output contained API timeout",
+                "exit_code": 0,
+                "retryable": False,
+                "blind_retry_allowed": False,
+                "failure_category": "worker_exception",
+            },
+        },
+    )
+
+    result = diagnose_real_codex_attempt(ctx, attempt_id=attempt_id)
+    diagnosis = _read_json(Path(result["diagnosis_json_path"]))
+
+    assert diagnosis["diagnosis"]["primary_category"] != "patchlet_report_schema_violation"
+
+
+def test_network_or_api_error_still_used_when_no_report_validation_error_exists(git_repo: Path):
+    from codex_orchestrator.diagnostics import diagnose_real_codex_attempt
+
+    ctx = _initialized_ctx(git_repo)
+    attempt_id = _seed_failed_real_codex_attempt(
+        ctx,
+        stderr_text="API timeout while contacting model\n",
+        output_events=[{"event": "error", "message": "network timeout"}],
+    )
+
+    result = diagnose_real_codex_attempt(ctx, attempt_id=attempt_id)
+    diagnosis = _read_json(Path(result["diagnosis_json_path"]))
+
+    assert diagnosis["diagnosis"]["primary_category"] == "network_or_api_error"
+
+
+def test_wrapper_gate_final_status_marker_error_precedes_network_or_api_error(git_repo: Path):
+    from codex_orchestrator.diagnostics import diagnose_real_codex_attempt
+
+    ctx = _initialized_ctx(git_repo)
+    attempt_id = _seed_failed_real_codex_attempt(
+        ctx,
+        stdout_text="network timeout noise\n",
+        stderr_text="API timeout noise\n",
+        output_events=[{"event": "error", "message": "network timeout"}],
+        command_payload={
+            "args": ["codex", "exec", "--json", "prompt.md"],
+            "cwd": str(ctx.root),
+            "exit_code": 0,
+            "patchlet_id": "P0001",
+            "attempt_id": "P0001_attempt1",
+        },
+        run_overrides={
+            "status": "FAILED_WITH_EVIDENCE",
+            "exit_code": 0,
+            "report_valid": True,
+            "report_validation": {"valid": True, "reason": None},
+            "worker_failure": {"type": None, "message": "", "exit_code": 0},
+        },
+    )
+    _write_wrapper_marker_failure(
+        ctx,
+        error="noncanonical_final_status_marker",
+        reason="noncanonical FINAL_STATUS marker found; marker must be a standalone line beginning at column 1",
+    )
+
+    result = diagnose_real_codex_attempt(ctx, attempt_id=attempt_id)
+    diagnosis = _read_json(Path(result["diagnosis_json_path"]))
+
+    assert diagnosis["diagnosis"]["primary_category"] == "wrapper_gate_final_status_marker_error"
+    assert diagnosis["diagnosis"]["subtype"] == "noncanonical_final_status_marker"
+    assert "captured_output_contains_network_or_api_error" not in diagnosis["observed_signals"]
+
+
+def test_transaction_group_repair_routing_error_precedes_network_or_api_error(git_repo: Path):
+    from codex_orchestrator.diagnostics import diagnose_real_codex_attempt
+
+    ctx = _initialized_ctx(git_repo)
+    attempt_id = _seed_failed_real_codex_attempt(
+        ctx,
+        stdout_text="network timeout noise\n",
+        stderr_text="API timeout noise\n",
+        output_events=[{"event": "error", "message": "network timeout"}],
+        run_overrides=_stage_precondition_overrides(
+            "precondition failed for regenerate-patchlets: missing source patchlet manifest for TG001"
+        ),
+    )
+
+    result = diagnose_real_codex_attempt(ctx, attempt_id=attempt_id)
+    diagnosis = _read_json(Path(result["diagnosis_json_path"]))
+
+    assert diagnosis["diagnosis"]["primary_category"] == "transaction_group_repair_routing_error"
+    assert diagnosis["diagnosis"]["source_id"] == "TG001"
+    assert "captured_output_contains_network_or_api_error" not in diagnosis["observed_signals"]
+
+
+def test_stage_precondition_error_precedes_network_or_api_error_when_no_more_specific_category(git_repo: Path):
+    from codex_orchestrator.diagnostics import diagnose_real_codex_attempt
+
+    ctx = _initialized_ctx(git_repo)
+    attempt_id = _seed_failed_real_codex_attempt(
+        ctx,
+        stdout_text="network timeout noise\n",
+        output_events=[{"event": "error", "message": "network timeout"}],
+        run_overrides=_stage_precondition_overrides(
+            "precondition failed for some-stage: missing required deterministic fixture"
+        ),
+    )
+
+    result = diagnose_real_codex_attempt(ctx, attempt_id=attempt_id)
+    diagnosis = _read_json(Path(result["diagnosis_json_path"]))
+
+    assert diagnosis["diagnosis"]["primary_category"] == "stage_precondition_error"
+    assert "some-stage" in diagnosis["diagnosis"]["summary"]
+
+
+def test_network_or_api_error_still_used_for_true_network_failure_without_structured_gate_or_stage_error(git_repo: Path):
+    from codex_orchestrator.diagnostics import diagnose_real_codex_attempt
+
+    ctx = _initialized_ctx(git_repo)
+    attempt_id = _seed_failed_real_codex_attempt(
+        ctx,
+        stderr_text="API timeout while contacting model\n",
+        output_events=[{"event": "error", "message": "network timeout"}],
+    )
+
+    result = diagnose_real_codex_attempt(ctx, attempt_id=attempt_id)
+    diagnosis = _read_json(Path(result["diagnosis_json_path"]))
+
+    assert diagnosis["diagnosis"]["primary_category"] == "network_or_api_error"
+
+
+def test_wrapper_gate_marker_error_diagnosis_includes_wrapper_gate_reasons(git_repo: Path):
+    from codex_orchestrator.diagnostics import diagnose_real_codex_attempt
+
+    ctx = _initialized_ctx(git_repo)
+    attempt_id = _seed_failed_real_codex_attempt(
+        ctx,
+        command_payload={
+            "args": ["codex", "exec", "--json", "prompt.md"],
+            "cwd": str(ctx.root),
+            "exit_code": 0,
+            "patchlet_id": "P0001",
+            "attempt_id": "P0001_attempt1",
+        },
+        run_overrides={"report_valid": True, "worker_failure": {"type": None, "message": "", "exit_code": 0}},
+    )
+    reason = "noncanonical FINAL_STATUS marker found; marker must be a standalone line beginning at column 1"
+    _write_wrapper_marker_failure(ctx, error="noncanonical_final_status_marker", reason=reason)
+
+    result = diagnose_real_codex_attempt(ctx, attempt_id=attempt_id)
+    diagnosis = _read_json(Path(result["diagnosis_json_path"]))
+
+    assert reason in diagnosis["diagnosis"]["wrapper_gate_reasons"]
+
+
+def test_tg_routing_error_diagnosis_includes_source_id_and_stage(git_repo: Path):
+    from codex_orchestrator.diagnostics import diagnose_real_codex_attempt
+
+    ctx = _initialized_ctx(git_repo)
+    attempt_id = _seed_failed_real_codex_attempt(
+        ctx,
+        run_overrides=_stage_precondition_overrides(
+            "precondition failed for regenerate-patchlets: missing source patchlet manifest for TG001"
+        ),
+    )
+
+    result = diagnose_real_codex_attempt(ctx, attempt_id=attempt_id)
+    diagnosis = _read_json(Path(result["diagnosis_json_path"]))
+
+    assert diagnosis["diagnosis"]["source_id"] == "TG001"
+    assert diagnosis["diagnosis"]["stage"] == "regenerate-patchlets"

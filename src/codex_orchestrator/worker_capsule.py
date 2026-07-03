@@ -29,6 +29,9 @@ class WorkerCapsule:
 
 REQUIRED_MEMORY_FILES = (
     "TASK_CONTRACT.md",
+    "REPORT_SCHEMA_CONTRACT.md",
+    "FINAL_REPORT_CONTRACT.md",
+    "PYTHON_RUNTIME_SIDE_EFFECT_CONTRACT.md",
     "LIVE_MEMORY.md",
     "LIVE_MEMORY.json",
     "KNOWN_FACTS.json",
@@ -36,6 +39,27 @@ REQUIRED_MEMORY_FILES = (
     "PREVIOUS_FAILURES.md",
     "CURRENT_STAGE.md",
     "WRITE_THESE_FILES.md",
+)
+
+ALLOWED_REPORT_STATUSES = (
+    "COMPLETE",
+    "VERIFIED_NO_CHANGE_NEEDED",
+    "BLOCKED_WITH_EVIDENCE",
+    "FAILED_WITH_EVIDENCE",
+)
+
+FORBIDDEN_REPORT_STATUSES = (
+    "FIXED",
+    "DONE",
+    "SUCCESS",
+    "PASSED",
+    "OK",
+)
+
+FINAL_STATUS_VALUES = (
+    "PASS",
+    "BLOCKED",
+    "FAILED",
 )
 
 REQUIRED_STAGE_FILES = (
@@ -62,6 +86,196 @@ def build_worker_capsule(run_context: PatchletRunContext, patchlet: dict) -> Wor
         gates_dir=run_dir / "gates",
         diagnostics_dir=run_dir / "diagnostics",
         manifest_path=run_dir / "worker_capsule.json",
+    )
+
+
+def _minimal_report_skeleton(patchlet_id: str) -> str:
+    return json.dumps(
+        {
+            "schema_version": "1.0",
+            "kind": "patchlet_report",
+            "patchlet_id": patchlet_id,
+            "status": "VERIFIED_NO_CHANGE_NEEDED",
+            "final_status_marker": "FINAL_STATUS: PASS",
+            "changed_product_runtime_file": None,
+            "changed_artifact_files": [],
+            "probe_commands": [],
+            "deterministic_run_counts": {
+                "baseline": "5/5",
+                "proof_of_fix": "5/5",
+                "negative_controls": "5/5",
+            },
+            "root_cause_classification": {
+                "observed_failure": "",
+                "immediate_cause": "",
+                "why_immediate_cause_happened": "",
+                "deeper_owner_boundary": "",
+                "producer_transformer_consumer_boundary": "",
+                "not_downstream_of_unprobed_state_proof": "",
+                "negative_control_proof": "",
+                "recursive_why_audit": [],
+            },
+            "before_after_state": [],
+            "row_ledger": [],
+            "trace_ledger": [],
+            "cleanup_proof": "cleanup passed; no transient files remain",
+            "probe_artifact_refs": [],
+            "acceptance_criteria_result": "pass",
+        },
+        indent=2,
+    )
+
+
+def report_schema_contract_text(*, patchlet_id: str, report_path: str) -> str:
+    allowed = "\n".join(f"- {status}" for status in ALLOWED_REPORT_STATUSES)
+    forbidden = "\n".join(f"- {status}" for status in FORBIDDEN_REPORT_STATUSES)
+    return (
+        "# REPORT SCHEMA CONTRACT\n\n"
+        "## Required report path\n\n"
+        f"Write the patchlet report JSON to `{report_path}`.\n\n"
+        "## Allowed status values\n\n"
+        f"{allowed}\n\n"
+        "## Forbidden status values\n\n"
+        f"{forbidden}\n\n"
+        "Never invent new statuses. Never use `FIXED`.\n\n"
+        "## Required top-level fields\n\n"
+        "- schema_version\n"
+        "- kind\n"
+        "- patchlet_id\n"
+        "- status\n"
+        "- final_status_marker\n"
+        "- changed_product_runtime_file\n"
+        "- changed_artifact_files\n"
+        "- probe_commands\n"
+        "- deterministic_run_counts\n"
+        "- root_cause_classification\n"
+        "- before_after_state\n"
+        "- row_ledger\n"
+        "- trace_ledger\n"
+        "- cleanup_proof\n"
+        "- probe_artifact_refs\n"
+        "- acceptance_criteria_result\n\n"
+        "## Required type reminders\n\n"
+        "- `cleanup_proof` must be a string, not an object.\n"
+        "- `changed_product_runtime_file` must be present and must be a string or null.\n"
+        "- Use the allowed product/runtime path string when exactly one product file changed.\n"
+        "- Use null when no product/runtime file changed.\n"
+        "- `deterministic_run_counts` must be present.\n"
+        "- `before_after_state` must be present.\n"
+        "- `row_ledger` must be present.\n"
+        "- `trace_ledger` must be present.\n\n"
+        "## Minimal valid JSON skeleton\n\n"
+        "```json\n"
+        f"{_minimal_report_skeleton(patchlet_id)}\n"
+        "```\n\n"
+        "Use COMPLETE only when you changed the allowed product/runtime file and have proof.\n"
+        "Use VERIFIED_NO_CHANGE_NEEDED when probes prove the existing runtime already satisfies the goal.\n"
+        "Use BLOCKED_WITH_EVIDENCE when blocked by a real external or policy constraint but evidence exists.\n"
+        "Use FAILED_WITH_EVIDENCE when the patchlet failed but evidence exists.\n\n"
+        "## Pre-submit checklist\n\n"
+        "Before final response, verify the report JSON has:\n"
+        "- schema_version\n"
+        "- kind\n"
+        "- patchlet_id\n"
+        "- status\n"
+        "- final_status_marker\n"
+        "- changed_product_runtime_file\n"
+        "- changed_artifact_files\n"
+        "- probe_commands\n"
+        "- deterministic_run_counts\n"
+        "- root_cause_classification\n"
+        "- before_after_state\n"
+        "- row_ledger\n"
+        "- trace_ledger\n"
+        "- cleanup_proof\n"
+        "- probe_artifact_refs\n"
+        "- acceptance_criteria_result\n\n"
+        "Verify:\n"
+        "- status is one of COMPLETE, VERIFIED_NO_CHANGE_NEEDED, BLOCKED_WITH_EVIDENCE, FAILED_WITH_EVIDENCE\n"
+        "- status is not FIXED\n"
+        "- cleanup_proof is a string\n"
+        "- changed_product_runtime_file exists and is a string or null\n"
+        "- JSON parses with python -m json.tool\n"
+    )
+
+
+def final_report_contract_text(*, patchlet_id: str, attempt_id: str, final_report_path: str, report_path: str, probe_root: str) -> str:
+    accepted = "\n".join(f"- FINAL_STATUS: {value}" for value in FINAL_STATUS_VALUES)
+    return (
+        "# FINAL REPORT CONTRACT\n\n"
+        "## Required final report path\n\n"
+        f"Write the final Markdown report to `{final_report_path}`.\n\n"
+        "## Canonical final status line\n\n"
+        "The first non-empty line must be a standalone canonical marker beginning at column 1:\n\n"
+        "```text\n"
+        "FINAL_STATUS: PASS\n"
+        "```\n\n"
+        "## Accepted final status lines\n\n"
+        f"{accepted}\n\n"
+        "## Forbidden non-canonical examples\n\n"
+        "Do not write:\n\n"
+        "```text\n"
+        "Marker: `FINAL_STATUS: PASS`\n"
+        "`FINAL_STATUS: PASS`\n"
+        "The marker is FINAL_STATUS: PASS\n"
+        "FINAL_STATUS PASS\n"
+        "FINAL_STATUS: OK\n"
+        "FINAL_STATUS: SUCCESS\n"
+        "```\n\n"
+        "Do not wrap the final status marker in backticks.\n"
+        "Do not prefix the marker with \"Marker:\".\n"
+        "Do not place the marker inside a sentence.\n"
+        "The marker must be a standalone line beginning at column 1.\n\n"
+        "## Minimal final report template\n\n"
+        "```text\n"
+        "FINAL_STATUS: PASS\n"
+        "\n"
+        "# Final Report\n"
+        "\n"
+        f"- Patchlet: {patchlet_id}\n"
+        f"- Attempt: {attempt_id}\n"
+        "- Outcome: <one sentence>\n"
+        f"- Report JSON: {report_path}\n"
+        f"- Probe root: {probe_root}\n"
+        "```\n\n"
+        "## Pre-submit checklist\n\n"
+        "- Verify the first non-empty line is exactly one of the accepted final status lines.\n"
+        "- Verify the marker starts at column 1.\n"
+        "- Verify the marker is not wrapped in backticks.\n"
+        "- Verify the marker is not prefixed by \"Marker:\".\n"
+        "- Verify the report JSON was written and follows REPORT_SCHEMA_CONTRACT.md.\n"
+    )
+
+
+def python_runtime_side_effect_contract_text() -> str:
+    return (
+        "# PYTHON RUNTIME SIDE EFFECT CONTRACT\n\n"
+        "- Do not create Python bytecode cache files under $CXOR_TARGET_ROOT.\n"
+        "- The worker environment sets PYTHONDONTWRITEBYTECODE=1.\n"
+        "- Prefer python -B for any probe that imports target or execution code.\n"
+        "- Do not import target-root product/runtime files in a way that writes cache files.\n"
+        "- If comparing target-root and execution-root code, use no-bytecode subprocesses.\n"
+        "- Durable evidence belongs under .artifacts/probes/ and .codex-orchestrator/ only.\n"
+        "- Never leave __pycache__/ or *.pyc under target root.\n"
+        "- If a cache artifact appears, report it explicitly in the probe evidence instead of hiding it.\n"
+    )
+
+
+def _execution_root_contract_text(run_context: PatchletRunContext, allowed_file: str) -> str:
+    return (
+        "There are two roots:\n\n"
+        "1. Execution root:\n"
+        f"   `$CXOR_EXECUTION_ROOT` = `{run_context.execution_root}`\n"
+        "   This is the worktree where product/runtime files are edited.\n\n"
+        "2. Target root:\n"
+        f"   `$CXOR_TARGET_ROOT` = `{run_context.target_root}`\n"
+        "   This is the durable artifact root and original target repo.\n"
+        "   Do not edit product/runtime files in this root.\n"
+        "   Product/runtime files under target root are read-only to the worker.\n\n"
+        f"Allowed product/runtime file: `{allowed_file}`\n"
+        f"Allowed product/runtime edit path: `$CXOR_EXECUTION_ROOT/{allowed_file}` (`{run_context.execution_root / allowed_file}`)\n"
+        f"Forbidden product/runtime edit path: `$CXOR_TARGET_ROOT/{allowed_file}` (`{run_context.target_root / allowed_file}`)\n"
+        "Target-root artifact directories remain writable only for orchestrator evidence under `.codex-orchestrator/` and `.artifacts/probes/`.\n"
     )
 
 
@@ -108,6 +322,9 @@ def _task_contract_text(
     preflight_path = worker_stage_dir / "00_preflight.md"
     final_report_path = worker_stage_dir / "05_final_report.md"
     target_root_worker_stage = run_context.target_root / "worker_stage"
+    report_contract_path = run_context.run_dir / "worker_memory" / "REPORT_SCHEMA_CONTRACT.md"
+    final_report_contract_path = run_context.run_dir / "worker_memory" / "FINAL_REPORT_CONTRACT.md"
+    python_contract_path = run_context.run_dir / "worker_memory" / "PYTHON_RUNTIME_SIDE_EFFECT_CONTRACT.md"
     return (
         "# TASK CONTRACT\n\n"
         f"- patchlet id: `{patchlet_id}`\n"
@@ -118,17 +335,22 @@ def _task_contract_text(
         f"- artifact root: `{run_context.artifact_root}`\n"
         f"- allowed product/runtime file: `{allowed_file}`\n"
         f"- required report path: `.codex-orchestrator/reports/{patchlet_id}.json`\n"
+        f"- report schema contract: `{report_contract_path}`\n"
+        f"- final report contract: `{final_report_contract_path}`\n"
+        f"- Python runtime side-effect contract: `{python_contract_path}`\n"
         f"- required probe root: `.artifacts/probes/{patchlet_id}`\n"
         f"- worker stage dir env: `$CXOR_WORKER_STAGE_DIR` = `{worker_stage_dir}`\n"
         f"- required preflight stage file: `$CXOR_WORKER_STAGE_DIR/00_preflight.md` = `{preflight_path}`\n"
         f"- required final stage file: `$CXOR_WORKER_STAGE_DIR/05_final_report.md` = `{final_report_path}`\n"
         f"- forbidden target-root stage dir: `{target_root_worker_stage}/`\n"
-        "- required final status marker: `FINAL_STATUS: PASS` or explicit failure/blocking status\n"
+        "- required final status marker: a standalone column-1 line: `FINAL_STATUS: PASS`, `FINAL_STATUS: BLOCKED`, or `FINAL_STATUS: FAILED`\n"
         f"- time budget: hard timeout of {timeout_seconds} seconds\n"
         f"- soft deadline: Aim to finish by {soft_deadline} seconds\n"
         "- if blocked near the budget, write `$CXOR_FINAL_REPORT_PATH` with explicit BLOCKED or FAILED status and preserve what you learned\n"
         "- Do not create target-root worker_stage/; all Worker Capsule stage files must stay under `$CXOR_WORKER_STAGE_DIR`\n"
-        "- forbidden edit paths: any product/runtime file other than the allowed file; do not edit orchestrator source paths\n"
+        "- forbidden edit paths: any product/runtime file other than the allowed file; do not edit orchestrator source paths\n\n"
+        "## Execution-root edit contract\n\n"
+        f"{_execution_root_contract_text(run_context, allowed_file)}\n"
         "- root-cause/probe contract reminder: direct probe first, then minimal fix, then deterministic proof and negative controls\n"
         "- no blind retry rule: blind retry is not allowed\n"
         "- orchestrator owns gate results: Codex may not write or overwrite gate result files\n"
@@ -192,6 +414,30 @@ def ensure_worker_memory(
         _task_contract_text(run_context, patchlet, worker_mode=worker_mode),
         encoding="utf-8",
     )
+    report_contract_path = capsule.worker_memory_dir / "REPORT_SCHEMA_CONTRACT.md"
+    final_report_contract_path = capsule.worker_memory_dir / "FINAL_REPORT_CONTRACT.md"
+    python_contract_path = capsule.worker_memory_dir / "PYTHON_RUNTIME_SIDE_EFFECT_CONTRACT.md"
+    report_path = f".codex-orchestrator/reports/{patchlet['patchlet_id']}.json"
+    final_report_path = f"{capsule.worker_stage_dir / '05_final_report.md'}"
+    probe_root = f".artifacts/probes/{patchlet['patchlet_id']}"
+    report_contract_path.write_text(
+        report_schema_contract_text(
+            patchlet_id=patchlet["patchlet_id"],
+            report_path=report_path,
+        ),
+        encoding="utf-8",
+    )
+    final_report_contract_path.write_text(
+        final_report_contract_text(
+            patchlet_id=patchlet["patchlet_id"],
+            attempt_id=run_context.run_dir.name,
+            final_report_path=final_report_path,
+            report_path=report_path,
+            probe_root=probe_root,
+        ),
+        encoding="utf-8",
+    )
+    python_contract_path.write_text(python_runtime_side_effect_contract_text(), encoding="utf-8")
     write_json(capsule.worker_memory_dir / "LIVE_MEMORY.json", live_memory)
     (capsule.worker_memory_dir / "LIVE_MEMORY.md").write_text(
         "# LIVE MEMORY\n\n"
@@ -199,6 +445,9 @@ def ensure_worker_memory(
         f"- attempt: `{run_context.run_dir.name}`\n"
         f"- allowed file: `{patchlet.get('allowed_product_runtime_file')}`\n"
         f"- report path: `{live_memory['required_report_path']}`\n"
+        f"- report schema contract: `{report_contract_path}`\n"
+        f"- final report contract: `{final_report_contract_path}`\n"
+        f"- Python runtime side-effect contract: `{python_contract_path}`\n"
         f"- probe root: `{live_memory['required_probe_root']}`\n",
         encoding="utf-8",
     )
@@ -225,8 +474,13 @@ def ensure_worker_memory(
         f"- `$CXOR_WORKER_STAGE_DIR/00_preflight.md` (`{capsule.worker_stage_dir / '00_preflight.md'}`)\n"
         f"- `$CXOR_WORKER_STAGE_DIR/05_final_report.md` (`{capsule.worker_stage_dir / '05_final_report.md'}`)\n"
         f"- `.codex-orchestrator/reports/{patchlet['patchlet_id']}.json`\n"
+        f"- Read and obey `{report_contract_path}` before writing the report.\n"
+        f"- Read and obey `{final_report_contract_path}` before writing the final Markdown report.\n"
+        f"- Read and obey `{python_contract_path}` before running Python probes.\n"
         f"- `.artifacts/probes/{patchlet['patchlet_id']}/...`\n"
         + "\n"
+        "Product/runtime edits must happen only under `$CXOR_EXECUTION_ROOT`. "
+        f"Do not edit `$CXOR_TARGET_ROOT/{patchlet.get('allowed_product_runtime_file')}`.\n\n"
         f"Do not create target-root worker_stage/ at `{ctx.root}/worker_stage/`. "
         "All Worker Capsule stage artifacts must be written under `$CXOR_WORKER_STAGE_DIR`.\n\n"
         f"Time budget: hard timeout of {timeout_seconds} seconds; aim to finish by {soft_deadline} seconds. "
@@ -282,10 +536,11 @@ def ensure_worker_stage_templates(
             "Record what was validated, what remains unvalidated, and any blocked checks.\n"
         ),
         "05_final_report.md": (
+            "FINAL_STATUS: PASS\n\n"
             "# Final Report\n\n"
             "State the terminal worker claim explicitly.\n\n"
-            "- FINAL_STATUS: PASS\n"
-            "- Or provide an explicit failure or blocking status with evidence.\n"
+            "- Or use `FINAL_STATUS: BLOCKED` or `FINAL_STATUS: FAILED` as a standalone first line with evidence.\n"
+            "- Do not write `Marker: `FINAL_STATUS: PASS`` or wrap the marker in backticks.\n"
         ),
     }
     for filename, content in templates.items():
@@ -319,15 +574,64 @@ def append_worker_event(
         handle.write(json.dumps(payload, sort_keys=True) + "\n")
 
 
-def _extract_final_status_claim(capsule: WorkerCapsule) -> str | None:
+def _extract_final_status_marker(capsule: WorkerCapsule) -> dict:
     final_report_path = capsule.worker_stage_dir / "05_final_report.md"
     if not final_report_path.exists():
-        return None
+        return {
+            "claim": None,
+            "gate": "missing",
+            "marker": None,
+            "canonical": False,
+            "noncanonical": None,
+            "error": "missing_final_status_marker",
+            "reason": "missing worker_stage/05_final_report.md FINAL_STATUS marker",
+        }
+    first_noncanonical: str | None = None
     for raw_line in final_report_path.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if line.startswith("FINAL_STATUS:"):
-            return line.split(":", 1)[1].strip() or None
-    return None
+        if raw_line.startswith("FINAL_STATUS:"):
+            claim = raw_line.split(":", 1)[1].strip() or None
+            if claim in FINAL_STATUS_VALUES:
+                return {
+                    "claim": claim,
+                    "gate": "present",
+                    "marker": raw_line,
+                    "canonical": True,
+                    "noncanonical": None,
+                    "error": None,
+                    "reason": None,
+                }
+            return {
+                "claim": claim,
+                "gate": "fail",
+                "marker": raw_line,
+                "canonical": False,
+                "noncanonical": None,
+                "error": "invalid_final_status_marker_value",
+                "reason": f"invalid FINAL_STATUS marker value: {claim}; expected PASS, BLOCKED, or FAILED",
+            }
+        stripped = raw_line.strip()
+        if "FINAL_STATUS:" in stripped or stripped.startswith("FINAL_STATUS "):
+            if first_noncanonical is None:
+                first_noncanonical = raw_line
+    if first_noncanonical is not None:
+        return {
+            "claim": None,
+            "gate": "fail",
+            "marker": None,
+            "canonical": False,
+            "noncanonical": first_noncanonical,
+            "error": "noncanonical_final_status_marker",
+            "reason": "noncanonical FINAL_STATUS marker found; marker must be a standalone line beginning at column 1",
+        }
+    return {
+        "claim": None,
+        "gate": "missing",
+        "marker": None,
+        "canonical": False,
+        "noncanonical": None,
+        "error": "missing_final_status_marker",
+        "reason": "missing worker_stage/05_final_report.md FINAL_STATUS marker",
+    }
 
 
 def write_wrapper_gate_result(
@@ -371,11 +675,13 @@ def write_wrapper_gate_result(
             stage_gate = "fail"
             reason_list.append(f"missing worker_stage/{filename}")
 
-    final_status_claim = _extract_final_status_claim(capsule)
-    final_status_gate = "present" if final_status_claim else "missing"
-    if final_status_claim is None:
+    final_status = _extract_final_status_marker(capsule)
+    final_status_claim = final_status["claim"]
+    final_status_gate = final_status["gate"]
+    if final_status_gate != "present":
         stage_gate = "fail"
-        reason_list.append("missing worker_stage/05_final_report.md FINAL_STATUS marker")
+        if final_status["reason"]:
+            reason_list.append(final_status["reason"])
 
     if report_valid is True and report_path is not None and not report_path.exists():
         artifact_gate = "fail"
@@ -398,6 +704,10 @@ def write_wrapper_gate_result(
         "probe_gate": "pass" if probe_valid is True else ("fail" if probe_valid is False else "not_run"),
         "final_status_gate": final_status_gate,
         "final_status_claim": final_status_claim,
+        "final_status_marker": final_status["marker"],
+        "final_status_marker_canonical": final_status["canonical"],
+        "final_status_marker_noncanonical": final_status["noncanonical"],
+        "final_status_marker_error": final_status["error"],
         "reasons": reason_list,
         "next_state": next_state,
         "blind_retry_allowed": False,

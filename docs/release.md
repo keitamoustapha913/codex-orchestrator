@@ -77,3 +77,70 @@ uv run --no-sync cxor export-real-codex-smoke-runbook --run-dir <latest_bundle>
 
 `safe_failure` is evidence capture, not DONE. DONE means the orchestrator
 validators accepted the run.
+
+When a live run safe-fails with `patchlet_report_schema_violation`, treat it as
+a report contract failure, not a `network_or_api_error`. The only allowed
+patchlet report statuses are `COMPLETE`, `VERIFIED_NO_CHANGE_NEEDED`,
+`BLOCKED_WITH_EVIDENCE`, and `FAILED_WITH_EVIDENCE`; `FIXED`, `DONE`,
+`SUCCESS`, `PASSED`, and `OK` are invalid. `cleanup_proof` must be a string,
+not an object. `changed_product_runtime_file`, `deterministic_run_counts`,
+`before_after_state`, `row_ledger`, and `trace_ledger` are required. Repair
+patchlets receive a report skeleton and must edit product/runtime files under
+`CXOR_EXECUTION_ROOT`; product/runtime files under `CXOR_TARGET_ROOT` are
+read-only to Codex workers.
+
+The final Markdown report has a separate wrapper gate. It must contain a
+standalone canonical marker line: `FINAL_STATUS: PASS`,
+`FINAL_STATUS: BLOCKED`, or `FINAL_STATUS: FAILED`. Non-canonical examples such
+as `Marker: `FINAL_STATUS: PASS`` or backticked markers are rejected, and a
+valid report JSON alone does not bypass the wrapper gate. The precise diagnosis
+is `wrapper_gate_final_status_marker_error`; `network_or_api_error` does not
+mask structured gate or routing failures.
+
+Transaction group ids such as `TG001` are not patchlet ids. Failure records for
+transaction groups preserve `source_patchlet_ids`, regeneration expands those
+member patchlets, and missing mapping reports
+`transaction_group_source_mapping_missing`.
+
+## P0004 Checkpoint Cleanliness Release Gate
+
+Before release, verify that checkpoint cleanliness is not treated as a blind
+`__pycache__/` ignore. The checkpoint cleanliness taxonomy must be present:
+`product_runtime_clean`, `artifact_dirs_ignored`, `cache_artifacts_detected`,
+`cache_artifacts_removed`, `unknown_dirty_paths`, and
+`whole_repo_clean_after_hygiene`.
+
+`target_working_tree_clean_after_checkpoint` remains strict and must be true.
+Product/runtime clean means files such as `app.py` are clean. Whole target
+clean means product files are clean, `.codex-orchestrator/` and `.artifacts/`
+are treated as allowed evidence directories, and known cache artifacts have
+gone through the Target Hygiene Gate. `target_hygiene_gate_result.json` records
+cache evidence, including hashes and `cache_artifacts_removed`; unknown dirty
+paths are not deleted and must fail precisely.
+
+Worker subprocesses set `PYTHONDONTWRITEBYTECODE=1`. Generated worker capsule
+and prompt text require `python -B` or `PYTHONDONTWRITEBYTECODE=1 python` for
+Python probes that import target or execution code.
+
+Run manifest lifecycle entries must include `ATTEMPT_STARTED`,
+`WORKER_EXITED`, `REPORT_VALIDATED`, `WRAPPER_GATE_EVALUATED`,
+`TARGET_HYGIENE_EVALUATED`, `INTEGRATION_CHECKPOINT_WRITTEN`,
+`INTEGRATION_ARTIFACTS_VALIDATED`, `ATTEMPT_ACCEPTED`, and
+`ATTEMPT_FAILED_WITH_EVIDENCE`. Late failures must still have current attempt
+manifest evidence. Operator-run bundles must expose runbook attempt
+consistency via `attempt_consistency`.
+
+Release diagnoses must prefer structured categories:
+`integration_checkpoint_target_cleanliness_error`,
+`integration_artifact_validation_error`, `run_manifest_attempt_lifecycle_error`,
+`runbook_attempt_evidence_mismatch`, and `target_cache_artifact_leak`.
+`network_or_api_error` requires actual external error evidence and must not be
+triggered by prompt text or ordinary model/timeout metadata.
+
+After every live real-Codex run, execute:
+
+```bash
+cxor validate-real-codex-smoke-runbook --run-dir <bundle>
+cxor list-real-codex-smoke-runbooks --latest --json
+cxor export-real-codex-smoke-runbook --run-dir <bundle>
+```

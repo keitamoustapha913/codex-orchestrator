@@ -23,6 +23,11 @@ from codex_orchestrator.live_progress import (
 )
 from codex_orchestrator.patchlet_run_context import PatchletRunContext
 from codex_orchestrator.target_repo import TargetRepoContext
+from codex_orchestrator.worker_capsule import (
+    final_report_contract_text,
+    python_runtime_side_effect_contract_text,
+    report_schema_contract_text,
+)
 
 from .base import Worker, WorkerResult, ensure_run_context
 
@@ -58,6 +63,9 @@ class CodexExecWorker(Worker):
             raise WorkerPreconditionError(f"Codex binary not found: {self.codex_binary}")
         run_dir.mkdir(parents=True, exist_ok=True)
         task_contract_path = run_dir / "worker_memory" / "TASK_CONTRACT.md"
+        report_contract_path = run_dir / "worker_memory" / "REPORT_SCHEMA_CONTRACT.md"
+        final_report_contract_path = run_dir / "worker_memory" / "FINAL_REPORT_CONTRACT.md"
+        python_contract_path = run_dir / "worker_memory" / "PYTHON_RUNTIME_SIDE_EFFECT_CONTRACT.md"
         live_memory_md_path = run_dir / "worker_memory" / "LIVE_MEMORY.md"
         write_these_files_path = run_dir / "worker_memory" / "WRITE_THESE_FILES.md"
         worker_stage_dir = run_dir / "worker_stage"
@@ -73,6 +81,9 @@ class CodexExecWorker(Worker):
         attempt_prompt_text = (
             "Before doing any task work, read:\n"
             f"- {task_contract_path}\n"
+            f"- {report_contract_path}\n"
+            f"- {final_report_contract_path}\n"
+            f"- {python_contract_path}\n"
             f"- {live_memory_md_path}\n"
             f"- {write_these_files_path}\n\n"
             "Use explicit Worker Capsule paths from the environment:\n"
@@ -95,10 +106,15 @@ class CodexExecWorker(Worker):
             "BLOCKED or FAILED status and preserve what you learned. "
             "Do not keep investigating indefinitely. Do not use blind retry.\n\n"
             "Do not write gate results. The orchestrator writes gates.\n\n"
+            "When running Python probes, use one of:\n"
+            "- python -B <probe>\n"
+            "- PYTHONDONTWRITEBYTECODE=1 python <probe>\n\n"
+            "Do not import target-root app.py in the main Codex process if that import can create cache files.\n"
+            "Do not leave __pycache__/ anywhere under target root.\n"
+            "The target hygiene gate will detect and report Python cache leaks.\n\n"
             "Use those files as the attempt-local contract. Then continue with the patchlet instructions below.\n\n"
             + prompt_path.read_text(encoding="utf-8")
         )
-        attempt_prompt_path.write_text(attempt_prompt_text, encoding="utf-8")
         repo_sha_before = repo_head(run_ctx.execution_root)
         final_message_path = run_dir / "codex_last_message.md"
         args = [
@@ -128,7 +144,32 @@ class CodexExecWorker(Worker):
         patchlet_id = patchlet["patchlet_id"]
         report_path = run_ctx.reports_dir / f"{patchlet_id}.json"
         probe_root = run_ctx.probe_dir / patchlet_id
+        allowed_file = patchlet.get("allowed_product_runtime_file", "")
         live_progress = LiveProgressReporter(self.live_progress_policy, attempt_id=run_dir.name)
+        attempt_prompt_text = (
+            attempt_prompt_text
+            + "\n\n## Concrete execution-root edit contract\n\n"
+            + f"Allowed product/runtime edit path: $CXOR_EXECUTION_ROOT/{allowed_file} ({run_ctx.execution_root / allowed_file})\n"
+            + f"Forbidden product/runtime edit path: $CXOR_TARGET_ROOT/{allowed_file} ({run_ctx.target_root / allowed_file})\n"
+            + "Product/runtime files under target root are read-only to the worker. "
+            + "Target-root artifact directories remain writable only under .codex-orchestrator/ and .artifacts/probes/.\n\n"
+            + "## Embedded report schema contract\n\n"
+            + report_schema_contract_text(
+                patchlet_id=patchlet_id,
+                report_path=f".codex-orchestrator/reports/{patchlet_id}.json",
+            )
+            + "\n\n## Embedded final report contract\n\n"
+            + final_report_contract_text(
+                patchlet_id=patchlet_id,
+                attempt_id=run_dir.name,
+                final_report_path=str(final_report_stage_path),
+                report_path=f".codex-orchestrator/reports/{patchlet_id}.json",
+                probe_root=f".artifacts/probes/{patchlet_id}",
+            )
+            + "\n\n## Embedded Python runtime side-effect contract\n\n"
+            + python_runtime_side_effect_contract_text()
+        )
+        attempt_prompt_path.write_text(attempt_prompt_text, encoding="utf-8")
 
         def write_progress_event(payload: dict) -> None:
             progress_path.parent.mkdir(parents=True, exist_ok=True)
@@ -201,6 +242,7 @@ class CodexExecWorker(Worker):
                 "CXOR_ALLOWED_PRODUCT_RUNTIME_FILE": patchlet.get("allowed_product_runtime_file", ""),
                 "CXOR_REPORT_PATH": str(report_path),
                 "CXOR_PROBE_ROOT": str(probe_root),
+                "PYTHONDONTWRITEBYTECODE": "1",
             },
             stdout_path=run_dir / "stdout.txt",
             stderr_path=run_dir / "stderr.txt",
@@ -233,6 +275,9 @@ class CodexExecWorker(Worker):
             "soft_deadline_seconds": self.soft_deadline_seconds,
             "selected_model": self.codex_model,
             "selected_reasoning": self.codex_reasoning,
+            "env": {
+                "PYTHONDONTWRITEBYTECODE": "1",
+            },
         }, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         (run_dir / "output.jsonl").write_text(json.dumps({
             "args": args,

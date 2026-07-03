@@ -16,7 +16,8 @@
     "changed_product_runtime_files",
     "diff_path",
     "wrapper_gate_result",
-    "target_working_tree_clean_after_checkpoint"
+    "target_working_tree_clean_after_checkpoint",
+    "target_cleanliness"
   ],
   "properties": {
     "schema_version": {
@@ -66,6 +67,62 @@
     },
     "target_working_tree_clean_after_checkpoint": {
       "const": true
+    },
+    "target_cleanliness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "product_runtime_clean",
+        "artifact_dirs_ignored",
+        "cache_artifacts_detected",
+        "cache_artifacts_removed",
+        "unknown_dirty_paths",
+        "product_runtime_dirty_paths",
+        "whole_repo_clean_after_hygiene",
+        "report_path"
+      ],
+      "properties": {
+        "product_runtime_clean": {
+          "type": "boolean"
+        },
+        "artifact_dirs_ignored": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "cache_artifacts_detected": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "cache_artifacts_removed": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "unknown_dirty_paths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "product_runtime_dirty_paths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "whole_repo_clean_after_hygiene": {
+          "type": "boolean"
+        },
+        "report_path": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
     }
   }
 }

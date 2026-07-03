@@ -46,13 +46,25 @@ def validate_integration_artifacts(repo_root: Path) -> dict[str, Any]:
 
     if paths.integration_checkpoints_dir.exists():
         for checkpoint in sorted(paths.integration_checkpoints_dir.glob("*.json")):
-            _validate_json_file(
+            if checkpoint.name.endswith("_cleanliness.json"):
+                continue
+            checkpoint_data = _validate_json_file(
                 errors,
                 repo_root=repo_root,
                 path=checkpoint,
                 schema_name="integration_checkpoint.schema.json",
             )
-    validated["checkpoints"] = not any(error.get("schema") == "integration_checkpoint.schema.json" for error in errors)
+            if checkpoint_data is not None:
+                _validate_checkpoint_cleanliness_sidecar(errors, repo_root=repo_root, checkpoint=checkpoint_data)
+    validated["checkpoints"] = not any(
+        error.get("schema") in {
+            "integration_checkpoint.schema.json",
+            "target_cleanliness_report.schema.json",
+            "target_hygiene_gate_result.schema.json",
+            "checkpoint_cleanliness_sidecar",
+        }
+        for error in errors
+    )
 
     apply_results_dir = paths.integration_dir / "apply_results"
     if apply_results_dir.exists():
@@ -164,6 +176,76 @@ def _final_diff_required(paths, state: dict[str, Any] | None) -> bool:
         return False
     apply_results_dir = paths.integration_dir / "apply_results"
     return paths.final_verification_json.exists() or any(apply_results_dir.glob("*_result.json")) if apply_results_dir.exists() else paths.final_verification_json.exists()
+
+
+def _validate_checkpoint_cleanliness_sidecar(
+    errors: list[dict[str, Any]],
+    *,
+    repo_root: Path,
+    checkpoint: dict[str, Any],
+) -> None:
+    summary = checkpoint.get("target_cleanliness")
+    if not isinstance(summary, dict):
+        return
+    report_path_value = summary.get("report_path")
+    if not isinstance(report_path_value, str) or not report_path_value:
+        _add_error(
+            errors,
+            repo_root=repo_root,
+            path=repo_root / ".codex-orchestrator" / "integration" / "checkpoints",
+            schema_name="checkpoint_cleanliness_sidecar",
+            message="checkpoint target_cleanliness missing report_path",
+        )
+        return
+    sidecar_path = repo_root / report_path_value
+    sidecar = _validate_json_file(
+        errors,
+        repo_root=repo_root,
+        path=sidecar_path,
+        schema_name="target_cleanliness_report.schema.json",
+    )
+    if sidecar is None:
+        if not sidecar_path.exists():
+            _add_error(
+                errors,
+                repo_root=repo_root,
+                path=sidecar_path,
+                schema_name="checkpoint_cleanliness_sidecar",
+                message="missing cleanliness sidecar",
+            )
+        return
+    if sidecar.get("patchlet_id") != checkpoint.get("patchlet_id"):
+        _add_error(
+            errors,
+            repo_root=repo_root,
+            path=sidecar_path,
+            schema_name="checkpoint_cleanliness_sidecar",
+            message="cleanliness sidecar patchlet_id mismatch",
+        )
+    if sidecar.get("attempt_id") != checkpoint.get("attempt_id"):
+        _add_error(
+            errors,
+            repo_root=repo_root,
+            path=sidecar_path,
+            schema_name="checkpoint_cleanliness_sidecar",
+            message="cleanliness sidecar attempt_id mismatch",
+        )
+    if sidecar.get("target_working_tree_clean_after_checkpoint") is not checkpoint.get("target_working_tree_clean_after_checkpoint"):
+        _add_error(
+            errors,
+            repo_root=repo_root,
+            path=sidecar_path,
+            schema_name="checkpoint_cleanliness_sidecar",
+            message="cleanliness sidecar target_working_tree_clean_after_checkpoint mismatch",
+        )
+    hygiene_path_value = sidecar.get("hygiene_gate_result_path")
+    if isinstance(hygiene_path_value, str) and hygiene_path_value:
+        _validate_json_file(
+            errors,
+            repo_root=repo_root,
+            path=repo_root / hygiene_path_value,
+            schema_name="target_hygiene_gate_result.schema.json",
+        )
 
 
 def _add_error(

@@ -62,6 +62,7 @@ def export_real_codex_smoke_runbook(
         "timeout_seconds": policy_payload.get("codex_patchlet_timeout_seconds") or result_payload.get("timeout_seconds"),
         "timed_out": result_payload.get("timed_out") if isinstance(result_payload.get("timed_out"), bool) else None,
         "diagnosis_primary_category": result_payload.get("diagnosis_primary_category"),
+        "attempt_consistency": result_payload.get("attempt_consistency") if isinstance(result_payload.get("attempt_consistency"), dict) else None,
         "file_count": len(files),
         "files": files,
         "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),

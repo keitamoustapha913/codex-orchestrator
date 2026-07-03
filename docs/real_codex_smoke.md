@@ -50,6 +50,37 @@ worker_stage/. If real Codex writes a top-level `worker_stage/`, diagnosis
 reports `worker_capsule_path_violation`. This is a Codex path-obedience issue,
 not orchestrator wiring failure. Do not weaken validators.
 
+If a real-Codex attempt exits `0` but writes a malformed patchlet report, the
+diagnosis is `patchlet_report_schema_violation`, not `network_or_api_error`.
+The valid report statuses are `COMPLETE`, `VERIFIED_NO_CHANGE_NEEDED`,
+`BLOCKED_WITH_EVIDENCE`, and `FAILED_WITH_EVIDENCE`. `FIXED`, `DONE`,
+`SUCCESS`, `PASSED`, and `OK` are invalid. `cleanup_proof` must be a string,
+not an object, and `changed_product_runtime_file`, `deterministic_run_counts`,
+`before_after_state`, `row_ledger`, and `trace_ledger` must be present. Repair
+patchlets receive a report skeleton with these fields.
+
+Workers edit product/runtime files only in `CXOR_EXECUTION_ROOT`.
+`CXOR_TARGET_ROOT` product/runtime files are read-only to the worker; target
+root remains writable only for `.codex-orchestrator/` and `.artifacts/probes/`
+evidence.
+
+The final Markdown report must contain a canonical `FINAL_STATUS` marker as a
+standalone line beginning at column 1. Accepted lines are `FINAL_STATUS: PASS`,
+`FINAL_STATUS: BLOCKED`, and `FINAL_STATUS: FAILED`. Non-canonical forms are
+rejected, including `Marker: `FINAL_STATUS: PASS``, markers wrapped in
+backticks, markers inside sentences, and invalid values such as
+`FINAL_STATUS: OK`. A valid report JSON alone does not bypass the wrapper gate.
+Marker failures diagnose as `wrapper_gate_final_status_marker_error`;
+`network_or_api_error` does not mask structured wrapper-gate failures.
+Any non-canonical marker should be treated as a worker contract failure, not as
+DONE.
+
+Transaction group ids such as `TG001` are not patchlet ids. Transaction-group
+failures preserve the TG id and member patchlet ids in `source_patchlet_ids`;
+regeneration expands those member patchlets instead of looking for a patchlet
+named `TG001`. If the mapping is absent, the structured error is
+`transaction_group_source_mapping_missing`.
+
 The smoke remains validator-backed and evidence-bound:
 
 - inspect `.codex-orchestrator/runs/`, `.codex-orchestrator/failures/`, and `.artifacts/probes/`
@@ -186,3 +217,40 @@ cxor validate-integration-artifacts --repo /path/to/target-repo
 
 The validator is read-only, does not run Codex, and helps compare whether a
 safe failure preserved structurally valid integration evidence.
+
+## P0004 Checkpoint Cleanliness
+
+Live smoke bundles now preserve checkpoint cleanliness taxonomy and runbook
+attempt consistency. `target_working_tree_clean_after_checkpoint` remains
+strictly `true`; the system does not accept false checkpoints. The Target
+Hygiene Gate writes `target_hygiene_gate_result.json` and classifies
+`product_runtime_clean`, `artifact_dirs_ignored`, `cache_artifacts_detected`,
+`cache_artifacts_removed`, and `unknown_dirty_paths`.
+
+Product/runtime clean is distinct from whole target clean: `app.py` and other
+runtime files must be clean, while `.codex-orchestrator/` and `.artifacts/`
+remain writable evidence directories. `__pycache__/` is not blindly ignored;
+known untracked cache artifacts are evidence-recorded, safely removed, and
+listed in the checkpoint sidecar. Unknown dirty paths are not deleted and
+produce precise failure evidence.
+
+Real-Codex worker subprocesses set `PYTHONDONTWRITEBYTECODE=1`. Generated
+worker prompts instruct probes to use `python -B` or
+`PYTHONDONTWRITEBYTECODE=1 python` when importing target or execution code.
+Checkpoints include `target_cleanliness`, and sidecars are written under
+`.codex-orchestrator/integration/checkpoints/<PATCHLET>_cleanliness.json`.
+
+The run manifest records `ATTEMPT_STARTED`, `WORKER_EXITED`,
+`REPORT_VALIDATED`, `WRAPPER_GATE_EVALUATED`, `TARGET_HYGIENE_EVALUATED`,
+`INTEGRATION_CHECKPOINT_WRITTEN`, `INTEGRATION_ARTIFACTS_VALIDATED`,
+`ATTEMPT_ACCEPTED`, and `ATTEMPT_FAILED_WITH_EVIDENCE`. Runbook results expose
+`attempt_consistency` so P0004 paths cannot be silently mixed with P0003
+manifest or diagnosis evidence.
+
+Structured categories such as
+`integration_checkpoint_target_cleanliness_error`,
+`integration_artifact_validation_error`, `run_manifest_attempt_lifecycle_error`,
+`runbook_attempt_evidence_mismatch`, and `target_cache_artifact_leak` outrank
+`network_or_api_error`. `network_or_api_error` requires actual external error
+evidence. After each live smoke, run `validate-real-codex-smoke-runbook`,
+`list-real-codex-smoke-runbooks`, and `export-real-codex-smoke-runbook`.

@@ -134,6 +134,54 @@
     "validation_result_path": {
       "type": "string",
       "minLength": 1
+    },
+    "attempt_consistency": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "valid",
+        "run_dir_attempt_id",
+        "manifest_attempt_id",
+        "diagnosis_attempt_id",
+        "stdout_attempt_id",
+        "stderr_attempt_id",
+        "output_jsonl_attempt_id",
+        "progress_attempt_id",
+        "mismatches"
+      ],
+      "properties": {
+        "valid": {
+          "type": "boolean"
+        },
+        "run_dir_attempt_id": {
+          "type": ["string", "null"]
+        },
+        "manifest_attempt_id": {
+          "type": ["string", "null"]
+        },
+        "diagnosis_attempt_id": {
+          "type": ["string", "null"]
+        },
+        "stdout_attempt_id": {
+          "type": ["string", "null"]
+        },
+        "stderr_attempt_id": {
+          "type": ["string", "null"]
+        },
+        "output_jsonl_attempt_id": {
+          "type": ["string", "null"]
+        },
+        "progress_attempt_id": {
+          "type": ["string", "null"]
+        },
+        "mismatches": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
     }
   },
   "allOf": [

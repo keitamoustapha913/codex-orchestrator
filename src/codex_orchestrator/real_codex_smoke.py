@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import re
 from pathlib import Path
 
 from codex_orchestrator.errors import CxorError, WorkerPreconditionError
@@ -21,6 +22,8 @@ from .stages.auto import run_auto
 from .stages.run_patchlet import run_next_patchlet
 from .run_records import load_run_manifest
 from .jsonio import read_json
+
+ATTEMPT_ID_PATTERN = re.compile(r"^P\d+_attempt\d+$")
 
 
 def _real_codex_contract_template_path() -> Path:
@@ -152,6 +155,77 @@ def _latest_patchlet_run_entry(ctx: TargetRepoContext) -> dict | None:
     return patchlet_runs[-1]
 
 
+def _patchlet_run_entry_for_attempt(ctx: TargetRepoContext, attempt_id: str | None) -> dict | None:
+    if not attempt_id:
+        return None
+    manifest = load_run_manifest(ctx)
+    for run in manifest.get("runs", []):
+        if run.get("attempt_id") == attempt_id:
+            return run
+    return None
+
+
+def _attempt_id_from_run_dir(run_dir: Path | None) -> str | None:
+    if run_dir is None:
+        return None
+    name = run_dir.name
+    return name if ATTEMPT_ID_PATTERN.match(name) else None
+
+
+def _attempt_id_from_artifact_path(path: str | None) -> str | None:
+    if not path:
+        return None
+    for part in Path(path).parts:
+        if ATTEMPT_ID_PATTERN.match(part):
+            return part
+    return None
+
+
+def _attempt_consistency(
+    *,
+    run_dir: Path | None,
+    selected_manifest_entry: dict | None,
+    latest_manifest_entry: dict | None,
+    diagnosis_attempt_id: str | None,
+) -> dict:
+    run_dir_attempt_id = _attempt_id_from_run_dir(run_dir)
+    manifest_attempt_id = (
+        str(selected_manifest_entry.get("attempt_id"))
+        if selected_manifest_entry is not None and selected_manifest_entry.get("attempt_id")
+        else str(latest_manifest_entry.get("attempt_id"))
+        if latest_manifest_entry is not None and latest_manifest_entry.get("attempt_id")
+        else None
+    )
+    stdout_attempt_id = _attempt_id_from_artifact_path(str(run_dir / "stdout.txt")) if run_dir is not None else None
+    stderr_attempt_id = _attempt_id_from_artifact_path(str(run_dir / "stderr.txt")) if run_dir is not None else None
+    output_attempt_id = _attempt_id_from_artifact_path(str(run_dir / "output.jsonl")) if run_dir is not None else None
+    progress_attempt_id = _attempt_id_from_artifact_path(str(run_dir / "progress.jsonl")) if run_dir is not None else None
+
+    mismatches: list[str] = []
+    for label, value in [
+        ("manifest_attempt_id", manifest_attempt_id),
+        ("diagnosis_attempt_id", diagnosis_attempt_id),
+        ("stdout_attempt_id", stdout_attempt_id),
+        ("stderr_attempt_id", stderr_attempt_id),
+        ("output_jsonl_attempt_id", output_attempt_id),
+        ("progress_attempt_id", progress_attempt_id),
+    ]:
+        if run_dir_attempt_id != value:
+            mismatches.append(f"run_dir_attempt_id != {label}")
+
+    return {
+        "valid": not mismatches,
+        "run_dir_attempt_id": run_dir_attempt_id,
+        "manifest_attempt_id": manifest_attempt_id,
+        "diagnosis_attempt_id": diagnosis_attempt_id,
+        "stdout_attempt_id": stdout_attempt_id,
+        "stderr_attempt_id": stderr_attempt_id,
+        "output_jsonl_attempt_id": output_attempt_id,
+        "progress_attempt_id": progress_attempt_id,
+        "mismatches": mismatches,
+    }
+
+
 def _latest_prompt_artifact_path(ctx: TargetRepoContext) -> Path | None:
     run_dir = _latest_run_dir(ctx)
     if run_dir is not None:
@@ -202,7 +276,10 @@ def _smoke_result(
     error_message: str | None = None,
 ) -> dict:
     run_dir = _latest_run_dir(ctx)
-    run_manifest_entry = _latest_patchlet_run_entry(ctx)
+    run_dir_attempt_id = _attempt_id_from_run_dir(run_dir)
+    matching_manifest_entry = _patchlet_run_entry_for_attempt(ctx, run_dir_attempt_id)
+    latest_manifest_entry = _latest_patchlet_run_entry(ctx)
+    run_manifest_entry = matching_manifest_entry
     prompt_artifact_path = _latest_prompt_artifact_path(ctx)
     capsule_manifest_path = str(run_dir / "worker_capsule.json") if run_dir is not None else None
     contract_template_path = _real_codex_contract_template_path()
@@ -212,6 +289,7 @@ def _smoke_result(
         command = read_json(run_dir / "command.json")
     if prompt_artifact_path is not None and prompt_artifact_path.exists():
         contract_injected = "Real Codex Patchlet Contract" in prompt_artifact_path.read_text(encoding="utf-8")
+    diagnosis_attempt_id = run_manifest_entry.get("attempt_id") if run_manifest_entry is not None else None
     result = {
         "worker_mode": "real_codex",
         "use_worktree": True,
@@ -252,6 +330,12 @@ def _smoke_result(
         "selected_model": command.get("selected_model"),
         "selected_reasoning": command.get("selected_reasoning"),
     }
+    result["attempt_consistency"] = _attempt_consistency(
+        run_dir=run_dir,
+        selected_manifest_entry=matching_manifest_entry,
+        latest_manifest_entry=latest_manifest_entry,
+        diagnosis_attempt_id=diagnosis_attempt_id,
+    )
     if outcome == "safe_failure" and run_manifest_entry is not None and run_manifest_entry.get("attempt_id"):
         diagnosis = diagnose_real_codex_attempt(
             ctx,
@@ -260,6 +344,9 @@ def _smoke_result(
             outcome=outcome,
         )
         result.update(diagnosis)
+    elif outcome == "safe_failure" and result["attempt_consistency"]["valid"] is False:
+        result["diagnosis_primary_category"] = "runbook_attempt_evidence_mismatch"
+        result["diagnosis_summary"] = "Latest run directory evidence did not match the available run manifest attempt."
     return result
 
 

@@ -59,6 +59,7 @@ def record_accepted_change(
     probe_root: Path,
     wrapper_gate_result: str | None,
     new_integration_sha: str | None = None,
+    target_hygiene_result: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     state = ensure_integration_state(ctx)
     patchlet_id = patchlet["patchlet_id"]
@@ -66,7 +67,20 @@ def record_accepted_change(
     new_sha = new_integration_sha or previous_sha
     run_id = DEFAULT_INTEGRATION_RUN_ID
     checkpoint_path = ctx.paths.integration_checkpoints_dir / f"{patchlet_id}.json"
-    target_clean_after_checkpoint = _target_product_runtime_clean(ctx)
+    cleanliness_path = ctx.paths.integration_checkpoints_dir / f"{patchlet_id}_cleanliness.json"
+    target_clean_after_checkpoint = (
+        bool(target_hygiene_result.get("target_working_tree_clean_after_checkpoint"))
+        if target_hygiene_result is not None
+        else _target_product_runtime_clean(ctx)
+    )
+    cleanliness_report_path = relative_to_repo(ctx.root, cleanliness_path)
+    target_cleanliness = _target_cleanliness_summary(
+        ctx,
+        patchlet_id=patchlet_id,
+        attempt_id=attempt_id,
+        target_hygiene_result=target_hygiene_result,
+        cleanliness_report_path=cleanliness_report_path,
+    )
 
     entry = {
         "schema_version": "1.0",
@@ -103,7 +117,18 @@ def record_accepted_change(
         "diff_path": relative_to_repo(ctx.root, diff_path),
         "wrapper_gate_result": wrapper_gate_result,
         "target_working_tree_clean_after_checkpoint": target_clean_after_checkpoint,
+        "target_cleanliness": target_cleanliness,
     }
+    write_json(
+        cleanliness_path,
+        _target_cleanliness_report(
+            patchlet_id=patchlet_id,
+            attempt_id=attempt_id,
+            target_hygiene_result=target_hygiene_result,
+            target_working_tree_clean_after_checkpoint=target_clean_after_checkpoint,
+            hygiene_gate_result_path=target_hygiene_result.get("result_path") if target_hygiene_result else None,
+        ),
+    )
     write_json(checkpoint_path, checkpoint)
 
     accepted_patchlets = list(state.get("accepted_patchlets", []))
@@ -118,6 +143,80 @@ def record_accepted_change(
     )
     write_json(ctx.paths.integration_state, state)
     return checkpoint
+
+
+def _target_cleanliness_summary(
+    ctx: TargetRepoContext,
+    *,
+    patchlet_id: str,
+    attempt_id: str,
+    target_hygiene_result: dict[str, Any] | None,
+    cleanliness_report_path: str,
+) -> dict[str, Any]:
+    if target_hygiene_result is None:
+        return {
+            "product_runtime_clean": _target_product_runtime_clean(ctx),
+            "artifact_dirs_ignored": [".codex-orchestrator/", ".artifacts/"],
+            "cache_artifacts_detected": [],
+            "cache_artifacts_removed": [],
+            "unknown_dirty_paths": [],
+            "product_runtime_dirty_paths": [],
+            "whole_repo_clean_after_hygiene": _target_product_runtime_clean(ctx),
+            "report_path": cleanliness_report_path,
+        }
+    return {
+        "product_runtime_clean": bool(target_hygiene_result.get("product_runtime_clean")),
+        "artifact_dirs_ignored": list(target_hygiene_result.get("artifact_dirs_ignored", [])),
+        "cache_artifacts_detected": [
+            item.get("path")
+            for item in target_hygiene_result.get("cache_artifacts_detected", [])
+            if isinstance(item, dict) and item.get("path")
+        ],
+        "cache_artifacts_removed": [
+            item.get("path")
+            for item in target_hygiene_result.get("cache_artifacts_removed", [])
+            if isinstance(item, dict) and item.get("path")
+        ],
+        "unknown_dirty_paths": list(target_hygiene_result.get("unknown_dirty_paths", [])),
+        "product_runtime_dirty_paths": list(target_hygiene_result.get("product_runtime_dirty_paths", [])),
+        "whole_repo_clean_after_hygiene": bool(target_hygiene_result.get("whole_repo_clean_after_hygiene")),
+        "report_path": cleanliness_report_path,
+    }
+
+
+def _target_cleanliness_report(
+    *,
+    patchlet_id: str,
+    attempt_id: str,
+    target_hygiene_result: dict[str, Any] | None,
+    target_working_tree_clean_after_checkpoint: bool,
+    hygiene_gate_result_path: str | None,
+) -> dict[str, Any]:
+    result = target_hygiene_result or {}
+    return {
+        "schema_version": "1.0",
+        "kind": "target_cleanliness_report",
+        "patchlet_id": patchlet_id,
+        "attempt_id": attempt_id,
+        "checked_at": now_iso(),
+        "product_runtime_clean": bool(result.get("product_runtime_clean", target_working_tree_clean_after_checkpoint)),
+        "artifact_dirs_ignored": list(result.get("artifact_dirs_ignored", [".codex-orchestrator/", ".artifacts/"])),
+        "cache_artifacts_detected": [
+            item.get("path")
+            for item in result.get("cache_artifacts_detected", [])
+            if isinstance(item, dict) and item.get("path")
+        ],
+        "cache_artifacts_removed": [
+            item.get("path")
+            for item in result.get("cache_artifacts_removed", [])
+            if isinstance(item, dict) and item.get("path")
+        ],
+        "unknown_dirty_paths": list(result.get("unknown_dirty_paths", [])),
+        "product_runtime_dirty_paths": list(result.get("product_runtime_dirty_paths", [])),
+        "whole_repo_clean_after_hygiene": bool(result.get("whole_repo_clean_after_hygiene", target_working_tree_clean_after_checkpoint)),
+        "target_working_tree_clean_after_checkpoint": target_working_tree_clean_after_checkpoint,
+        "hygiene_gate_result_path": hygiene_gate_result_path,
+    }
 
 
 def advance_integration_ref_from_worktree(

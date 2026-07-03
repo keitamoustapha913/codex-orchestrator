@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import re
 from typing import Any
 
 from .jsonio import read_json, write_json
@@ -193,6 +194,336 @@ def _target_dirty_after_integration_apply(
             "the clean-target precondition."
         ),
     )
+
+
+def _patchlet_report_schema_violation(
+    *,
+    run: dict[str, Any],
+    artifact_presence: dict[str, bool],
+) -> tuple[list[str], dict[str, Any], list[str], str] | None:
+    if run.get("report_valid") is not False:
+        return None
+
+    report_validation = run.get("report_validation")
+    report_validation_reason = ""
+    if isinstance(report_validation, dict):
+        report_validation_reason = str(report_validation.get("reason") or "")
+    report_error = str(run.get("report_error") or "")
+    reason = report_validation_reason or report_error
+    if not reason:
+        return None
+
+    worker_failure = run.get("worker_failure")
+    exit_code = run.get("exit_code")
+    if isinstance(worker_failure, dict) and exit_code is None:
+        exit_code = worker_failure.get("exit_code")
+    produced_normal_evidence = any(
+        artifact_presence.get(key)
+        for key in ("stdout", "output_jsonl", "worker_capsule", "worker_memory", "wrapper_gate_result")
+    )
+    if exit_code not in {0, None} and not produced_normal_evidence:
+        return None
+
+    observed_signals = ["report_validation_failed"]
+    if "FIXED" in reason:
+        observed_signals.append("unsupported_report_status")
+    if ("cleanup_proof" in reason or "cleanup_passed" in reason) and "not of type 'string'" in reason:
+        observed_signals.append("cleanup_proof_type_error")
+    if "required property" in reason:
+        observed_signals.append("missing_required_report_fields")
+
+    summary = "Worker completed but produced a patchlet report that failed schema validation."
+    if "FIXED" in reason:
+        summary += " The report used unsupported status FIXED."
+
+    return (
+        observed_signals,
+        {
+            "primary_category": "patchlet_report_schema_violation",
+            "confidence": "high",
+            "summary": summary,
+            "supported_by": ["run_manifest.json"],
+            "report_valid": False,
+            "report_validation_reason": reason,
+            "report_error": report_error or None,
+            "attempt_id": str(run.get("attempt_id", "")),
+            "patchlet_id": str(run.get("patchlet_id", "")),
+        },
+        [],
+        (
+            "Fix the generated report contract/prompt so Codex writes a schema-valid "
+            "patchlet report. Do not add unsupported statuses such as FIXED, do not "
+            "weaken the report schema, keep cleanup_proof as a string, and include all "
+            "required fields before rerunning."
+        ),
+    )
+
+
+def _wrapper_gate_final_status_marker_error(
+    *,
+    wrapper_gate_path: Path | None,
+) -> tuple[list[str], dict[str, Any], list[str], str] | None:
+    wrapper_gate = _load_json_object(wrapper_gate_path)
+    if not wrapper_gate:
+        return None
+    if wrapper_gate.get("accepted") is not False:
+        return None
+
+    marker_error = wrapper_gate.get("final_status_marker_error")
+    reasons = [str(reason) for reason in wrapper_gate.get("reasons", []) if reason]
+    reason_text = "\n".join(reasons).lower()
+    if not marker_error and "final_status" not in reason_text and "final status" not in reason_text:
+        return None
+    final_status_gate = wrapper_gate.get("final_status_gate")
+    if final_status_gate not in {"fail", "missing"} and not marker_error:
+        return None
+
+    subtype = str(marker_error or "final_status_marker_error")
+    summary = "Wrapper gate rejected the worker final report because the FINAL_STATUS marker was not canonical."
+    if subtype == "missing_final_status_marker":
+        summary = "Wrapper gate rejected the worker final report because the required FINAL_STATUS marker was missing."
+    if subtype == "invalid_final_status_marker_value":
+        summary = "Wrapper gate rejected the worker final report because the FINAL_STATUS marker value was invalid."
+
+    return (
+        ["wrapper_gate_final_status_marker_error", subtype],
+        {
+            "primary_category": "wrapper_gate_final_status_marker_error",
+            "confidence": "high",
+            "summary": summary,
+            "supported_by": ["wrapper_gate_result.json"],
+            "subtype": subtype,
+            "wrapper_gate_reasons": reasons,
+            "final_status_gate": final_status_gate,
+            "final_status_marker_noncanonical": wrapper_gate.get("final_status_marker_noncanonical"),
+        },
+        [],
+        (
+            "Fix the generated final report contract/prompt so Codex writes a standalone "
+            "canonical FINAL_STATUS line at column 1. Do not weaken the wrapper gate."
+        ),
+    )
+
+
+def _stage_precondition_or_tg_routing_error(
+    *,
+    run: dict[str, Any],
+) -> tuple[list[str], dict[str, Any], list[str], str] | None:
+    worker_failure = run.get("worker_failure")
+    if not isinstance(worker_failure, dict):
+        return None
+    error_type = str(worker_failure.get("type") or "")
+    message = str(worker_failure.get("message") or "")
+    if error_type != "StagePreconditionError" and "precondition failed for" not in message:
+        return None
+
+    stage = None
+    match = re.search(r"precondition failed for ([^:]+):", message)
+    if match:
+        stage = match.group(1)
+    tg_match = re.search(r"\b(TG\d{3,})\b", message)
+    if stage == "regenerate-patchlets" and tg_match:
+        source_id = tg_match.group(1)
+        return (
+            ["transaction_group_repair_routing_error", "transaction_group_id_used_as_patchlet_id"],
+            {
+                "primary_category": "transaction_group_repair_routing_error",
+                "confidence": "high",
+                "summary": (
+                    f"Repair regeneration received transaction group id {source_id} where it needed "
+                    "member patchlet ids. Transaction groups must not be resolved as patchlet manifests."
+                ),
+                "supported_by": ["run_manifest.json"],
+                "stage": stage,
+                "source_id": source_id,
+            },
+            [],
+            (
+                "Preserve source_type on failure records and expand transaction-group failures "
+                "to member patchlet ids before regenerating patchlets."
+            ),
+        )
+
+    return (
+        ["stage_precondition_error"],
+        {
+            "primary_category": "stage_precondition_error",
+            "confidence": "medium",
+            "summary": f"{error_type or 'Stage precondition'} stopped execution: {message}",
+            "supported_by": ["run_manifest.json"],
+            "stage": stage,
+        },
+        [],
+        "Inspect the structured stage precondition error and fix the stage input state before rerunning.",
+    )
+
+
+def _integration_checkpoint_target_cleanliness_error(
+    *,
+    run: dict[str, Any],
+) -> tuple[list[str], dict[str, Any], list[str], str] | None:
+    validation = run.get("integration_artifact_validation")
+    if not isinstance(validation, dict) or validation.get("valid") is not False:
+        return None
+    errors = validation.get("errors", [])
+    if not isinstance(errors, list):
+        return None
+    for error in errors:
+        if not isinstance(error, dict):
+            continue
+        path = str(error.get("path") or "")
+        message = str(error.get("message") or "")
+        if "integration/checkpoints/" in path and "target_working_tree_clean_after_checkpoint" in message:
+            return (
+                ["integration_checkpoint_target_cleanliness_error"],
+                {
+                    "primary_category": "integration_checkpoint_target_cleanliness_error",
+                    "confidence": "high",
+                    "summary": "Integration checkpoint validation failed because checkpoint target cleanliness was false.",
+                    "supported_by": ["run_manifest.json", path],
+                    "validation_path": validation.get("path"),
+                    "error_path": path,
+                    "error_message": message,
+                    "target_cleanliness_report_path": run.get("target_cleanliness_report_path"),
+                },
+                [],
+                "Inspect the target hygiene gate and checkpoint cleanliness sidecar; do not weaken the checkpoint schema.",
+            )
+    return None
+
+
+def _target_cache_artifact_leak(
+    *,
+    ctx: TargetRepoContext,
+    run: dict[str, Any],
+) -> tuple[list[str], dict[str, Any], list[str], str] | None:
+    hygiene_path_value = run.get("target_hygiene_gate_result")
+    hygiene_path = _path_from_manifest(ctx, str(hygiene_path_value)) if hygiene_path_value else None
+    hygiene = _load_json_object(hygiene_path)
+    if not hygiene:
+        return None
+    detected = hygiene.get("cache_artifacts_detected", [])
+    removed = hygiene.get("cache_artifacts_removed", [])
+    if not isinstance(detected, list) or not detected:
+        return None
+    if hygiene.get("accepted") is True:
+        return None
+    paths = [str(item.get("path")) for item in detected if isinstance(item, dict) and item.get("path")]
+    return (
+        ["target_cache_artifact_leak"],
+        {
+            "primary_category": "target_cache_artifact_leak",
+            "confidence": "high",
+            "summary": "Target hygiene detected Python cache artifacts that prevented target cleanliness.",
+            "supported_by": ["target_hygiene_gate_result.json"],
+            "cache_artifacts_detected": paths,
+            "cache_artifacts_removed": [
+                str(item.get("path")) for item in removed if isinstance(item, dict) and item.get("path")
+            ],
+        },
+        [],
+        "Inspect the recorded cache artifacts and prevention contract; do not silently ignore or delete unknown dirty paths.",
+    )
+
+
+def _integration_artifact_validation_error(
+    *,
+    run: dict[str, Any],
+) -> tuple[list[str], dict[str, Any], list[str], str] | None:
+    validation = run.get("integration_artifact_validation")
+    if not isinstance(validation, dict) or validation.get("valid") is not False:
+        return None
+    errors = validation.get("errors", [])
+    first_error = errors[0] if isinstance(errors, list) and errors and isinstance(errors[0], dict) else {}
+    return (
+        ["integration_artifact_validation_error"],
+        {
+            "primary_category": "integration_artifact_validation_error",
+            "confidence": "high",
+            "summary": "Integration artifact validation failed after worker evidence was produced.",
+            "supported_by": ["run_manifest.json", str(validation.get("path") or "integration validation result")],
+            "validation_path": validation.get("path"),
+            "error_path": first_error.get("path"),
+            "error_message": first_error.get("message"),
+        },
+        [],
+        "Inspect the integration validation result and fix the artifact contract violation; do not classify this as a network/API failure.",
+    )
+
+
+def _run_manifest_attempt_lifecycle_error(
+    *,
+    run: dict[str, Any],
+) -> tuple[list[str], dict[str, Any], list[str], str] | None:
+    if run.get("lifecycle_status") != "ATTEMPT_FAILED_WITH_EVIDENCE":
+        return None
+    if not run.get("failed_stage"):
+        return None
+    if run.get("integration_artifact_validation"):
+        return None
+    return (
+        ["run_manifest_attempt_lifecycle_error"],
+        {
+            "primary_category": "run_manifest_attempt_lifecycle_error",
+            "confidence": "medium",
+            "summary": "Run manifest recorded a failed attempt lifecycle before a more specific validation result was available.",
+            "supported_by": ["run_manifest.json"],
+            "failed_stage": run.get("failed_stage"),
+        },
+        [],
+        "Inspect the manifest lifecycle events for the failing attempt and preserve current-attempt evidence.",
+    )
+
+
+def _runbook_attempt_evidence_mismatch(
+    *,
+    run: dict[str, Any],
+) -> tuple[list[str], dict[str, Any], list[str], str] | None:
+    consistency = run.get("attempt_consistency")
+    if not isinstance(consistency, dict) or consistency.get("valid") is not False:
+        return None
+    mismatches = consistency.get("mismatches", [])
+    return (
+        ["runbook_attempt_evidence_mismatch"],
+        {
+            "primary_category": "runbook_attempt_evidence_mismatch",
+            "confidence": "high",
+            "summary": "Operator runbook evidence contains mismatched attempt identities.",
+            "supported_by": ["result.json"],
+            "attempt_consistency": consistency,
+            "mismatches": mismatches if isinstance(mismatches, list) else [],
+        },
+        [],
+        "Inspect the runbook result attempt_consistency object and avoid using stale manifest or diagnosis evidence.",
+    )
+
+
+def _network_or_api_evidence(stderr_text: str, output_events: list[dict[str, Any]]) -> tuple[bool, list[str]]:
+    patterns = [
+        "connection failed",
+        "connection error",
+        "dns",
+        "api error",
+        "api timeout",
+        "http error",
+        "rate limit",
+        "model unavailable",
+        "network timeout",
+        "timed out connecting",
+        "service unavailable",
+        "authentication failed",
+        "session expired",
+    ]
+    haystacks = [stderr_text.lower()]
+    for event in output_events:
+        for key in ("error", "message", "stderr"):
+            value = event.get(key)
+            if isinstance(value, str):
+                haystacks.append(value.lower())
+    hits = sorted({pattern for text in haystacks for pattern in patterns if pattern in text})
+    return bool(hits), hits
+
+
 def _analyze_signals(
     stderr_text: str,
     stdout_text: str,
@@ -205,8 +536,6 @@ def _analyze_signals(
     observed_signals: list[str] = []
     supported_by: list[str] = []
     known_unknowns: list[str] = []
-
-    combined_output = "\n".join([stdout_text, stderr_text] + [json.dumps(event, sort_keys=True) for event in output_events]).strip()
 
     worker_failure = run.get("worker_failure", {})
     command_timed_out = command.get("timed_out") is True and command.get("exit_code") == 124
@@ -269,7 +598,8 @@ def _analyze_signals(
             "Inspect the preserved command.json and Codex CLI syntax before rerunning the opt-in smoke.",
         )
 
-    if _contains_any(combined_output, ["network", "api", "rate limit", "timeout", "connection", "model unavailable"]):
+    has_network_evidence, network_hits = _network_or_api_evidence(stderr_text, output_events)
+    if has_network_evidence:
         observed_signals.append("captured_output_contains_network_or_api_error")
         supported_by.extend(["stderr.txt" if stderr_text else "output.jsonl"])
         return (
@@ -279,6 +609,7 @@ def _analyze_signals(
                 "confidence": "medium",
                 "summary": "captured stderr or output.jsonl contains network, API, timeout, or model availability error text.",
                 "supported_by": sorted(set(supported_by)),
+                "matched_external_error_terms": network_hits,
             },
             known_unknowns,
             "Inspect service availability or transient upstream conditions, but keep blind retry disabled until the evidence is reviewed.",
@@ -445,22 +776,59 @@ def diagnose_real_codex_attempt(ctx: TargetRepoContext, *, attempt_id: str, prom
     if capsule_violation is not None:
         observed_signals, diagnosis_block, known_unknowns, next_action = capsule_violation
     else:
-        integration_dirty = _target_dirty_after_integration_apply(
+        report_violation = _patchlet_report_schema_violation(
             run=run,
-            live_memory=live_memory,
-            stderr_text=stderr_text,
+            artifact_presence=artifact_presence,
         )
-        if integration_dirty is not None:
-            observed_signals, diagnosis_block, known_unknowns, next_action = integration_dirty
+        if report_violation is not None:
+            observed_signals, diagnosis_block, known_unknowns, next_action = report_violation
         else:
-            observed_signals, diagnosis_block, known_unknowns, next_action = _analyze_signals(
-                stderr_text,
-                stdout_text,
-                output_events,
-                artifact_presence,
-                command=command,
-                run=run,
+            wrapper_gate_marker_error = _wrapper_gate_final_status_marker_error(
+                wrapper_gate_path=wrapper_gate_path,
             )
+            if wrapper_gate_marker_error is not None:
+                observed_signals, diagnosis_block, known_unknowns, next_action = wrapper_gate_marker_error
+            else:
+                stage_or_routing_error = _stage_precondition_or_tg_routing_error(run=run)
+                if stage_or_routing_error is not None:
+                    observed_signals, diagnosis_block, known_unknowns, next_action = stage_or_routing_error
+                else:
+                    checkpoint_cleanliness_error = _integration_checkpoint_target_cleanliness_error(run=run)
+                    if checkpoint_cleanliness_error is not None:
+                        observed_signals, diagnosis_block, known_unknowns, next_action = checkpoint_cleanliness_error
+                    else:
+                        cache_leak = _target_cache_artifact_leak(ctx=ctx, run=run)
+                        if cache_leak is not None:
+                            observed_signals, diagnosis_block, known_unknowns, next_action = cache_leak
+                        else:
+                            integration_validation_error = _integration_artifact_validation_error(run=run)
+                            if integration_validation_error is not None:
+                                observed_signals, diagnosis_block, known_unknowns, next_action = integration_validation_error
+                            else:
+                                manifest_lifecycle_error = _run_manifest_attempt_lifecycle_error(run=run)
+                                if manifest_lifecycle_error is not None:
+                                    observed_signals, diagnosis_block, known_unknowns, next_action = manifest_lifecycle_error
+                                else:
+                                    runbook_mismatch = _runbook_attempt_evidence_mismatch(run=run)
+                                    if runbook_mismatch is not None:
+                                        observed_signals, diagnosis_block, known_unknowns, next_action = runbook_mismatch
+                                    else:
+                                        integration_dirty = _target_dirty_after_integration_apply(
+                                            run=run,
+                                            live_memory=live_memory,
+                                            stderr_text=stderr_text,
+                                        )
+                                        if integration_dirty is not None:
+                                            observed_signals, diagnosis_block, known_unknowns, next_action = integration_dirty
+                                        else:
+                                            observed_signals, diagnosis_block, known_unknowns, next_action = _analyze_signals(
+                                                stderr_text,
+                                                stdout_text,
+                                                output_events,
+                                                artifact_presence,
+                                                command=command,
+                                                run=run,
+                                            )
     if artifact_presence["worker_capsule"]:
         observed_signals.append("worker_capsule_present")
     if artifact_presence["worker_memory"]:
@@ -474,6 +842,7 @@ def diagnose_real_codex_attempt(ctx: TargetRepoContext, *, attempt_id: str, prom
     if not artifact_presence["preflight_stage"] and diagnosis_block["primary_category"] not in {
         "orchestrator_subprocess_timeout",
         "worker_capsule_path_violation",
+        "patchlet_report_schema_violation",
     }:
         next_action = (
             "Inspect the generated prompt artifact and TASK_CONTRACT.md path usage before rerunning the opt-in smoke."

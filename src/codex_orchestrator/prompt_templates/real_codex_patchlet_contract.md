@@ -34,6 +34,30 @@ Treat `CXOR_EXECUTION_ROOT` as the only place where product/runtime file edits
 may occur. Treat `CXOR_ARTIFACT_ROOT` as the only place where orchestrator
 artifacts must be written.
 
+There are two roots:
+
+1. Execution root:
+   `CXOR_EXECUTION_ROOT`
+   This is the worktree where product/runtime files are edited.
+
+2. Target root:
+   `CXOR_TARGET_ROOT`
+   This is the durable artifact root and original target repo.
+   Do not edit product/runtime files in this root.
+   Product/runtime files under target root are read-only to the worker.
+
+Allowed product/runtime file:
+   `CXOR_ALLOWED_PRODUCT_RUNTIME_FILE`
+
+Allowed product/runtime edit path:
+   `CXOR_EXECUTION_ROOT/CXOR_ALLOWED_PRODUCT_RUNTIME_FILE`
+
+Forbidden product/runtime edit path:
+   `CXOR_TARGET_ROOT/CXOR_ALLOWED_PRODUCT_RUNTIME_FILE`
+
+Target-root artifact directories remain writable for evidence only under
+`.codex-orchestrator/` and `.artifacts/probes/`.
+
 Do not write report or probe artifacts into the worktree if
 `CXOR_EXECUTION_ROOT` differs from `CXOR_ARTIFACT_ROOT`.
 
@@ -74,21 +98,48 @@ Do not invent extra artifact locations outside:
 
 Write a valid patchlet report JSON to `CXOR_REPORT_PATH`.
 
+The status field must be exactly one of:
+
+- `COMPLETE`
+- `VERIFIED_NO_CHANGE_NEEDED`
+- `BLOCKED_WITH_EVIDENCE`
+- `FAILED_WITH_EVIDENCE`
+
+Never use:
+
+- `FIXED`
+- `DONE`
+- `SUCCESS`
+- `PASSED`
+- `OK`
+
 The report must include at least:
 
 - `schema_version`
 - `kind`
 - `patchlet_id`
 - `status`
-- `changed_product_runtime_file` for `COMPLETE`
+- `changed_product_runtime_file`
 - `changed_artifact_files`
 - `probe_commands`
 - `deterministic_run_counts`
 - `root_cause_classification`
 - `before_after_state`
+- `row_ledger`
+- `trace_ledger`
 - `cleanup_proof`
 - `probe_artifact_refs`
 - `acceptance_criteria_result`
+
+`cleanup_proof` must be a string, not an object, if the current report schema
+requires a string.
+
+`changed_product_runtime_file` must be present. It must be either the allowed
+product/runtime path string when exactly one product file changed, or `null`
+when no product/runtime file changed.
+
+`deterministic_run_counts`, `before_after_state`, `row_ledger`, and
+`trace_ledger` must be present.
 
 `probe_artifact_refs` must reference the durable probe run written under
 `CXOR_PROBE_ROOT`.

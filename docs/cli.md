@@ -194,6 +194,20 @@ If the preserved artifacts do not justify a more specific root cause, the
 diagnosis will report `unknown_codex_nonzero_exit`. Do not weaken validators to
 force a narrower classification.
 
+Wrapper gate final-status marker errors are classified separately from
+network/API failures. The final Markdown report must contain a standalone
+canonical line: `FINAL_STATUS: PASS`, `FINAL_STATUS: BLOCKED`, or
+`FINAL_STATUS: FAILED`. Non-canonical forms such as
+`Marker: `FINAL_STATUS: PASS`` or backticked markers are rejected, and a valid
+report JSON alone does not bypass the wrapper gate. The diagnosis category is
+`wrapper_gate_final_status_marker_error`; `network_or_api_error` does not mask
+structured gate or routing failures.
+
+Transaction group ids such as `TG001` are not patchlet ids. Transaction-group
+failure records preserve `source_patchlet_ids`, and regeneration expands those
+member patchlets. Missing mapping reports
+`transaction_group_source_mapping_missing`.
+
 ## Live Progress And Result Application
 
 Real-Codex subprocesses may print compact live progress lines like
@@ -295,7 +309,60 @@ Do not create target-root worker_stage/. If Codex writes a top-level
 `worker_capsule_path_violation`. This is a Codex path-obedience issue, not an
 orchestrator wiring failure. Do not weaken validators.
 
+`diagnose-real-codex` reports `patchlet_report_schema_violation` when a worker
+exits successfully but the patchlet report fails schema validation. This is not
+a `network_or_api_error`. Allowed report statuses are `COMPLETE`,
+`VERIFIED_NO_CHANGE_NEEDED`, `BLOCKED_WITH_EVIDENCE`, and
+`FAILED_WITH_EVIDENCE`; `FIXED`, `DONE`, `SUCCESS`, `PASSED`, and `OK` are
+unsupported and invalid. `cleanup_proof` must be a string, not an object.
+`changed_product_runtime_file`, `deterministic_run_counts`,
+`before_after_state`, `row_ledger`, and `trace_ledger` are required.
+
+Repair patchlets receive a report skeleton and must edit product/runtime files
+only under `CXOR_EXECUTION_ROOT`. Product/runtime files under
+`CXOR_TARGET_ROOT` are read-only to workers; only target-root evidence under
+`.codex-orchestrator/` and `.artifacts/probes/` is writable.
+
 `diagnose-real-codex` is also read-only and summarizes preserved failure
 evidence before writing diagnosis artifacts. `verify-group` and
 `verify-global` write matrix-backed gate artifacts before they decide
 acceptance.
+## P0004 Checkpoint Cleanliness And Attempt Lifecycle
+
+`cxor validate-integration-artifacts --repo <repo>` now checks strict
+checkpoint cleanliness plus structured sidecar evidence. The checkpoint field
+`target_working_tree_clean_after_checkpoint` still must be `true`; it is not
+weakened to allow dirty targets. Each checkpoint can include a
+`target_cleanliness` summary and a sidecar
+`.codex-orchestrator/integration/checkpoints/<PATCHLET>_cleanliness.json`.
+
+The checkpoint cleanliness taxonomy separates product/runtime clean from whole
+target clean. Product/runtime clean means files such as `app.py` are clean.
+Whole target clean means allowed evidence directories have been accounted for
+and the Target Hygiene Gate has run. `.codex-orchestrator/` and `.artifacts/`
+are ignored as durable evidence directories. Python cache artifacts such as
+`__pycache__/`, `*.pyc`, and `*.pyo` are evidence-recorded in
+`target_hygiene_gate_result.json`; known untracked cache files may be removed
+with `cache_artifacts_detected` and `cache_artifacts_removed` recorded.
+Unknown dirty paths are not deleted and fail validation.
+
+Workers run with `PYTHONDONTWRITEBYTECODE=1`, and generated prompts instruct
+Codex to use `python -B` or `PYTHONDONTWRITEBYTECODE=1 python` for probes that
+import target or execution code.
+
+`run_manifest.json` records attempt lifecycle states including
+`ATTEMPT_STARTED`, `WORKER_EXITED`, `REPORT_VALIDATED`,
+`WRAPPER_GATE_EVALUATED`, `TARGET_HYGIENE_EVALUATED`,
+`INTEGRATION_CHECKPOINT_WRITTEN`, `INTEGRATION_ARTIFACTS_VALIDATED`,
+`ATTEMPT_ACCEPTED`, and `ATTEMPT_FAILED_WITH_EVIDENCE`. Operator runbook
+outputs include `attempt_consistency`; validation, list, and export commands
+surface runbook attempt consistency and mismatch details.
+
+Diagnosis categories for this path include
+`integration_checkpoint_target_cleanliness_error`,
+`integration_artifact_validation_error`, `run_manifest_attempt_lifecycle_error`,
+`runbook_attempt_evidence_mismatch`, and `target_cache_artifact_leak`.
+`network_or_api_error` now requires actual external error evidence, not prompt
+or metadata text alone. After a live smoke, run
+`validate-real-codex-smoke-runbook`, `list-real-codex-smoke-runbooks`, and
+`export-real-codex-smoke-runbook`.

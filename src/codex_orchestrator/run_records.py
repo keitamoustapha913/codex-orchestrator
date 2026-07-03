@@ -46,3 +46,28 @@ def append_run_record(ctx: TargetRepoContext, record: dict[str, Any]) -> str:
     manifest.setdefault("runs", []).append(record)
     write_json(ctx.paths.run_manifest, manifest)
     return next_id
+
+
+def upsert_run_record(ctx: TargetRepoContext, *, attempt_id: str, record: dict[str, Any]) -> str:
+    manifest = load_run_manifest(ctx)
+    runs = manifest.setdefault("runs", [])
+    existing = None
+    for run in runs:
+        if run.get("attempt_id") == attempt_id:
+            existing = run
+            break
+    if existing is None:
+        existing = {
+            "run_id": f"R{len(runs) + 1:04d}",
+            "created_at": now_iso(),
+            "attempt_id": attempt_id,
+            "lifecycle_events": [],
+        }
+        runs.append(existing)
+    existing.update(record)
+    lifecycle_status = record.get("lifecycle_status")
+    if lifecycle_status:
+        events = existing.setdefault("lifecycle_events", [])
+        events.append({"stage": lifecycle_status, "at": now_iso()})
+    write_json(ctx.paths.run_manifest, manifest)
+    return str(existing["run_id"])
