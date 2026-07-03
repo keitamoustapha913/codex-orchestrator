@@ -1,0 +1,165 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://codex-orchestrator.local/schemas/real_codex_smoke_operator_result.schema.json",
+  "title": "Real Codex Smoke Operator Result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "kind",
+    "outcome",
+    "default_skip",
+    "explicit_smoke",
+    "operator_run_dir",
+    "diagnosis_paths"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "kind": {
+      "const": "real_codex_smoke_operator_result"
+    },
+    "outcome": {
+      "enum": ["dry_run", "success", "safe_failure", "failure", "unparsed", "unknown", "not_run"]
+    },
+    "default_skip": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["exit_code", "skipped"],
+      "properties": {
+        "exit_code": {
+          "type": "integer"
+        },
+        "skipped": {
+          "type": "boolean"
+        }
+      }
+    },
+    "explicit_smoke": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["run", "exit_code", "outcome"],
+      "properties": {
+        "run": {
+          "type": "boolean"
+        },
+        "exit_code": {
+          "oneOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "outcome": {
+          "enum": ["not_run", "success", "safe_failure", "failure", "unparsed", "unknown"]
+        },
+        "parse_error": {
+          "type": "string",
+          "minLength": 1
+        },
+        "parsed_smoke": {
+          "type": "object"
+        }
+      }
+    },
+    "operator_run_dir": {
+      "type": "string",
+      "minLength": 1
+    },
+    "diagnosis_paths": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "diagnosis_json_path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "diagnosis_md_path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "diagnosis_primary_category": {
+      "type": "string",
+      "minLength": 1
+    },
+    "run_manifest_path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "run_dir": {
+      "type": "string",
+      "minLength": 1
+    },
+    "stdout_path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "stderr_path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "output_jsonl_path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "progress_path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "timeout_seconds": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "timed_out": {
+      "type": "boolean"
+    },
+    "selected_model": {
+      "type": "string",
+      "minLength": 1
+    },
+    "selected_reasoning": {
+      "type": "string",
+      "minLength": 1
+    },
+    "validation_valid": {
+      "type": "boolean"
+    },
+    "validation_result_path": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "outcome": {
+            "const": "dry_run"
+          }
+        },
+        "required": ["outcome"]
+      },
+      "then": {
+        "properties": {
+          "explicit_smoke": {
+            "properties": {
+              "run": {
+                "const": false
+              },
+              "outcome": {
+                "const": "not_run"
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

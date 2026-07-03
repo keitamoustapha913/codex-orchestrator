@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://codex-orchestrator.local/schemas/real_codex_smoke_selected_policy.schema.json",
+  "title": "Real Codex Smoke Selected Policy",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "kind",
+    "codex_patchlet_timeout_seconds",
+    "codex_timeout_seconds",
+    "codex_model",
+    "codex_reasoning",
+    "codex_progress_interval_seconds",
+    "live_progress_enabled",
+    "run_real_codex",
+    "dry_run"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "kind": {
+      "const": "real_codex_smoke_selected_policy"
+    },
+    "codex_patchlet_timeout_seconds": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "codex_timeout_seconds": {
+      "oneOf": [
+        {
+          "type": "integer",
+          "minimum": 1
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "codex_model": {
+      "type": "string",
+      "minLength": 1
+    },
+    "codex_reasoning": {
+      "type": "string",
+      "minLength": 1
+    },
+    "codex_progress_interval_seconds": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "live_progress_enabled": {
+      "type": "boolean"
+    },
+    "run_real_codex": {
+      "type": "boolean"
+    },
+    "dry_run": {
+      "type": "boolean"
+    }
+  }
+}

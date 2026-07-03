@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://codex-orchestrator.local/schemas/real_codex_smoke_runbook_validation.schema.json",
+  "title": "Real Codex Smoke Runbook Validation",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "kind",
+    "valid",
+    "run_dir",
+    "validated",
+    "errors",
+    "warnings"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "kind": {
+      "const": "real_codex_smoke_runbook_validation"
+    },
+    "valid": {
+      "type": "boolean"
+    },
+    "run_dir": {
+      "type": "string",
+      "minLength": 1
+    },
+    "validated": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "required_files",
+        "selected_policy",
+        "result",
+        "diagnosis_paths",
+        "text_evidence",
+        "copied_diagnosis_files"
+      ],
+      "properties": {
+        "required_files": {
+          "type": "boolean"
+        },
+        "selected_policy": {
+          "type": "boolean"
+        },
+        "result": {
+          "type": "boolean"
+        },
+        "diagnosis_paths": {
+          "type": "boolean"
+        },
+        "text_evidence": {
+          "type": "boolean"
+        },
+        "copied_diagnosis_files": {
+          "type": "boolean"
+        }
+      }
+    },
+    "errors": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/validation_message"
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/validation_message"
+      }
+    }
+  },
+  "$defs": {
+    "validation_message": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "schema", "message"],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "schema": {
+          "type": "string",
+          "minLength": 1
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}

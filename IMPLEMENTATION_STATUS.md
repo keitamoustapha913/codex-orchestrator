@@ -227,3 +227,12 @@ Implemented: schema validation for integration artifacts.
 `patch_result.json` use `apply_results_result.schema.json`. Operators can run
 `cxor validate-integration-artifacts --repo /path/to/target-repo`; the command
 is read-only and does not run Codex.
+
+Implemented: schema validation for operator-run real-Codex smoke bundles.
+`selected_policy.json` uses `real_codex_smoke_selected_policy.schema.json`,
+`result.json` uses `real_codex_smoke_operator_result.schema.json`,
+`diagnosis_paths.json` uses `real_codex_smoke_diagnosis_paths.schema.json`,
+and `validation_result.json` uses
+`real_codex_smoke_runbook_validation.schema.json`. Operators can run
+`cxor validate-real-codex-smoke-runbook --run-dir .operator-runs/real-codex-smoke/<timestamp>-real-codex-smoke`;
+the command is read-only, does not run Codex, and does not run pytest.

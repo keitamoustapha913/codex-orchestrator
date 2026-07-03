@@ -13,6 +13,7 @@ from codex_orchestrator.real_codex_operator_runbook import (
     parse_smoke_stdout,
     run_real_codex_smoke_runbook,
 )
+from codex_orchestrator.validators.real_codex_smoke_runbook_validator import validate_real_codex_smoke_runbook
 
 
 FIXED_TIMESTAMP = "2026-07-02T18-45-00"
@@ -468,3 +469,48 @@ def test_runbook_selected_policy_records_live_progress_disabled(tmp_path: Path):
 
     policy = read_json(Path(result["operator_run_dir"]) / "selected_policy.json")
     assert policy["live_progress_enabled"] is False
+
+
+def test_runbook_dry_run_writes_validation_result_json(tmp_path: Path):
+    result = run_real_codex_smoke_runbook(
+        repo_root=tmp_path,
+        operator_root=tmp_path / "runs",
+        timestamp=FIXED_TIMESTAMP,
+        dry_run=True,
+        run_real_codex=False,
+        runner=fake_runner_factory([]),
+    )
+
+    run_dir = Path(result["operator_run_dir"])
+    validation = read_json(run_dir / "validation_result.json")
+    assert validation["kind"] == "real_codex_smoke_runbook_validation"
+    assert validation["valid"] is True
+
+
+def test_runbook_result_includes_validation_valid_true(tmp_path: Path):
+    result = run_real_codex_smoke_runbook(
+        repo_root=tmp_path,
+        operator_root=tmp_path / "runs",
+        timestamp=FIXED_TIMESTAMP,
+        dry_run=True,
+        run_real_codex=False,
+        runner=fake_runner_factory([]),
+    )
+
+    payload = read_json(Path(result["operator_run_dir"]) / "result.json")
+    assert payload["validation_valid"] is True
+    assert payload["validation_result_path"] == "validation_result.json"
+
+
+def test_runbook_validation_result_matches_standalone_validator(tmp_path: Path):
+    result = run_real_codex_smoke_runbook(
+        repo_root=tmp_path,
+        operator_root=tmp_path / "runs",
+        timestamp=FIXED_TIMESTAMP,
+        dry_run=True,
+        run_real_codex=False,
+        runner=fake_runner_factory([]),
+    )
+
+    run_dir = Path(result["operator_run_dir"])
+    assert read_json(run_dir / "validation_result.json") == validate_real_codex_smoke_runbook(run_dir)

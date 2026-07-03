@@ -103,6 +103,21 @@ The runbook writes
 `diagnosis_paths.json`. Compare runs by diffing `selected_policy.json`,
 `result.json`, and `diagnosis_paths.json`.
 
+Each bundle can be checked after capture:
+
+```bash
+cxor validate-real-codex-smoke-runbook --run-dir .operator-runs/real-codex-smoke/<timestamp>-real-codex-smoke
+```
+
+The validator is read-only, does not run Codex, and does not run pytest. It
+uses `real_codex_smoke_selected_policy.schema.json`,
+`real_codex_smoke_operator_result.schema.json`,
+`real_codex_smoke_diagnosis_paths.schema.json`, and
+`real_codex_smoke_runbook_validation.schema.json`. It also checks required text
+evidence files such as `environment.txt`, `default_skip_stdout.txt`,
+`default_skip_stderr.txt`, `explicit_smoke_stdout.txt`, and
+`explicit_smoke_stderr.txt`.
+
 `safe_failure is a successful runbook capture`, not task DONE. `DONE means the
 orchestrator validators accepted the run`.
 

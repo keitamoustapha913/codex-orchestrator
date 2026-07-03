@@ -228,6 +228,22 @@ validates apply-results artifacts such as `patch_result.json` with
 `apply_results_result.schema.json`. A non-zero exit means the integration
 artifact set is structurally invalid and should not be treated as DONE.
 
+Operator-run real-Codex smoke bundle validation:
+
+```bash
+cxor validate-real-codex-smoke-runbook --run-dir .operator-runs/real-codex-smoke/<timestamp>-real-codex-smoke
+```
+
+This command is read-only, does not run Codex, and does not run pytest. It
+validates `selected_policy.json` with
+`real_codex_smoke_selected_policy.schema.json`, validates `result.json` with
+`real_codex_smoke_operator_result.schema.json`, validates
+`diagnosis_paths.json` with `real_codex_smoke_diagnosis_paths.schema.json`,
+validates `validation_result.json` with
+`real_codex_smoke_runbook_validation.schema.json` when present, and checks
+required text evidence files including `environment.txt`,
+`default_skip_stdout.txt`, and `explicit_smoke_stdout.txt`.
+
 Worker Capsule inspection:
 
 ```bash

@@ -57,6 +57,28 @@ cannot be parsed as JSON. When diagnosis files are referenced and present, the
 runbook copies them into the operator-run directory as `diagnosis.json` and
 `diagnosis.md`.
 
+Each bundle also writes `validation_result.json`. Validate any saved bundle
+again with:
+
+```bash
+cxor validate-real-codex-smoke-runbook --run-dir .operator-runs/real-codex-smoke/<timestamp>-real-codex-smoke
+```
+
+The validator is read-only, does not run Codex, does not run pytest, and only
+inspects the supplied operator-run directory. It checks JSON schemas for
+`selected_policy.json`, `result.json`, and `diagnosis_paths.json`:
+
+- `real_codex_smoke_selected_policy.schema.json`
+- `real_codex_smoke_operator_result.schema.json`
+- `real_codex_smoke_diagnosis_paths.schema.json`
+- `real_codex_smoke_runbook_validation.schema.json`
+
+It also checks required text evidence files including `environment.txt`,
+`git_status.txt`, `codex_version.txt`, `default_skip_stdout.txt`,
+`default_skip_stderr.txt`, `explicit_smoke_stdout.txt`, and
+`explicit_smoke_stderr.txt`. Dry-run bundles and explicit-run bundles can both
+be validated after capture.
+
 ## Compare Runs
 
 To compare runs, diff `selected_policy.json`, `result.json`, and

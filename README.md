@@ -165,6 +165,20 @@ not invoke real Codex. Explicit mode may consume account, network, model, token,
 and wall-clock resources. `safe_failure is a successful runbook capture`, not
 task DONE; `DONE means the orchestrator validators accepted the run`.
 
+Validate a captured runbook bundle with:
+
+```bash
+cxor validate-real-codex-smoke-runbook --run-dir .operator-runs/real-codex-smoke/<timestamp>-real-codex-smoke
+```
+
+This command is read-only, does not run Codex, and does not run pytest. It
+checks `real_codex_smoke_selected_policy.schema.json`,
+`real_codex_smoke_operator_result.schema.json`,
+`real_codex_smoke_diagnosis_paths.schema.json`,
+`real_codex_smoke_runbook_validation.schema.json`, and required text evidence
+files such as `environment.txt`, `default_skip_stdout.txt`, and
+`explicit_smoke_stdout.txt`.
+
 See `docs/runbooks/real_codex_smoke_runbook.md` for how to compare runs.
 
 Patchlet Codex defaults to `gpt-5.4-mini` with `CODEX_REASONING=medium`.

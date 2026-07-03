@@ -300,6 +300,14 @@ def cmd_validate_integration_artifacts(args: argparse.Namespace) -> int:
     return 0 if result["valid"] else 1
 
 
+def cmd_validate_real_codex_smoke_runbook(args: argparse.Namespace) -> int:
+    from codex_orchestrator.validators.real_codex_smoke_runbook_validator import validate_real_codex_smoke_runbook
+
+    result = validate_real_codex_smoke_runbook(args.run_dir)
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0 if result["valid"] else 1
+
+
 def cmd_inspect_capsule(args: argparse.Namespace) -> int:
     ctx = _ctx(args)
     run_dir = ctx.paths.runs_dir / args.attempt
@@ -502,6 +510,10 @@ def build_parser() -> argparse.ArgumentParser:
     validate_integration = sub.add_parser("validate-integration-artifacts")
     _add_repo_flags(validate_integration)
     validate_integration.set_defaults(func=cmd_validate_integration_artifacts)
+
+    validate_runbook = sub.add_parser("validate-real-codex-smoke-runbook")
+    validate_runbook.add_argument("--run-dir", type=Path, required=True)
+    validate_runbook.set_defaults(func=cmd_validate_real_codex_smoke_runbook)
 
     return parser
 

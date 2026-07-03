@@ -201,6 +201,12 @@ def run_real_codex_smoke_runbook(
 
     _write_json(run_dir / "diagnosis_paths.json", diagnosis_payload)
     _write_json(run_dir / "result.json", result_payload)
+    validation = _validate_runbook_bundle(run_dir)
+    result_payload["validation_valid"] = validation["valid"]
+    result_payload["validation_result_path"] = "validation_result.json"
+    _write_json(run_dir / "result.json", result_payload)
+    validation = _validate_runbook_bundle(run_dir)
+    _write_json(run_dir / "validation_result.json", validation)
     return result_payload
 
 
@@ -376,6 +382,12 @@ def _copy_if_present(payload: dict, source_key: str, destination: Path, copied_k
 
 def _write_json(path: Path, payload: Mapping[str, object]) -> None:
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _validate_runbook_bundle(run_dir: Path) -> dict:
+    from codex_orchestrator.validators.real_codex_smoke_runbook_validator import validate_real_codex_smoke_runbook
+
+    return validate_real_codex_smoke_runbook(run_dir)
 
 
 def command_from_string(value: str | None, default: list[str]) -> list[str]:

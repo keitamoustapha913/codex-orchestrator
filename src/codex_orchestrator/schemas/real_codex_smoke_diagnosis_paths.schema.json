@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://codex-orchestrator.local/schemas/real_codex_smoke_diagnosis_paths.schema.json",
+  "title": "Real Codex Smoke Diagnosis Paths",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "kind",
+    "diagnosis_json_path",
+    "diagnosis_md_path",
+    "run_manifest_path",
+    "run_dir",
+    "stdout_path",
+    "stderr_path",
+    "output_jsonl_path",
+    "progress_path",
+    "copied_diagnosis_json",
+    "copied_diagnosis_md"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "kind": {
+      "const": "real_codex_smoke_diagnosis_paths"
+    },
+    "diagnosis_json_path": {
+      "$ref": "#/$defs/nullable_path"
+    },
+    "diagnosis_md_path": {
+      "$ref": "#/$defs/nullable_path"
+    },
+    "run_manifest_path": {
+      "$ref": "#/$defs/nullable_path"
+    },
+    "run_dir": {
+      "$ref": "#/$defs/nullable_path"
+    },
+    "stdout_path": {
+      "$ref": "#/$defs/nullable_path"
+    },
+    "stderr_path": {
+      "$ref": "#/$defs/nullable_path"
+    },
+    "output_jsonl_path": {
+      "$ref": "#/$defs/nullable_path"
+    },
+    "progress_path": {
+      "$ref": "#/$defs/nullable_path"
+    },
+    "copied_diagnosis_json": {
+      "$ref": "#/$defs/nullable_path"
+    },
+    "copied_diagnosis_md": {
+      "$ref": "#/$defs/nullable_path"
+    }
+  },
+  "$defs": {
+    "nullable_path": {
+      "oneOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  }
+}
