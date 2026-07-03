@@ -314,3 +314,14 @@ Structured diagnoses include `integration_checkpoint_target_cleanliness_error`,
 `integration_artifact_validation_error`, `run_manifest_attempt_lifecycle_error`,
 `runbook_attempt_evidence_mismatch`, and `target_cache_artifact_leak`.
 `network_or_api_error` now requires actual external error evidence.
+
+Release evidence preserved for v0.1.0-rc1:
+
+```text
+.operator-runs/real-codex-smoke/2026-07-03T18-15-05-real-codex-smoke
+.operator-runs/exports/2026-07-03T18-15-05-real-codex-smoke.zip
+.operator-runs/exports/2026-07-03T18-15-05-real-codex-smoke.zip.manifest.json
+```
+
+The final explicit installed real-Codex operator smoke reached `DONE`; the
+bundle validated with no errors or warnings and exported successfully.

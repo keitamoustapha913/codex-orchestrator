@@ -1,0 +1,75 @@
+{
+  "files": [
+    {
+      "path": ".operator-runs/real-codex-smoke/2026-07-03T16-28-35-real-codex-smoke/README.md",
+      "sha256": "fcc8657b46a4e14606d53cd80da9590aca20546f84bc590dbf861c0fb1ea954b",
+      "size_bytes": 354
+    },
+    {
+      "path": ".operator-runs/real-codex-smoke/2026-07-03T16-28-35-real-codex-smoke/codex_version.txt",
+      "sha256": "ede40e3c9f9383f0dd259eb8ca69ffe676f032917456104bc78446a291543aad",
+      "size_bytes": 18
+    },
+    {
+      "path": ".operator-runs/real-codex-smoke/2026-07-03T16-28-35-real-codex-smoke/default_skip_stderr.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size_bytes": 0
+    },
+    {
+      "path": ".operator-runs/real-codex-smoke/2026-07-03T16-28-35-real-codex-smoke/default_skip_stdout.txt",
+      "sha256": "bda3b2872b2ac804b174ceb14ace9c67bb7e53bf4ee723b6bae31376b0204c9e",
+      "size_bytes": 99
+    },
+    {
+      "path": ".operator-runs/real-codex-smoke/2026-07-03T16-28-35-real-codex-smoke/diagnosis.json",
+      "sha256": "ba72d3b00e48e0772ae5bd4eb06b8ce4c927cd68f658608b5ca6f9989e23d23d",
+      "size_bytes": 3246
+    },
+    {
+      "path": ".operator-runs/real-codex-smoke/2026-07-03T16-28-35-real-codex-smoke/diagnosis.md",
+      "sha256": "032364819e95c147c3e93a7fe9abcc1fe966664598ef6e78c780b30329865561",
+      "size_bytes": 1447
+    },
+    {
+      "path": ".operator-runs/real-codex-smoke/2026-07-03T16-28-35-real-codex-smoke/diagnosis_paths.json",
+      "sha256": "4873574d6586647fcb9a70747982c58d2c1fd95f250e888ea877fa5d69df2c4b",
+      "size_bytes": 1434
+    },
+    {
+      "path": ".operator-runs/real-codex-smoke/2026-07-03T16-28-35-real-codex-smoke/environment.txt",
+      "sha256": "faf616ed277cafc421dbdd6017e4be890940dff66805096fe791a7996726b8e0",
+      "size_bytes": 346
+    },
+    {
+      "path": ".operator-runs/real-codex-smoke/2026-07-03T16-28-35-real-codex-smoke/explicit_smoke_stderr.txt",
+      "sha256": "a230b99fc1eef025bf870c46ba601afa78d2e98422816b9c5527310ad45788f4",
+      "size_bytes": 5264
+    },
+    {
+      "path": ".operator-runs/real-codex-smoke/2026-07-03T16-28-35-real-codex-smoke/explicit_smoke_stdout.txt",
+      "sha256": "ce1a910a1f14d205792636f61855777484cada94d605899e4f12ee75a7cba64c",
+      "size_bytes": 45563
+    },
+    {
+      "path": ".operator-runs/real-codex-smoke/2026-07-03T16-28-35-real-codex-smoke/git_status.txt",
+      "sha256": "dbabfb1d6dbbf3b22ab4f81dea9949b27e64b617baeeb781a4ba368a64f8af0c",
+      "size_bytes": 1477
+    },
+    {
+      "path": ".operator-runs/real-codex-smoke/2026-07-03T16-28-35-real-codex-smoke/result.json",
+      "sha256": "716a16c466ff98a3cbc2f2745629243e489dc9c4a5b4118aea295fb7ca929d7c",
+      "size_bytes": 49020
+    },
+    {
+      "path": ".operator-runs/real-codex-smoke/2026-07-03T16-28-35-real-codex-smoke/selected_policy.json",
+      "sha256": "4f851e2052fc62a6208cc73f461a1b6d88f7632890c3fac961987cc813cdc89d",
+      "size_bytes": 334
+    },
+    {
+      "path": ".operator-runs/real-codex-smoke/2026-07-03T16-28-35-real-codex-smoke/validation_result.json",
+      "sha256": "1a0e137b576035a7892a7d1012ad667e1abbaeda3d6e34eefeb609eac530f268",
+      "size_bytes": 473
+    }
+  ],
+  "latest_run_dir": ".operator-runs/real-codex-smoke/2026-07-03T16-28-35-real-codex-smoke"
+}

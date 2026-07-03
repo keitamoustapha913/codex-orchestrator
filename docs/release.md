@@ -144,3 +144,16 @@ cxor validate-real-codex-smoke-runbook --run-dir <bundle>
 cxor list-real-codex-smoke-runbooks --latest --json
 cxor export-real-codex-smoke-runbook --run-dir <bundle>
 ```
+
+## v0.1.0-rc1 Release Evidence
+
+The final release evidence bundle for the v0.1.0 release candidate is:
+
+```text
+.operator-runs/real-codex-smoke/2026-07-03T18-15-05-real-codex-smoke
+.operator-runs/exports/2026-07-03T18-15-05-real-codex-smoke.zip
+.operator-runs/exports/2026-07-03T18-15-05-real-codex-smoke.zip.manifest.json
+```
+
+This bundle reached `DONE`, validated with `errors: []` and `warnings: []`,
+and exported successfully with a hash manifest.
