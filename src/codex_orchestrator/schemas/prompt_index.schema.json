@@ -1,0 +1,125 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Prompt Index",
+  "type": "object",
+  "required": ["schema_version", "kind", "prompts"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1.0"
+    },
+    "kind": {
+      "type": "string",
+      "const": "prompt_index"
+    },
+    "prompts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "prompt_id",
+          "kind",
+          "stage",
+          "title",
+          "summary",
+          "path",
+          "sha256",
+          "size_bytes",
+          "created_at",
+          "failure_ids",
+          "contracts",
+          "artifact_paths"
+        ],
+        "additionalProperties": true,
+        "properties": {
+          "prompt_id": {
+            "type": "string",
+            "pattern": "^PR[0-9]{6}$"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "master_prompt",
+              "patchlet_subprompt",
+              "patchlet_worker_prompt",
+              "repair_subprompt",
+              "repair_worker_prompt",
+              "transaction_group_verifier_prompt",
+              "global_verifier_prompt",
+              "diagnosis_prompt",
+              "rediscovery_prompt",
+              "inventory_prompt",
+              "unknown_prompt"
+            ]
+          },
+          "stage": {
+            "type": ["string", "null"]
+          },
+          "patchlet_id": {
+            "type": ["string", "null"]
+          },
+          "attempt_id": {
+            "type": ["string", "null"]
+          },
+          "transaction_group_id": {
+            "type": ["string", "null"]
+          },
+          "verifier_id": {
+            "type": ["string", "null"]
+          },
+          "repair_plan_id": {
+            "type": ["string", "null"]
+          },
+          "failure_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "title": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "subprompt_path": {
+            "type": ["string", "null"]
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "model": {
+            "type": ["string", "null"]
+          },
+          "reasoning": {
+            "type": ["string", "null"]
+          },
+          "contracts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "artifact_paths": {
+            "type": "array",
+            "items": {
+              "type": ["string", "null"]
+            }
+          }
+        }
+      }
+    }
+  }
+}

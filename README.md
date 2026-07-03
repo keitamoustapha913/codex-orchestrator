@@ -421,3 +421,32 @@ Structured diagnosis categories include
 normal metadata mentioning timeout, model, network, or API is not enough. After
 every live run, use `validate-real-codex-smoke-runbook`,
 `list-real-codex-smoke-runbooks`, and `export-real-codex-smoke-runbook`.
+
+## Direct Auto Operator Visibility
+
+Direct `cxor auto` supports `--live-progress`, `--no-live-progress`,
+`--progress-interval-seconds`, and `--progress-format compact|jsonl`.
+Compact progress prints concise stage-level operator events from
+`.codex-orchestrator/operator_events.jsonl`; JSONL progress prints structured
+events. Raw Codex JSON and full prompt bodies are not printed by default.
+
+Prompt visibility is recorded in `.codex-orchestrator/prompt_index.json`.
+Operators can use `cxor prompts --repo <repo>`, `cxor prompts --latest`, and
+`cxor prompts --show PR000001 --lines 160` to inspect prompt metadata or
+explicitly show a prompt body.
+
+Use these read-only second-terminal commands while direct auto is running:
+
+```bash
+uv run --no-sync cxor monitor --repo /tmp/cxor-target --follow
+uv run --no-sync cxor status --repo /tmp/cxor-target --watch
+uv run --no-sync cxor prompts --repo /tmp/cxor-target --latest
+```
+
+`cxor status --json` reports active, silent_but_active, likely_stalled, done,
+and failed classifications, plus current patchlet, current attempt, active
+prompt path, last progress age, and next action. Repeated repair loops are
+recorded in `.codex-orchestrator/loop_governor.json`; warning mode emits
+`loop_governor_warning`, and explicit `--loop-governor-mode safe-fail
+--max-repeated-failure-signature 3` safe-fails with evidence. Default tests do
+not run real Codex.

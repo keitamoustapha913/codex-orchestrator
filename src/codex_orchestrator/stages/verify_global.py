@@ -6,6 +6,7 @@ from pathlib import Path
 from codex_orchestrator.errors import StagePreconditionError
 from codex_orchestrator.integration_state import target_product_runtime_clean, write_final_diff
 from codex_orchestrator.jsonio import read_json, write_json
+from codex_orchestrator.operator_events import append_operator_event
 from codex_orchestrator.state import load_state, now_iso, transition
 from codex_orchestrator.target_repo import TargetRepoContext
 from codex_orchestrator.validators.report_validator import ReportValidationError, validate_patchlet_report_file
@@ -59,6 +60,24 @@ def verify_global(ctx: TargetRepoContext) -> GlobalVerificationResult:
     )
     run_manifest = _latest_run_manifest(ctx)
     state = load_state(ctx)
+    append_operator_event(
+        ctx.root,
+        event_type="global_verifier_started",
+        severity="info",
+        stage="GLOBAL_VERIFICATION",
+        summary="Started global verifier.",
+        artifact_paths=[],
+        next_action="Checking final workflow acceptance.",
+    )
+    append_operator_event(
+        ctx.root,
+        event_type="verifier_no_prompt",
+        severity="debug",
+        stage="GLOBAL_VERIFICATION",
+        summary="Global verifier is deterministic; no Codex prompt exists.",
+        artifact_paths=[],
+        terminal_hint="No prompt is generated for this deterministic global verifier.",
+    )
     patchlets = index.get("patchlets", [])
     patchlets_by_id = {patchlet["patchlet_id"]: patchlet for patchlet in patchlets}
     failed: list[str] = []
@@ -307,8 +326,51 @@ def verify_global(ctx: TargetRepoContext) -> GlobalVerificationResult:
     )
     if done:
         transition(ctx, state, "DONE", reason="global verification passed")
+        append_operator_event(
+            ctx.root,
+            event_type="global_verifier_passed",
+            severity="success",
+            stage="GLOBAL_VERIFICATION",
+            summary="Global verifier passed; workflow DONE.",
+            artifact_paths=[
+                str(ctx.paths.final_verification_json.relative_to(ctx.root)),
+                str(matrix_path.relative_to(ctx.root)),
+                str(global_gate_path.relative_to(ctx.root)),
+            ],
+            next_action="Workflow reached DONE.",
+        )
+        append_operator_event(
+            ctx.root,
+            event_type="workflow_done",
+            severity="success",
+            stage="DONE",
+            summary="Workflow reached DONE.",
+            artifact_paths=[str(ctx.paths.final_verification_json.relative_to(ctx.root))],
+        )
     else:
         transition(ctx, state, "FAILURE_CLASSIFICATION_REQUIRED", reason="global verification failed")
+        append_operator_event(
+            ctx.root,
+            event_type="global_verifier_failed",
+            severity="error",
+            stage="GLOBAL_VERIFICATION",
+            summary="Global verifier failed; repair planning next.",
+            artifact_paths=[
+                str(ctx.paths.final_verification_json.relative_to(ctx.root)),
+                str(matrix_path.relative_to(ctx.root)),
+                str(global_gate_path.relative_to(ctx.root)),
+            ],
+            next_action="Classifying global verification failure.",
+            details={"failed_patchlets": failed, "unproven_patchlets": unproven},
+        )
+        append_operator_event(
+            ctx.root,
+            event_type="workflow_safe_failed",
+            severity="error",
+            stage="FAILURE_CLASSIFICATION_REQUIRED",
+            summary="Workflow safe-failed with verification evidence.",
+            artifact_paths=[str(ctx.paths.final_verification_json.relative_to(ctx.root))],
+        )
     return GlobalVerificationResult(
         done=done,
         status=status,

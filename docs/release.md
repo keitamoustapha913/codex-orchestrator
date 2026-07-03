@@ -157,3 +157,39 @@ The final release evidence bundle for the v0.1.0 release candidate is:
 
 This bundle reached `DONE`, validated with `errors: []` and `warnings: []`,
 and exported successfully with a hash manifest.
+
+## Direct Auto Visibility Release Guidance
+
+Manual direct auto smoke for operator visibility should use a fresh tiny target
+and explicit real-Codex opt-in:
+
+```bash
+CODEX_PATCHLET_TIMEOUT_SECONDS=600 \
+uv run --no-sync cxor auto \
+  --repo /tmp/cxor-target \
+  --master /tmp/cxor-target/master_prompt.md \
+  --until DONE \
+  --worker-mode real_codex \
+  --use-worktree \
+  --live-progress
+```
+
+Second terminal:
+
+```bash
+uv run --no-sync cxor monitor --repo /tmp/cxor-target --follow
+uv run --no-sync cxor status --repo /tmp/cxor-target --watch
+uv run --no-sync cxor prompts --repo /tmp/cxor-target --latest
+uv run --no-sync cxor prompts --repo /tmp/cxor-target --show PR000001 --lines 160
+```
+
+Release validation should confirm `.codex-orchestrator/operator_events.jsonl`,
+`.codex-orchestrator/prompt_index.json`, and
+`.codex-orchestrator/loop_governor.json` exist when relevant. `--no-live-progress`
+must keep terminal progress quiet while preserving events. `--progress-format
+jsonl` must print structured operator events. Compact progress must not print
+raw Codex JSON or prompt bodies by default. `cxor status --json` must classify
+active, silent_but_active, likely_stalled, done, and failed states. Repeated
+repair-loop warnings use `loop_governor_warning`; explicit safe failure uses
+`--loop-governor-mode safe-fail --max-repeated-failure-signature 3`. Default
+tests must not invoke real Codex.

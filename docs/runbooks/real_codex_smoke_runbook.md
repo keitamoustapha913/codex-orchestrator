@@ -204,3 +204,40 @@ Relevant diagnoses are `integration_checkpoint_target_cleanliness_error`,
 `network_or_api_error` requires actual external error evidence. After a live
 run, always use `validate-real-codex-smoke-runbook`,
 `list-real-codex-smoke-runbooks`, and `export-real-codex-smoke-runbook`.
+
+## Manual Direct Auto Visibility
+
+Direct manual real-Codex runs should use `cxor auto --live-progress` when the
+operator needs concise terminal visibility:
+
+```bash
+CODEX_PATCHLET_TIMEOUT_SECONDS=600 \
+uv run --no-sync cxor auto \
+  --repo /tmp/cxor-target \
+  --master /tmp/cxor-target/master_prompt.md \
+  --until DONE \
+  --worker-mode real_codex \
+  --use-worktree \
+  --live-progress
+```
+
+Use `--no-live-progress` for quiet mode, `--progress-interval-seconds` for
+heartbeat cadence, and `--progress-format jsonl` for structured event output.
+Progress comes from `.codex-orchestrator/operator_events.jsonl`; prompt
+metadata is in `.codex-orchestrator/prompt_index.json`; repeated repair-loop
+state is in `.codex-orchestrator/loop_governor.json`.
+
+Second-terminal read-only commands:
+
+```bash
+uv run --no-sync cxor monitor --repo /tmp/cxor-target --follow
+uv run --no-sync cxor status --repo /tmp/cxor-target --watch
+uv run --no-sync cxor prompts --repo /tmp/cxor-target --latest
+uv run --no-sync cxor prompts --repo /tmp/cxor-target --show PR000001 --lines 160
+```
+
+Prompt bodies are not printed by default, and compact progress does not print
+raw Codex JSON. `cxor status --json` distinguishes active-but-silent from
+likely stalled. Loop-governor warning mode emits `loop_governor_warning`; safe
+failure requires explicit `--loop-governor-mode safe-fail
+--max-repeated-failure-signature 3`. Default tests do not run real Codex.

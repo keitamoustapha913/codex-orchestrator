@@ -159,3 +159,43 @@ cxor validate-integration-artifacts --repo /path/to/target-repo
 This command is read-only, does not run Codex, and reinforces that DONE is
 based on validated integration-state evidence rather than a dirty target
 working tree.
+
+## Direct Auto Operator Visibility And Loop Control
+
+Direct `cxor auto` supports concise progress with `--live-progress`, quiet mode
+with `--no-live-progress`, heartbeat tuning with `--progress-interval-seconds`,
+and structured output with `--progress-format jsonl`.
+
+```bash
+CODEX_PATCHLET_TIMEOUT_SECONDS=600 \
+uv run --no-sync cxor auto \
+  --repo /tmp/cxor-target \
+  --master /tmp/cxor-target/master_prompt.md \
+  --until DONE \
+  --worker-mode real_codex \
+  --use-worktree \
+  --live-progress
+```
+
+Progress comes from `.codex-orchestrator/operator_events.jsonl`; it is compact
+and does not print raw Codex JSON or prompt bodies. Prompt metadata is indexed
+in `.codex-orchestrator/prompt_index.json`; show prompt bodies only with:
+
+```bash
+uv run --no-sync cxor prompts --repo /tmp/cxor-target --show PR000001 --lines 160
+```
+
+Second-terminal read-only commands:
+
+```bash
+uv run --no-sync cxor monitor --repo /tmp/cxor-target --follow
+uv run --no-sync cxor status --repo /tmp/cxor-target --watch
+uv run --no-sync cxor prompts --repo /tmp/cxor-target --latest
+```
+
+`cxor status --json` reports active, silent_but_active, likely_stalled, done,
+and failed classifications. Repeated repair loops are visible in
+`.codex-orchestrator/loop_governor.json`; warning mode emits
+`loop_governor_warning`, while `--loop-governor-mode safe-fail
+--max-repeated-failure-signature 3` safe-fails with evidence. Default tests do
+not run real Codex.

@@ -6,6 +6,7 @@ from pathlib import Path, PurePosixPath
 
 from codex_orchestrator.codex_execution_policy import resolve_patchlet_timeout_seconds, soft_deadline_seconds
 from codex_orchestrator.jsonio import read_json, write_json
+from codex_orchestrator.prompt_index import upsert_prompt_index_entry
 from codex_orchestrator.state import load_state, transition
 from codex_orchestrator.target_repo import TargetRepoContext
 
@@ -138,6 +139,20 @@ def compile_patchlets(ctx: TargetRepoContext) -> dict:
             + real_codex_contract,
             encoding="utf-8",
         )
+        upsert_prompt_index_entry(ctx.root, {
+            "kind": "patchlet_subprompt",
+            "stage": "PATCHLET_COMPILATION_REQUIRED",
+            "patchlet_id": patchlet_id,
+            "attempt_id": None,
+            "title": f"{runtime_file} — patchlet {patchlet_id}",
+            "summary": f"Patchlet subprompt for {patchlet_id}.",
+            "path": subprompt,
+            "subprompt_path": subprompt_rel,
+            "model": None,
+            "reasoning": None,
+            "contracts": [],
+            "artifact_paths": [subprompt_rel],
+        })
 
     for patchlet_id, patchlet in existing_patchlets.items():
         if patchlet_id.startswith("P") and patchlet not in patchlets and patchlet.get("is_repair_patchlet"):

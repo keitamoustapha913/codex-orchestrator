@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Callable
@@ -60,12 +61,38 @@ def cmd_init(args: argparse.Namespace) -> int:
 
 
 def cmd_status(args: argparse.Namespace) -> int:
+    import time
+
     from codex_orchestrator.stages.status import status
 
     ctx = _ctx(args)
-    result = status(ctx)
-    print(json.dumps(result, indent=2, sort_keys=True))
-    return 0
+    iterations = 0
+    while True:
+        result = status(ctx)
+        if args.json:
+            print(json.dumps(result, indent=2, sort_keys=True))
+        else:
+            print(f"Repo: {result['repo']}")
+            print(f"Stage: {result['stage']}")
+            print(f"Current: {result.get('current_patchlet_id') or '-'} / {result.get('current_attempt_id') or '-'}")
+            print(f"Loop iteration: {result.get('current_loop_iteration')}")
+            print(
+                "Patchlets: "
+                f"completed={result.get('completed_patchlet_count')} "
+                f"failed={result.get('failed_patchlet_count')} "
+                f"pending={result.get('pending_patchlet_count')}"
+            )
+            print(f"Classification: {result.get('classification')}")
+            print(f"Prompt: {result.get('active_prompt_path') or '-'}")
+            last_event = result.get("last_event") or {}
+            print(f"Last event: {last_event.get('event_id', '-')} {last_event.get('event_type', '-')}")
+            print(f"Next: {result.get('next_action')}")
+        if not args.watch:
+            return 0
+        iterations += 1
+        if args.max_iterations is not None and iterations >= args.max_iterations:
+            return 0
+        time.sleep(args.interval)
 
 
 def cmd_validate_state(args: argparse.Namespace) -> int:
@@ -419,20 +446,193 @@ def cmd_validate_capsule(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_prompts(args: argparse.Namespace) -> int:
+    from codex_orchestrator.prompt_index import get_prompt_entry, list_prompt_entries, prompt_index_path
+
+    ctx = _ctx(args)
+    index_path = prompt_index_path(ctx.root)
+    if args.show or args.show_path:
+        entry = get_prompt_entry(ctx.root, args.show) if args.show else None
+        prompt_path = None
+        if args.show_path:
+            candidate = Path(args.show_path)
+            prompt_path = candidate if candidate.is_absolute() else ctx.root / candidate
+        elif entry is not None:
+            prompt_path = ctx.root / entry["path"]
+        if prompt_path is None:
+            print(f"error: prompt id not found: {args.show}", file=sys.stderr)
+            return 1
+        if not prompt_path.exists():
+            print(f"error: prompt file not found: {prompt_path}", file=sys.stderr)
+            return 1
+        lines = prompt_path.read_text(encoding="utf-8").splitlines()
+        limit = args.lines
+        if limit > 0:
+            lines = lines[:limit]
+        print("\n".join(lines))
+        return 0
+
+    filters = {
+        "attempt_id": args.attempt,
+        "patchlet_id": args.patchlet,
+        "kind": args.kind,
+    }
+    prompts = list_prompt_entries(ctx.root, filters)
+    if args.latest and prompts:
+        prompts = [prompts[-1]]
+    if args.json:
+        print(json.dumps({
+            "schema_version": "1.0",
+            "kind": "prompt_list",
+            "repo": str(ctx.root),
+            "count": len(prompts),
+            "prompts": prompts,
+        }, indent=2, sort_keys=True))
+        return 0
+    if not index_path.exists():
+        print(f"No prompt index found for repo: {ctx.root}")
+        return 0
+    if not prompts:
+        print(f"No prompts found for repo: {ctx.root}")
+        return 0
+    for prompt in prompts:
+        print(
+            " ".join(
+                [
+                    prompt.get("prompt_id", "-"),
+                    prompt.get("kind", "-"),
+                    prompt.get("patchlet_id") or "-",
+                    prompt.get("attempt_id") or "-",
+                    prompt.get("path", "-"),
+                    f"{prompt.get('size_bytes', 0)} bytes",
+                ]
+            )
+        )
+    return 0
+
+
+def cmd_monitor(args: argparse.Namespace) -> int:
+    import time
+
+    from codex_orchestrator.operator_events import read_operator_events
+
+    ctx = _ctx(args)
+
+    def _emit(events: list[dict]) -> None:
+        if args.json:
+            print(json.dumps({
+                "schema_version": "1.0",
+                "kind": "operator_event_list",
+                "repo": str(ctx.root),
+                "count": len(events),
+                "events": events,
+            }, indent=2, sort_keys=True))
+            return
+        if not events:
+            print(f"No operator events found for repo: {ctx.root}")
+            return
+        for event in events:
+            print(
+                " ".join(
+                    [
+                        event.get("event_id", "-"),
+                        event.get("created_at", "-"),
+                        event.get("severity", "-"),
+                        event.get("event_type", "-"),
+                        event.get("patchlet_id") or event.get("attempt_id") or "-",
+                        event.get("summary", ""),
+                    ]
+                )
+            )
+
+    filters = {
+        "since": args.since,
+        "limit": args.limit,
+        "attempt_id": args.attempt,
+        "patchlet_id": args.patchlet,
+        "event_type": args.event_type,
+    }
+    if not args.follow:
+        _emit(read_operator_events(ctx.root, **filters))
+        return 0
+
+    emitted = 0
+    since = args.since
+    while True:
+        events = read_operator_events(
+            ctx.root,
+            since=since,
+            limit=args.limit,
+            attempt_id=args.attempt,
+            patchlet_id=args.patchlet,
+            event_type=args.event_type,
+        )
+        if events:
+            if args.json:
+                for event in events:
+                    print(json.dumps(event, sort_keys=True), flush=True)
+            else:
+                _emit(events)
+            emitted += len(events)
+            since = events[-1].get("event_id")
+            if args.max_events is not None and emitted >= args.max_events:
+                return 0
+        elif args.max_events == 0:
+            return 0
+        time.sleep(args.interval)
+
+
 def cmd_auto(args: argparse.Namespace) -> int:
+    from codex_orchestrator.operator_events import append_operator_event
+    from codex_orchestrator.operator_progress import operator_progress_streamer, should_enable_live_progress
     from codex_orchestrator.stages.auto import run_auto
 
     ctx = _ctx(args)
-    state = run_auto(
-        ctx,
-        master=args.master,
-        resume=args.resume,
-        until=args.until,
+    live_progress = should_enable_live_progress(
         worker_mode=args.worker_mode,
-        use_worktree=args.use_worktree,
-        max_iterations=args.max_iterations,
-        use_lock=True,
+        explicit=args.live_progress,
+        stream=sys.stderr,
     )
+    if live_progress:
+        os.environ["CXOR_LIVE_PROGRESS"] = "1"
+        os.environ["CXOR_LIVE_CODEX_PROGRESS"] = "1"
+        os.environ["CODEX_PROGRESS_STDERR"] = "1"
+        os.environ["CXOR_LIVE_CODEX_PROGRESS_INTERVAL_SECONDS"] = str(int(args.progress_interval_seconds))
+    os.environ["CXOR_LOOP_GOVERNOR_MODE"] = args.loop_governor_mode
+    os.environ["CXOR_MAX_REPEATED_FAILURE_SIGNATURE"] = str(args.max_repeated_failure_signature)
+
+    append_operator_event(
+        ctx.root,
+        event_type="workflow_started",
+        severity="info",
+        stage="AUTO",
+        summary=f"workflow started repo={ctx.root} until={args.until} worker={args.worker_mode}",
+        artifact_paths=[],
+        next_action="Running autonomous workflow.",
+        details={
+            "worker_mode": args.worker_mode,
+            "until": args.until,
+            "use_worktree": args.use_worktree,
+            "max_iterations": args.max_iterations,
+        },
+    )
+    with operator_progress_streamer(
+        ctx.root,
+        enabled=live_progress,
+        progress_format=args.progress_format,
+        interval_seconds=args.progress_interval_seconds,
+        stream=sys.stderr,
+    ):
+        state = run_auto(
+            ctx,
+            master=args.master,
+            resume=args.resume,
+            until=args.until,
+            worker_mode=args.worker_mode,
+            use_worktree=args.use_worktree,
+            max_iterations=args.max_iterations,
+            use_lock=True,
+        )
     print(f"{state.stage} {ctx.root}")
     return 0 if state.stage == args.until else 1
 
@@ -453,6 +653,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     status = sub.add_parser("status")
     _add_repo_flags(status)
+    status.add_argument("--json", action="store_true")
+    status.add_argument("--watch", action="store_true")
+    status.add_argument("--interval", type=float, default=5.0)
+    status.add_argument("--max-iterations", type=int, default=None)
     status.set_defaults(func=cmd_status)
 
     validate_state = sub.add_parser("validate-state")
@@ -510,6 +714,31 @@ def build_parser() -> argparse.ArgumentParser:
     validate_report.add_argument("patchlet_id")
     validate_report.set_defaults(func=cmd_validate_report)
 
+    prompts = sub.add_parser("prompts")
+    _add_repo_flags(prompts)
+    prompts.add_argument("--json", action="store_true")
+    prompts.add_argument("--latest", action="store_true")
+    prompts.add_argument("--attempt", default=None)
+    prompts.add_argument("--patchlet", default=None)
+    prompts.add_argument("--kind", default=None)
+    prompts.add_argument("--show", default=None)
+    prompts.add_argument("--show-path", default=None)
+    prompts.add_argument("--lines", type=int, default=120)
+    prompts.set_defaults(func=cmd_prompts)
+
+    monitor = sub.add_parser("monitor")
+    _add_repo_flags(monitor)
+    monitor.add_argument("--follow", action="store_true")
+    monitor.add_argument("--json", action="store_true")
+    monitor.add_argument("--since", default=None)
+    monitor.add_argument("--attempt", default=None)
+    monitor.add_argument("--patchlet", default=None)
+    monitor.add_argument("--event-type", default=None)
+    monitor.add_argument("--limit", type=int, default=None)
+    monitor.add_argument("--interval", type=float, default=2.0)
+    monitor.add_argument("--max-events", type=int, default=None, help=argparse.SUPPRESS)
+    monitor.set_defaults(func=cmd_monitor)
+
     auto = sub.add_parser("auto")
     _add_repo_flags(auto)
     auto.add_argument("--master", type=Path, default=None)
@@ -518,6 +747,14 @@ def build_parser() -> argparse.ArgumentParser:
     auto.add_argument("--worker-mode", default="mock", choices=["mock", "real_codex", "manual", "ci_only"])
     auto.add_argument("--use-worktree", action="store_true")
     auto.add_argument("--max-iterations", type=int, default=100)
+    auto_progress = auto.add_mutually_exclusive_group()
+    auto_progress.add_argument("--live-progress", dest="live_progress", action="store_true")
+    auto_progress.add_argument("--no-live-progress", dest="live_progress", action="store_false")
+    auto.add_argument("--progress-interval-seconds", type=float, default=15.0)
+    auto.add_argument("--progress-format", choices=["compact", "jsonl"], default="compact")
+    auto.add_argument("--max-repeated-failure-signature", type=int, default=3)
+    auto.add_argument("--loop-governor-mode", choices=["warning", "safe-fail"], default="warning")
+    auto.set_defaults(live_progress=None)
     auto.set_defaults(func=cmd_auto)
 
     runbook = sub.add_parser("real-codex-smoke-runbook")

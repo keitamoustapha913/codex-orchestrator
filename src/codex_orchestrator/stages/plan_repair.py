@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from codex_orchestrator.jsonio import read_json, write_json
+from codex_orchestrator.operator_events import append_operator_event
 from codex_orchestrator.state import load_state, now_iso, transition
 from codex_orchestrator.target_repo import TargetRepoContext
 
@@ -118,6 +119,20 @@ def plan_repair(ctx: TargetRepoContext) -> dict:
     }
     write_json(ctx.paths.repair_plans_dir / f"{plan_id}.json", plan)
     (ctx.paths.repair_plans_dir / f"{plan_id}.md").write_text(f"# {plan_id}\n\n{plan['why']}\n", encoding="utf-8")
+    append_operator_event(
+        ctx.root,
+        event_type="repair_plan_created",
+        severity="info",
+        stage="REPAIR_PLANNING_REQUIRED",
+        summary=f"Repair plan {plan_id} created; {recommended_action.lower().replace('_', ' ')} next.",
+        artifact_paths=[
+            f".codex-orchestrator/repair_plans/{plan_id}.json",
+            f".codex-orchestrator/repair_plans/{plan_id}.md",
+        ],
+        repair_plan_id=plan_id,
+        next_action=next_stage,
+        details={"source_failure_ids": failure_ids, "classification": classification_value},
+    )
     state = load_state(ctx)
     transition(ctx, state, next_stage, reason="repair plan created")
     return plan

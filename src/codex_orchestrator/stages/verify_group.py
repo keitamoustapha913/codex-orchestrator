@@ -4,6 +4,7 @@ from pathlib import Path
 
 from codex_orchestrator.errors import StagePreconditionError
 from codex_orchestrator.jsonio import read_json, write_json
+from codex_orchestrator.operator_events import append_operator_event
 from codex_orchestrator.state import load_state, now_iso, transition
 from codex_orchestrator.target_repo import TargetRepoContext
 from codex_orchestrator.validators.report_validator import ReportValidationError, validate_patchlet_report_file
@@ -137,6 +138,27 @@ def verify_group(ctx: TargetRepoContext, *, transaction_group_id: str) -> dict:
             target_repo=str(ctx.root),
             detail=f"missing patchlet manifest for {transaction_group_id}",
         )
+    append_operator_event(
+        ctx.root,
+        event_type="transaction_group_started",
+        severity="info",
+        stage="TRANSACTION_GROUP_VERIFICATION",
+        summary=f"Started transaction group {transaction_group_id} with {len(required_patchlets)} patchlets.",
+        artifact_paths=[".codex-orchestrator/patchlets/transaction_groups.json"],
+        transaction_group_id=transaction_group_id,
+        next_action="Running transaction group verifier.",
+        details={"patchlet_ids": source_patchlet_ids},
+    )
+    append_operator_event(
+        ctx.root,
+        event_type="verifier_no_prompt",
+        severity="debug",
+        stage="TRANSACTION_GROUP_VERIFICATION",
+        summary=f"Transaction group {transaction_group_id} uses deterministic verifier; no Codex prompt exists.",
+        artifact_paths=[".codex-orchestrator/patchlets/transaction_groups.json"],
+        transaction_group_id=transaction_group_id,
+        terminal_hint="No prompt is generated for this deterministic transaction group verifier.",
+    )
     incomplete = [
         patchlet["patchlet_id"]
         for patchlet in required_patchlets
@@ -259,6 +281,23 @@ def verify_group(ctx: TargetRepoContext, *, transaction_group_id: str) -> dict:
         })
         _save_transaction_groups(ctx, groups)
         transition(ctx, state, "FAILURE_CLASSIFICATION_REQUIRED", reason=f"{transaction_group_id} verification failed")
+        append_operator_event(
+            ctx.root,
+            event_type="transaction_group_failed",
+            severity="error",
+            stage="TRANSACTION_GROUP_VERIFICATION",
+            summary=f"Transaction group {transaction_group_id} failed; repair planning next.",
+            artifact_paths=[
+                ".codex-orchestrator/patchlets/transaction_groups.json",
+                str(matrix_path.relative_to(ctx.root)),
+                str(gate_path.relative_to(ctx.root)),
+                f".codex-orchestrator/failures/{failure_id}.json",
+            ],
+            transaction_group_id=transaction_group_id,
+            failure_id=failure_id,
+            next_action="Classifying transaction group failure.",
+            details={"failed_patchlet_ids": failed_patchlet_ids},
+        )
         return {
             "transaction_group_id": transaction_group_id,
             "status": "FAILED",
@@ -290,6 +329,21 @@ def verify_group(ctx: TargetRepoContext, *, transaction_group_id: str) -> dict:
     })
     _save_transaction_groups(ctx, groups)
     transition(ctx, state, "TRANSACTION_VERIFICATION_COMPLETE", reason=f"{transaction_group_id} verification passed")
+    append_operator_event(
+        ctx.root,
+        event_type="transaction_group_passed",
+        severity="success",
+        stage="TRANSACTION_GROUP_VERIFICATION",
+        summary=f"Transaction group {transaction_group_id} passed.",
+        artifact_paths=[
+            ".codex-orchestrator/patchlets/transaction_groups.json",
+            str(matrix_path.relative_to(ctx.root)),
+            str(gate_path.relative_to(ctx.root)),
+        ],
+        transaction_group_id=transaction_group_id,
+        next_action="Running global verifier.",
+        details={"validated_patchlet_ids": validated_patchlet_ids},
+    )
     return {
         "transaction_group_id": transaction_group_id,
         "status": "PASSED",

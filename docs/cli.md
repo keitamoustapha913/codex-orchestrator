@@ -366,3 +366,42 @@ Diagnosis categories for this path include
 or metadata text alone. After a live smoke, run
 `validate-real-codex-smoke-runbook`, `list-real-codex-smoke-runbooks`, and
 `export-real-codex-smoke-runbook`.
+
+## Direct Auto Operator Visibility
+
+Use direct auto live progress for real-Codex workflows:
+
+```bash
+CODEX_PATCHLET_TIMEOUT_SECONDS=600 \
+uv run --no-sync cxor auto \
+  --repo /tmp/cxor-target \
+  --master /tmp/cxor-target/master_prompt.md \
+  --until DONE \
+  --worker-mode real_codex \
+  --use-worktree \
+  --live-progress
+```
+
+`--no-live-progress` keeps the terminal quiet. `--progress-interval-seconds`
+sets heartbeat spacing. `--progress-format compact` prints concise stage-level
+operator lines, and `--progress-format jsonl` prints structured events. Raw
+Codex JSON and full prompt bodies are not printed by default.
+
+Read-only second-terminal commands:
+
+```bash
+uv run --no-sync cxor monitor --repo /tmp/cxor-target --follow
+uv run --no-sync cxor status --repo /tmp/cxor-target --watch
+uv run --no-sync cxor status --repo /tmp/cxor-target --json
+uv run --no-sync cxor prompts --repo /tmp/cxor-target --latest
+uv run --no-sync cxor prompts --repo /tmp/cxor-target --show PR000001 --lines 160
+```
+
+The workflow writes `.codex-orchestrator/operator_events.jsonl`,
+`.codex-orchestrator/prompt_index.json`, and
+`.codex-orchestrator/loop_governor.json`. `cxor status` distinguishes
+active-but-silent from likely stalled work using durable progress artifacts.
+Repeated repair-loop warnings emit `loop_governor_warning`; explicit
+`--loop-governor-mode safe-fail --max-repeated-failure-signature 3` stops
+repeated identical failures with preserved evidence. Default tests do not run
+real Codex.

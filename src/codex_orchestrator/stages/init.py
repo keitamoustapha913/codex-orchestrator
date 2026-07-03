@@ -6,6 +6,7 @@ from pathlib import Path
 from codex_orchestrator.config import write_default_target_config
 from codex_orchestrator.integration_state import ensure_integration_state
 from codex_orchestrator.jsonio import write_json
+from codex_orchestrator.prompt_index import upsert_prompt_index_entry
 from codex_orchestrator.run_records import init_run_manifest
 from codex_orchestrator.state import new_state, save_state, sha256_file
 from codex_orchestrator.target_repo import TargetRepoContext
@@ -56,6 +57,19 @@ def init_workflow(
         if not master_path.exists():
             raise FileNotFoundError(f"Master prompt does not exist: {master_path}")
         shutil.copyfile(master_path, ctx.paths.master_prompt)
+        upsert_prompt_index_entry(ctx.root, {
+            "kind": "master_prompt",
+            "stage": "MASTER_PROMPT_SAVED",
+            "title": "Master prompt",
+            "summary": "Copied master prompt for this workflow.",
+            "path": ctx.paths.master_prompt,
+            "patchlet_id": None,
+            "attempt_id": None,
+            "model": None,
+            "reasoning": None,
+            "contracts": [],
+            "artifact_paths": [],
+        })
         state_stage = "MASTER_PROMPT_SAVED"
 
     if not ctx.paths.run_manifest.exists():

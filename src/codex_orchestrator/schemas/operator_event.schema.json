@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "artifact_paths": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "attempt_id": {
+      "type": "string"
+    },
+    "created_at": {
+      "type": "string"
+    },
+    "details": {
+      "type": "object"
+    },
+    "event_id": {
+      "pattern": "^OE[0-9]{6}$",
+      "type": "string"
+    },
+    "event_type": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "failure_id": {
+      "type": "string"
+    },
+    "kind": {
+      "const": "operator_event"
+    },
+    "next_action": {
+      "type": "string"
+    },
+    "patchlet_id": {
+      "type": "string"
+    },
+    "prompt_id": {
+      "type": "string"
+    },
+    "prompt_path": {
+      "type": "string"
+    },
+    "repair_plan_id": {
+      "type": "string"
+    },
+    "run_id": {
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "1.0"
+    },
+    "severity": {
+      "enum": [
+        "info",
+        "warning",
+        "error",
+        "success",
+        "debug"
+      ],
+      "type": "string"
+    },
+    "stage": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "summary": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "terminal_hint": {
+      "type": "string"
+    },
+    "transaction_group_id": {
+      "type": "string"
+    },
+    "verifier_id": {
+      "type": "string"
+    },
+    "workflow_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_version",
+    "kind",
+    "event_id",
+    "created_at",
+    "event_type",
+    "severity",
+    "stage",
+    "summary",
+    "artifact_paths"
+  ],
+  "type": "object"
+}

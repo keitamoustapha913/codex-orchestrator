@@ -22,6 +22,7 @@ from codex_orchestrator.live_progress import (
     resolve_live_progress_policy,
 )
 from codex_orchestrator.patchlet_run_context import PatchletRunContext
+from codex_orchestrator.prompt_index import upsert_prompt_index_entry
 from codex_orchestrator.target_repo import TargetRepoContext
 from codex_orchestrator.worker_capsule import (
     final_report_contract_text,
@@ -170,6 +171,27 @@ class CodexExecWorker(Worker):
             + python_runtime_side_effect_contract_text()
         )
         attempt_prompt_path.write_text(attempt_prompt_text, encoding="utf-8")
+        upsert_prompt_index_entry(ctx.root, {
+            "kind": "repair_worker_prompt" if patchlet.get("is_repair_patchlet") else "patchlet_worker_prompt",
+            "stage": "PATCHLET_EXECUTION_IN_PROGRESS",
+            "patchlet_id": patchlet_id,
+            "attempt_id": run_dir.name,
+            "repair_plan_id": patchlet.get("repair_plan_id"),
+            "failure_ids": patchlet.get("source_failure_ids", []),
+            "title": f"{allowed_file} — {patchlet_id}",
+            "summary": f"Worker prompt for patchlet {patchlet_id}.",
+            "path": attempt_prompt_path,
+            "subprompt_path": patchlet.get("subprompt_path"),
+            "model": self.codex_model,
+            "reasoning": self.codex_reasoning,
+            "contracts": [
+                "TASK_CONTRACT.md",
+                "REPORT_SCHEMA_CONTRACT.md",
+                "FINAL_REPORT_CONTRACT.md",
+                "PYTHON_RUNTIME_SIDE_EFFECT_CONTRACT.md",
+            ],
+            "artifact_paths": [str(attempt_prompt_path)],
+        })
 
         def write_progress_event(payload: dict) -> None:
             progress_path.parent.mkdir(parents=True, exist_ok=True)

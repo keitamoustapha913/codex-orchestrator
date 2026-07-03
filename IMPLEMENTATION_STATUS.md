@@ -325,3 +325,26 @@ Release evidence preserved for v0.1.0-rc1:
 
 The final explicit installed real-Codex operator smoke reached `DONE`; the
 bundle validated with no errors or warnings and exported successfully.
+
+Implemented: direct auto operator visibility and long-run control. Direct
+`cxor auto` now supports `--live-progress`, `--no-live-progress`,
+`--progress-interval-seconds`, and `--progress-format compact|jsonl`. Compact
+progress is concise and does not print raw Codex JSON or full prompt bodies.
+Durable operator events are written to
+`.codex-orchestrator/operator_events.jsonl`.
+
+Implemented: prompt visibility through `.codex-orchestrator/prompt_index.json`
+and the read-only `cxor prompts` command. Operators can list prompt metadata
+with `cxor prompts --repo <repo> --latest` and explicitly show prompt bodies
+with `cxor prompts --repo <repo> --show PR000001 --lines 160`.
+
+Implemented: read-only `cxor monitor --repo <repo> --follow` and
+`cxor status --repo <repo> --watch`. `cxor status --json` reports active,
+silent_but_active, likely_stalled, done, and failed classifications with
+current patchlet, current attempt, active prompt path, last progress age, and
+next action.
+
+Implemented: loop governance through `.codex-orchestrator/loop_governor.json`.
+Repeated repair-loop warnings emit `loop_governor_warning`; explicit safe
+failure is configured with `--loop-governor-mode safe-fail
+--max-repeated-failure-signature 3`. Default tests do not run real Codex.

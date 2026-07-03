@@ -254,3 +254,50 @@ Structured categories such as
 `network_or_api_error`. `network_or_api_error` requires actual external error
 evidence. After each live smoke, run `validate-real-codex-smoke-runbook`,
 `list-real-codex-smoke-runbooks`, and `export-real-codex-smoke-runbook`.
+
+## Direct Auto Visibility After Smoke Hardening
+
+For manual direct real-Codex operation, use:
+
+```bash
+CODEX_PATCHLET_TIMEOUT_SECONDS=600 \
+uv run --no-sync cxor auto \
+  --repo /tmp/cxor-target \
+  --master /tmp/cxor-target/master_prompt.md \
+  --until DONE \
+  --worker-mode real_codex \
+  --use-worktree \
+  --live-progress
+```
+
+Direct auto progress is based on `.codex-orchestrator/operator_events.jsonl`.
+Use `--no-live-progress` for quiet mode, `--progress-interval-seconds` for
+heartbeats, and `--progress-format jsonl` for structured event lines. It does
+not print raw Codex JSON or full prompt bodies.
+
+Read-only visibility commands:
+
+```bash
+uv run --no-sync cxor monitor --repo /tmp/cxor-target --follow
+uv run --no-sync cxor status --repo /tmp/cxor-target --watch
+uv run --no-sync cxor prompts --repo /tmp/cxor-target --latest
+uv run --no-sync cxor prompts --repo /tmp/cxor-target --show PR000001 --lines 160
+```
+
+Prompts are indexed in `.codex-orchestrator/prompt_index.json`. Repeated repair
+loops are tracked in `.codex-orchestrator/loop_governor.json`; warnings surface
+as `loop_governor_warning`, and safe-fail mode is explicit:
+
+```bash
+uv run --no-sync cxor auto \
+  --repo /tmp/cxor-target \
+  --master /tmp/cxor-target/master_prompt.md \
+  --until DONE \
+  --worker-mode real_codex \
+  --use-worktree \
+  --live-progress \
+  --loop-governor-mode safe-fail \
+  --max-repeated-failure-signature 3
+```
+
+Default tests do not invoke real Codex.

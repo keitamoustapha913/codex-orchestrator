@@ -6,6 +6,9 @@ from pathlib import Path
 
 from codex_orchestrator.errors import StagePreconditionError
 from codex_orchestrator.jsonio import read_json, write_json
+from codex_orchestrator.loop_governor import read_loop_governor
+from codex_orchestrator.operator_events import append_operator_event
+from codex_orchestrator.prompt_index import upsert_prompt_index_entry
 from codex_orchestrator.worker_capsule import final_report_contract_text, report_schema_contract_text
 from codex_orchestrator.state import load_state, transition
 from codex_orchestrator.target_repo import TargetRepoContext
@@ -107,6 +110,14 @@ def regenerate_patchlets(ctx: TargetRepoContext, *, from_repair_plan: str = "lat
             current_stage=state.stage,
             target_repo=str(ctx.root),
             detail="wrong non-terminal state",
+        )
+    governor = read_loop_governor(ctx.root)
+    if governor.get("blocked"):
+        raise StagePreconditionError(
+            "regenerate-patchlets",
+            current_stage=state.stage,
+            target_repo=str(ctx.root),
+            detail=governor.get("blocked_reason") or "loop governor blocked patchlet regeneration",
         )
 
     if from_repair_plan != "latest":
@@ -217,6 +228,25 @@ def regenerate_patchlets(ctx: TargetRepoContext, *, from_repair_plan: str = "lat
             + _real_codex_contract_text(),
             encoding="utf-8",
         )
+        upsert_prompt_index_entry(ctx.root, {
+            "kind": "repair_subprompt",
+            "stage": "PATCHLET_REGENERATION_REQUIRED",
+            "patchlet_id": patchlet_id,
+            "attempt_id": None,
+            "repair_plan_id": repair_plan_id,
+            "failure_ids": plan["source_failure_ids"],
+            "title": f"{source_patchlet['allowed_product_runtime_file']} — repair {patchlet_id}",
+            "summary": f"Repair subprompt for {patchlet_id}.",
+            "path": subprompt,
+            "subprompt_path": subprompt_rel,
+            "model": None,
+            "reasoning": None,
+            "contracts": [
+                "REPORT_SCHEMA_CONTRACT.md",
+                "FINAL_REPORT_CONTRACT.md",
+            ],
+            "artifact_paths": [subprompt_rel],
+        })
         patchlet_ids = [patchlet_id]
     else:
         patchlet_ids = [existing["patchlet_id"]]
@@ -237,4 +267,18 @@ def regenerate_patchlets(ctx: TargetRepoContext, *, from_repair_plan: str = "lat
         if patchlet_id not in state.pending_patchlets:
             state.pending_patchlets.append(patchlet_id)
     transition(ctx, state, "PATCHLETS_READY", reason=f"{repair_plan_id} regenerated repair patchlets")
+    append_operator_event(
+        ctx.root,
+        event_type="repair_patchlets_regenerated",
+        severity="info",
+        stage="PATCHLET_REGENERATION_REQUIRED",
+        summary=f"Regenerated repair patchlets {', '.join(patchlet_ids)} from {repair_plan_id}.",
+        artifact_paths=[
+            ".codex-orchestrator/patchlets/patchlet_index.json",
+            *[f".codex-orchestrator/subprompts/{patchlet_id[1:]}_repair.md" for patchlet_id in patchlet_ids],
+        ],
+        repair_plan_id=repair_plan_id,
+        next_action="Running regenerated repair patchlets.",
+        details={"patchlet_ids": patchlet_ids},
+    )
     return {"repair_plan_id": repair_plan_id, "patchlet_ids": patchlet_ids}
