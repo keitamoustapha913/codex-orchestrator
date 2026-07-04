@@ -19,30 +19,32 @@ def _docs_text() -> str:
     return "\n".join(path.read_text(encoding="utf-8") for path in DOC_PATHS)
 
 
-def test_docs_explain_semantic_goal_spec():
-    assert "semantic_goal_spec.json" in _docs_text()
+def test_docs_explain_goal_interpretation_artifacts():
+    assert "goal_interpretation/goal_interpretation.json" in _docs_text()
 
 
-def test_docs_explain_structured_criteria():
+def test_docs_explain_model_mediated_planning():
     text = _docs_text()
-    assert "structured" in text
-    assert "criteria" in text
+    assert "model-mediated goal interpretation" in text
+    assert "proof planning" in text
+    assert "probe planning" in text
 
 
-def test_docs_explain_python_main_return_parser():
+def test_docs_explain_no_python_main_return_parser():
     text = _docs_text()
-    assert "Python main-return" in text or "Python main return" in text
-    assert "app.main()" in text
+    assert "no longer supports" in text
+    assert "Python-specific" in text
+    assert "app.main-specific" in text
 
 
-def test_docs_explain_goal_satisfaction_gate():
-    assert "goal_satisfaction_gate_result.json" in _docs_text()
+def test_docs_explain_goal_coverage_gate():
+    assert "goal_coverage_gate_result.json" in _docs_text()
 
 
-def test_docs_explain_semantic_goal_runner():
+def test_docs_explain_independent_probe_rerun():
     text = _docs_text()
-    assert "semantic goal runner" in text
-    assert "semantic_goal_check_result.json" in text
+    assert "independent_probe_rerun_result.json" in text
+    assert "orchestrator-owned rerun or validation" in text or "independent proof rerun or validation" in text
 
 
 def test_docs_explain_verified_no_change_requires_goal_proof():
@@ -51,32 +53,30 @@ def test_docs_explain_verified_no_change_requires_goal_proof():
     assert "independent" in text
 
 
-def test_docs_explain_done_requires_semantic_pass_for_structured_goals():
+def test_docs_explain_done_requires_master_prompt_satisfaction():
     text = _docs_text()
     assert "DONE" in text
-    assert "semantic pass" in text
-    assert "structured goals" in text
+    assert "master-prompt satisfaction" in text
 
 
-def test_docs_explain_semantic_goal_unsatisfied_diagnosis():
-    assert "semantic_goal_unsatisfied" in _docs_text()
+def test_docs_explain_missing_decomposition_no_fallback():
+    assert "do not fall back" in _docs_text()
 
 
-def test_docs_explain_status_semantic_goal_fields():
+def test_docs_explain_status_master_prompt_fields():
     text = _docs_text()
     assert "cxor status --json" in text
-    assert "semantic_goal" in text
+    assert "master_prompt" in text or "master-prompt" in text
 
 
-def test_docs_include_ok_vs_me_false_positive_example():
+def test_docs_include_one_file_patchlet_rule():
     text = _docs_text()
-    assert '"ok"' in text
-    assert '"me"' in text
-    assert "does not satisfy" in text
+    assert "exactly one allowed product/runtime file" in text
+    assert "Multiple patchlets may target the same file" in text
 
 
-def test_usage_guide_mentions_semantic_goal_satisfaction():
+def test_usage_guide_mentions_master_prompt_satisfaction():
     text = Path("docs/Codex_Orchestrator_Step_By_Step_Usage_Guide.md").read_text(
         encoding="utf-8"
     )
-    assert "Semantic Goal Satisfaction" in text
+    assert "Master Prompt Satisfaction" in text

@@ -5,6 +5,7 @@ from pathlib import Path
 from conftest import read_json, run
 
 from codex_orchestrator.independent_probe_rerun import run_independent_probe_rerun_gate
+from codex_orchestrator.jsonio import write_json
 from codex_orchestrator.stages.init import init_workflow
 from codex_orchestrator.stages.normalize import normalize_master_prompt
 from codex_orchestrator.target_repo import resolve_target_repo
@@ -37,10 +38,17 @@ def _run_gate(ctx):
     )
 
 
+def _set_probe_command(ctx, command: str):
+    plan = read_json(ctx.paths.workflow_dir / "probe_plan.json")
+    plan["probes"][0]["command"] = command
+    write_json(ctx.paths.workflow_dir / "probe_plan.json", plan)
+
+
 def test_worker_proof_alone_does_not_prove_obligation(git_repo: Path):
     ctx = _ctx(git_repo, "ok")
     obligations = read_json(ctx.paths.workflow_dir / "proof_obligations.json")
     obligations["obligations"][0]["status"] = "PROVEN_BY_WORKER"
+    _set_probe_command(ctx, "false")
     assert _run_gate(ctx)["accepted"] is False
 
 
@@ -51,13 +59,16 @@ def test_orchestrator_rerun_proves_obligation(git_repo: Path):
 
 def test_rerun_expected_actual_mismatch_fails(git_repo: Path):
     ctx = _ctx(git_repo, "ok")
+    _set_probe_command(ctx, "false")
     assert _run_gate(ctx)["accepted"] is False
 
 
-def test_rerun_records_expected_and_actual(git_repo: Path):
+def test_rerun_records_expected_and_actual_observation(git_repo: Path):
     ctx = _ctx(git_repo, "ok")
+    _set_probe_command(ctx, "printf observed")
     row = _run_gate(ctx)["probe_results"][0]
-    assert row["expected_actual"] == {"expected": "me", "actual": "ok"}
+    assert row["expected_actual"]["expected"] == {"type": "exit_code_zero"}
+    assert row["expected_actual"]["actual"] == "observed"
 
 
 def test_rerun_stdout_stderr_are_persisted(git_repo: Path):
@@ -80,6 +91,7 @@ def test_rerun_does_not_create_pycache(git_repo: Path):
 
 def test_failed_rerun_creates_failure_signature_independent_probe_rerun_failed(git_repo: Path):
     ctx = _ctx(git_repo, "ok")
+    _set_probe_command(ctx, "false")
     assert _run_gate(ctx)["failure_signature"] == "independent_probe_rerun_failed"
 
 
@@ -91,6 +103,6 @@ def test_probe_not_rerunnable_blocks_required_obligation(git_repo: Path):
     assert result["failure_signature"] == "probe_not_rerunnable"
 
 
-def test_app_main_semantic_runner_integrates_as_independent_probe(git_repo: Path):
+def test_model_planned_command_integrates_as_independent_probe(git_repo: Path):
     ctx = _ctx(git_repo)
-    assert _run_gate(ctx)["probe_results"][0]["command"].startswith("PYTHONDONTWRITEBYTECODE=1")
+    assert _run_gate(ctx)["probe_results"][0]["command"] == "true"

@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from pathlib import Path
 
 import pytest
+
+
+os.environ.setdefault("CXOR_PLANNING_MODEL_STUB", "1")
 
 
 def run(args: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:

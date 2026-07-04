@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import os
+
 from codex_orchestrator.jsonio import read_json, write_json
 from codex_orchestrator.state import load_state, transition
 from codex_orchestrator.target_repo import TargetRepoContext
+from codex_orchestrator.codex_execution_policy import resolve_patchlet_timeout_seconds
+from codex_orchestrator.work_decomposition import build_work_decomposition_plan
 
 
 def extract_invariants(ctx: TargetRepoContext) -> list[dict]:
@@ -43,6 +47,23 @@ def extract_invariants(ctx: TargetRepoContext) -> list[dict]:
         "invariants": [invariant],
     }
     write_json(ctx.paths.invariants, document)
+    required_for_decomposition = [
+        ctx.paths.inventory_graph,
+        ctx.paths.workflow_dir / "proof_obligations.json",
+        ctx.paths.workflow_dir / "goal_interpretation.json",
+        ctx.paths.workflow_dir / "master_prompt_frozen.json",
+        ctx.paths.workflow_dir / "probe_plan.json",
+    ]
+    if all(path.exists() for path in required_for_decomposition):
+        build_work_decomposition_plan(
+            repo_root=ctx.root,
+            workflow_root=ctx.paths.workflow_dir,
+            inventory_graph=read_json(ctx.paths.inventory_graph),
+            proof_obligations=read_json(ctx.paths.workflow_dir / "proof_obligations.json"),
+            goal_interpretation=read_json(ctx.paths.workflow_dir / "goal_interpretation.json"),
+            master_prompt_frozen=read_json(ctx.paths.workflow_dir / "master_prompt_frozen.json"),
+            timeout_seconds=resolve_patchlet_timeout_seconds(os.environ),
+        )
     state = load_state(ctx)
     transition(ctx, state, "INVARIANTS_READY", reason="invariants extracted")
     return [invariant]

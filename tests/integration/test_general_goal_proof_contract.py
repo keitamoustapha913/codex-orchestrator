@@ -48,7 +48,7 @@ def test_obligation_references_source_span(git_repo: Path):
 
 def test_obligation_records_evidence_requirements(git_repo: Path):
     ctx = _ctx(git_repo)
-    assert "orchestrator_rerun" in read_json(ctx.paths.workflow_dir / "proof_obligations.json")["obligations"][0]["evidence_requirements"]
+    assert "orchestrator_rerun_or_validation" in read_json(ctx.paths.workflow_dir / "proof_obligations.json")["obligations"][0]["evidence_requirements"]
 
 
 def test_obligation_status_lifecycle_unproven_to_worker_to_orchestrator(git_repo: Path):
@@ -59,11 +59,11 @@ def test_obligation_status_lifecycle_unproven_to_worker_to_orchestrator(git_repo
     assert orch["obligations"][0]["status"] == "PROVEN_BY_ORCHESTRATOR"
 
 
-def test_app_main_semantic_fast_path_maps_to_proof_obligation(git_repo: Path):
+def test_model_mediated_goal_maps_to_proof_obligation(git_repo: Path):
     ctx = _ctx(git_repo)
     obligation = read_json(ctx.paths.workflow_dir / "proof_obligations.json")["obligations"][0]
-    assert obligation["metadata"]["semantic_criterion_id"] == "SGC001"
-    assert obligation["acceptance_rule"]["expected"] == "me"
+    assert obligation["proof_strategy"] == "executable_probe"
+    assert obligation["goal_item_ids"] == ["GI001"]
 
 
 def test_missing_obligation_blocks_provability(git_repo: Path):

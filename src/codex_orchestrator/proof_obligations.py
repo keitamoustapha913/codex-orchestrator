@@ -3,45 +3,65 @@ from __future__ import annotations
 from typing import Any
 
 from codex_orchestrator.state import now_iso
+from codex_orchestrator.validators.schema_validator import validate_json
 
 
-def build_proof_obligations(
+def normalize_proof_obligations(
     *,
     master_prompt_frozen: dict[str, Any],
     goal_interpretation: dict[str, Any],
-    semantic_goal_spec: dict[str, Any] | None,
+    model_output: dict[str, Any],
 ) -> dict[str, Any]:
-    obligations: list[dict[str, Any]] = []
-    criteria = (semantic_goal_spec or {}).get("criteria", [])
-    if criteria and goal_interpretation.get("interpretation_status") == "CONCORDANT":
-        criterion = criteria[0]
-        obligations.append(
-            {
-                "obligation_id": "PO001",
-                "goal_item_ids": ["GI001"],
-                "source_span_ids": goal_interpretation["goal_items"][0].get("source_span_ids", []),
-                "obligation_type": "behavioral_runtime_claim",
-                "statement": "The accepted integration state satisfies the requested runtime behavior.",
-                "required": True,
-                "proof_kind": "executable_probe",
-                "evidence_requirements": ["direct_probe", "expected_actual_record", "orchestrator_rerun"],
-                "acceptance_rule": {"type": "expected_actual_equal", "expected": criterion.get("expected_value")},
-                "status": "UNPROVEN",
-                "evidence_paths": [],
-                "last_updated_at": None,
-                "metadata": {"semantic_criterion_id": criterion.get("criterion_id")},
-            }
-        )
-    return {
-        "schema_version": "1.0",
-        "kind": "proof_obligations",
-        "workflow_id": master_prompt_frozen.get("workflow_id"),
-        "run_id": master_prompt_frozen.get("run_id"),
-        "master_prompt_sha256": master_prompt_frozen.get("sha256"),
-        "master_prompt_frozen_path": ".codex-orchestrator/master_prompt_frozen.json",
-        "goal_interpretation_path": ".codex-orchestrator/goal_interpretation.json",
-        "obligations": obligations,
-    }
+    normalized = dict(model_output)
+    normalized.setdefault("schema_version", "1.0")
+    normalized.setdefault("kind", "proof_obligations")
+    normalized.setdefault("workflow_id", master_prompt_frozen.get("workflow_id"))
+    normalized.setdefault("run_id", master_prompt_frozen.get("run_id"))
+    normalized.setdefault("master_prompt_sha256", master_prompt_frozen.get("sha256"))
+    normalized.setdefault("master_prompt_frozen_path", ".codex-orchestrator/master_prompt_frozen.json")
+    normalized.setdefault("goal_interpretation_path", ".codex-orchestrator/goal_interpretation/goal_interpretation.json")
+    for obligation in normalized.get("obligations", []):
+        if "proof_kind" not in obligation and "proof_strategy" in obligation:
+            obligation["proof_kind"] = obligation["proof_strategy"]
+        if "proof_strategy" not in obligation and "proof_kind" in obligation:
+            obligation["proof_strategy"] = obligation["proof_kind"]
+    return normalized
+
+
+def validate_proof_obligations(*, proof_obligations: dict[str, Any], goal_interpretation: dict[str, Any], master_prompt_frozen: dict[str, Any]) -> None:
+    errors = validate_json(proof_obligations, "proof_obligations.schema.json")
+    if proof_obligations.get("master_prompt_sha256") != master_prompt_frozen.get("sha256"):
+        errors.append("proof obligations master prompt hash does not match frozen master prompt")
+    goal_ids = {item.get("goal_item_id") for item in goal_interpretation.get("goal_items", [])}
+    required_goal_ids = {item.get("goal_item_id") for item in goal_interpretation.get("goal_items", []) if item.get("required") is True}
+    span_ids = {span.get("span_id") for span in master_prompt_frozen.get("source_spans", [])}
+    covered_goal_ids: set[str] = set()
+    for obligation in proof_obligations.get("obligations", []):
+        oid = obligation.get("obligation_id")
+        if obligation.get("required") is True:
+            covered_goal_ids.update(obligation.get("goal_item_ids", []))
+        if not obligation.get("goal_item_ids"):
+            errors.append(f"{oid} missing goal_item_ids")
+        for goal_id in obligation.get("goal_item_ids", []):
+            if goal_id not in goal_ids:
+                errors.append(f"{oid} references unknown goal item {goal_id}")
+        if not obligation.get("source_span_ids"):
+            errors.append(f"{oid} missing source_span_ids")
+        for span_id in obligation.get("source_span_ids", []):
+            if span_id not in span_ids:
+                errors.append(f"{oid} references unknown source span {span_id}")
+        if not (obligation.get("proof_strategy") or obligation.get("proof_kind")):
+            errors.append(f"{oid} missing proof strategy")
+        if not obligation.get("evidence_requirements"):
+            errors.append(f"{oid} missing evidence requirements")
+        claim = str(obligation.get("claim") or obligation.get("statement") or "").strip()
+        if len(claim) < 12 or claim.lower() in {"prove it", "works", "verify behavior"}:
+            errors.append(f"{oid} has vague claim")
+    missing = sorted(required_goal_ids - covered_goal_ids)
+    if missing:
+        errors.append(f"required goal items lack proof obligations: {', '.join(missing)}")
+    if errors:
+        raise ValueError("; ".join(errors))
 
 
 def update_obligation_status(

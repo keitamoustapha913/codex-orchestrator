@@ -4,7 +4,6 @@ from pathlib import Path
 
 from conftest import read_json, run
 
-from codex_orchestrator.goal_interpretation import build_goal_interpretation
 from codex_orchestrator.stages.init import init_workflow
 from codex_orchestrator.stages.normalize import normalize_master_prompt
 from codex_orchestrator.target_repo import resolve_target_repo
@@ -29,6 +28,8 @@ def test_goal_interpretation_written_after_master_prompt_freeze(git_repo: Path):
     ctx = _normalized(git_repo)
     assert (ctx.paths.workflow_dir / "master_prompt_frozen.json").exists()
     assert (ctx.paths.workflow_dir / "goal_interpretation.json").exists()
+    assert (ctx.paths.workflow_dir / "goal_interpretation/model_request.json").exists()
+    assert (ctx.paths.workflow_dir / "goal_interpretation/model_response.raw.json").exists()
 
 
 def test_goal_interpretation_references_master_prompt_hash(git_repo: Path):
@@ -47,14 +48,14 @@ def test_goal_item_references_master_prompt_span(git_repo: Path):
 def test_goal_interpretation_records_goal_summary(git_repo: Path):
     ctx = _normalized(git_repo)
     interpretation = read_json(ctx.paths.workflow_dir / "goal_interpretation.json")
-    assert "app.main()" in interpretation["goal_summary"]
+    assert interpretation["goal_summary"]
 
 
 def test_goal_interpretation_records_ambiguity(git_repo: Path):
     ctx = _normalized(git_repo, "Make the project delightful.")
-    interpretation = read_json(ctx.paths.workflow_dir / "goal_interpretation.json")
-    assert interpretation["interpretation_status"] in {"AMBIGUOUS", "INCOMPLETE"}
-    assert interpretation["ambiguities"]
+    validation = read_json(ctx.paths.workflow_dir / "goal_interpretation/validation_result.json")
+    assert validation["accepted"] is False
+    assert read_json(ctx.paths.workflow_dir / "provability/provability_result.json")["can_start_product_patchlets"] is False
 
 
 def test_goal_interpretation_schema_validates(git_repo: Path):
@@ -69,23 +70,21 @@ def test_goal_interpretation_does_not_mark_goal_proven(git_repo: Path):
     assert "proven" not in interpretation
 
 
-def test_app_main_semantic_goal_creates_goal_item(git_repo: Path):
+def test_app_prompt_does_not_create_app_main_semantic_goal_item(git_repo: Path):
     ctx = _normalized(git_repo)
     interpretation = read_json(ctx.paths.workflow_dir / "goal_interpretation.json")
-    assert interpretation["goal_items"][0]["desired_state"] == 'app.main() returns "me"'
-    assert interpretation["goal_items"][0]["metadata"]["semantic_criterion_id"] == "SGC001"
+    assert "app.main" not in str(interpretation)
+    assert "semantic_criterion_id" not in str(interpretation)
 
 
 def test_unsupported_semantic_goal_creates_non_proven_interpretation(git_repo: Path):
     ctx = _normalized(git_repo, "Make the project delightful.")
-    interpretation = read_json(ctx.paths.workflow_dir / "goal_interpretation.json")
-    assert interpretation["proof_not_claimed_here"] is True
-    assert interpretation["interpretation_status"] != "CONCORDANT"
+    result = read_json(ctx.paths.workflow_dir / "provability/goal_not_provable_result.json")
+    assert result["status"] == "SAFE_FAILURE"
 
 
-def test_build_goal_interpretation_is_pure_for_supplied_payload(git_repo: Path):
+def test_goal_interpretation_authoritative_artifact_is_stage_scoped(git_repo: Path):
     ctx = _normalized(git_repo)
-    frozen = read_json(ctx.paths.workflow_dir / "master_prompt_frozen.json")
-    semantic = read_json(ctx.paths.workflow_dir / "semantic_goal_spec.json")
-    interpretation = build_goal_interpretation(master_prompt_frozen=frozen, semantic_goal_spec=semantic)
-    assert interpretation["workflow_id"] == "WF000001"
+    assert read_json(ctx.paths.workflow_dir / "goal_interpretation.json") == read_json(
+        ctx.paths.workflow_dir / "goal_interpretation/goal_interpretation.json"
+    )

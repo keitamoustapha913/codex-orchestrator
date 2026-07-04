@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
+import os
+import subprocess
 
 from codex_orchestrator.jsonio import write_json
 from codex_orchestrator.paths import relative_to_repo
-from codex_orchestrator.semantic_goal_runner import run_semantic_goal_checks
-from codex_orchestrator.semantic_goals import load_semantic_goal_spec
 
 
 def run_independent_probe_rerun_gate(
@@ -23,26 +23,21 @@ def run_independent_probe_rerun_gate(
     gate_dir = workflow_root / "runs" / attempt_id / "gates"
     out_dir = gate_dir / "independent_probe_rerun"
     out_dir.mkdir(parents=True, exist_ok=True)
-    semantic_spec = load_semantic_goal_spec(repo_root)
     probe_results: list[dict[str, Any]] = []
     proven: list[str] = []
     failed_obligations: list[str] = []
     blocked: list[str] = []
-    check = run_semantic_goal_checks(
-        repo_root=repo_root,
-        execution_root=execution_root,
-        integration_ref=integration_ref,
-        semantic_goal_spec=semantic_spec or {"semantic_mode": "unsupported", "criteria": []},
-        patchlet_id=patchlet_id,
-        attempt_id=attempt_id,
-    )
-    rows = check.get("criteria", [])
     for probe in probe_plan.get("probes", []):
         if probe.get("rerunnable_by_orchestrator") is not True:
             blocked.append(probe["probe_id"])
             failed_obligations.extend(probe.get("obligation_ids", []))
             continue
-        row = rows[0] if rows else {}
+        row = _run_probe(
+            repo_root=repo_root,
+            execution_root=execution_root or repo_root,
+            out_dir=out_dir,
+            probe=probe,
+        )
         stdout_path = row.get("stdout_path")
         stderr_path = row.get("stderr_path")
         passed = row.get("passed") is True
@@ -55,7 +50,7 @@ def run_independent_probe_rerun_gate(
             {
                 "probe_id": probe["probe_id"],
                 "obligation_ids": obligation_ids,
-                "command": probe.get("command"),
+                "command": row.get("command") or probe.get("command"),
                 "execution_context": probe.get("execution_context"),
                 "exit_code": row.get("exit_code", 1),
                 "passed": passed,
@@ -85,3 +80,75 @@ def run_independent_probe_rerun_gate(
     }
     write_json(gate_dir / "independent_probe_rerun_result.json", result)
     return result
+
+
+def _run_probe(*, repo_root: Path, execution_root: Path, out_dir: Path, probe: dict[str, Any]) -> dict[str, Any]:
+    probe_id = probe["probe_id"]
+    stdout_path = out_dir / f"{probe_id}.stdout.txt"
+    stderr_path = out_dir / f"{probe_id}.stderr.txt"
+    command = probe.get("command")
+    script_path = probe.get("script_path")
+    if command:
+        proc = subprocess.run(
+            command,
+            cwd=execution_root,
+            env=os.environ.copy(),
+            shell=True,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+    elif script_path:
+        script = execution_root / script_path
+        proc = subprocess.run(
+            [str(script)],
+            cwd=execution_root,
+            env=os.environ.copy(),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        command = str(script_path)
+    elif probe.get("expected_observation", {}).get("type") == "artifact_exists":
+        rel_path = probe.get("expected_observation", {}).get("path")
+        exists = bool(rel_path) and (execution_root / rel_path).exists()
+        stdout_path.write_text("artifact exists\n" if exists else "artifact missing\n", encoding="utf-8")
+        stderr_path.write_text("", encoding="utf-8")
+        return {
+            "command": "artifact_exists",
+            "exit_code": 0 if exists else 1,
+            "passed": exists,
+            "expected_value": rel_path,
+            "actual_value": "exists" if exists else "missing",
+            "stdout_path": relative_to_repo(repo_root, stdout_path),
+            "stderr_path": relative_to_repo(repo_root, stderr_path),
+        }
+    else:
+        stdout_path.write_text("", encoding="utf-8")
+        stderr_path.write_text("probe has no command, script_path, or supported expected_observation\n", encoding="utf-8")
+        return {
+            "command": None,
+            "exit_code": 1,
+            "passed": False,
+            "expected_value": probe.get("expected_observation"),
+            "actual_value": None,
+            "stdout_path": relative_to_repo(repo_root, stdout_path),
+            "stderr_path": relative_to_repo(repo_root, stderr_path),
+        }
+    stdout_path.write_text(proc.stdout, encoding="utf-8")
+    stderr_path.write_text(proc.stderr, encoding="utf-8")
+    expected = probe.get("expected_observation") or {}
+    passed = proc.returncode == 0
+    if expected.get("type") == "stdout_contains":
+        passed = passed and str(expected.get("value", "")) in proc.stdout
+    return {
+        "command": command,
+        "exit_code": proc.returncode,
+        "passed": passed,
+        "expected_value": expected or "exit_code_zero",
+        "actual_value": proc.stdout.strip(),
+        "stdout_path": relative_to_repo(repo_root, stdout_path),
+        "stderr_path": relative_to_repo(repo_root, stderr_path),
+    }

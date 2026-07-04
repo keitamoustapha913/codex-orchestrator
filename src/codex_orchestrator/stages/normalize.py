@@ -4,17 +4,25 @@ import re
 
 from codex_orchestrator.jsonio import write_json
 from codex_orchestrator.master_prompt_source import freeze_master_prompt
+from codex_orchestrator.model_planning import (
+    PlanningModelError,
+    build_goal_interpretation_request,
+    build_probe_planning_request,
+    build_proof_planning_request,
+    create_planning_model_client,
+    run_planning_model,
+    write_validation_result,
+)
 from codex_orchestrator.prompt_index import upsert_prompt_index_entry
 from codex_orchestrator.operator_events import append_operator_event
-from codex_orchestrator.semantic_goals import compile_semantic_goal_spec, semantic_goal_summary
 from pathlib import Path
 
-from codex_orchestrator.goal_interpretation import build_goal_interpretation, validate_goal_interpretation
+from codex_orchestrator.goal_interpretation import normalize_goal_interpretation, validate_goal_interpretation
 from codex_orchestrator.goal_progress import update_goal_progress
 from codex_orchestrator.state import load_state, transition
-from codex_orchestrator.probe_plan import build_probe_plan, validate_probe_plan_for_required_obligations
-from codex_orchestrator.proof_obligations import build_proof_obligations
-from codex_orchestrator.provability import classify_goal_provability, write_provability_result
+from codex_orchestrator.probe_plan import normalize_probe_plan, validate_probe_plan, validate_probe_plan_for_required_obligations
+from codex_orchestrator.proof_obligations import normalize_proof_obligations, validate_proof_obligations
+from codex_orchestrator.provability import classify_goal_provability, missing_goal_interpretation_provability, write_provability_result
 from codex_orchestrator.target_repo import TargetRepoContext
 from codex_orchestrator.workflow_identity import read_workflow_identity, write_workflow_identity
 
@@ -126,77 +134,173 @@ def normalize_master_prompt(ctx: TargetRepoContext) -> dict:
     text = ctx.paths.master_prompt.read_text(encoding="utf-8").strip()
     sections = _parse_prompt_sections(text)
     first_line = _extract_first_meaningful_line(text)
-    semantic_spec = compile_semantic_goal_spec(
-        master_prompt_text=text,
-        master_prompt_path=ctx.paths.master_prompt,
-        master_prompt_sha256=frozen["sha256"],
-        workflow_id=identity.get("workflow_id"),
-        run_id=identity.get("run_id"),
-    )
-    semantic_spec_path = ctx.paths.workflow_dir / "semantic_goal_spec.json"
-    write_json(semantic_spec_path, semantic_spec)
-    interpretation = build_goal_interpretation(master_prompt_frozen=frozen, semantic_goal_spec=semantic_spec)
-    validate_goal_interpretation(interpretation)
-    goal_interpretation_path = ctx.paths.workflow_dir / "goal_interpretation.json"
-    write_json(goal_interpretation_path, interpretation)
-    append_operator_event(
-        ctx.root,
-        event_type="goal_interpretation_written",
-        severity="info" if interpretation["interpretation_status"] == "CONCORDANT" else "warning",
-        stage="GOAL_SPEC_READY",
-        summary=f"Goal interpretation written with status {interpretation['interpretation_status']}.",
-        artifact_paths=[".codex-orchestrator/goal_interpretation.json"],
-        details={
-            "interpretation_status": interpretation["interpretation_status"],
-            "goal_item_count": len(interpretation.get("goal_items", [])),
-            "proof_not_claimed_here": True,
-        },
-    )
-    proof_obligations = build_proof_obligations(
-        master_prompt_frozen=frozen,
-        goal_interpretation=interpretation,
-        semantic_goal_spec=semantic_spec,
-    )
-    write_json(ctx.paths.workflow_dir / "proof_obligations.json", proof_obligations)
-    append_operator_event(
-        ctx.root,
-        event_type="proof_obligations_written",
-        severity="info",
-        stage="GOAL_SPEC_READY",
-        summary=f"Proof obligations written: {len(proof_obligations.get('obligations', []))} required.",
-        artifact_paths=[".codex-orchestrator/proof_obligations.json"],
-        details={"proof_obligation_count": len(proof_obligations.get("obligations", []))},
-    )
-    probe_plan = build_probe_plan(proof_obligations=proof_obligations, semantic_goal_spec=semantic_spec, repo_root=ctx.root)
-    probe_coverage = validate_probe_plan_for_required_obligations(proof_obligations=proof_obligations, probe_plan=probe_plan)
-    write_json(ctx.paths.workflow_dir / "probe_plan.json", probe_plan)
-    append_operator_event(
-        ctx.root,
-        event_type="probe_plan_written",
-        severity="info" if probe_coverage["accepted"] or not proof_obligations.get("obligations") else "warning",
-        stage="GOAL_SPEC_READY",
-        summary=f"Probe plan written: {len(probe_plan.get('probes', []))} probes.",
-        artifact_paths=[".codex-orchestrator/probe_plan.json"],
-        details=probe_coverage,
-    )
-    provability = classify_goal_provability(
-        master_prompt_frozen=frozen,
-        goal_interpretation=interpretation,
-        semantic_goal_spec=semantic_spec,
-        repo_census=None,
-        capabilities={"local_execution": True},
-    )
-    write_provability_result(ctx.paths.workflow_dir, provability)
-    append_operator_event(
-        ctx.root,
-        event_type="provability_classified",
-        severity="info" if provability["can_start_product_patchlets"] else "warning",
-        stage="PROVABILITY_ASSESSMENT",
-        summary=f"provability classified: {provability['provability_status']}.",
-        artifact_paths=[".codex-orchestrator/provability/provability_result.json"],
-        details=provability,
-    )
-    if not provability["can_start_product_patchlets"]:
+    planning_client = create_planning_model_client({})
+    interpretation = None
+    proof_obligations = None
+    probe_plan = None
+    provability = None
+    try:
+        goal_request = build_goal_interpretation_request(
+            workflow_root=ctx.paths.workflow_dir,
+            master_prompt_frozen=frozen,
+            inventory_graph_path=ctx.paths.inventory_graph,
+        )
+        append_operator_event(
+            ctx.root,
+            event_type="goal_interpretation_model_requested",
+            severity="info",
+            stage="GOAL_SPEC_READY",
+            summary="Goal interpretation model requested.",
+            artifact_paths=[".codex-orchestrator/goal_interpretation/model_request.json"],
+        )
+        goal_output = run_planning_model(
+            workflow_root=ctx.paths.workflow_dir,
+            stage_dir_name="goal_interpretation",
+            response_kind="goal_interpretation",
+            request=goal_request,
+            model_client=planning_client,
+        )
+        interpretation = normalize_goal_interpretation(model_output=goal_output, master_prompt_frozen=frozen)
+        validate_goal_interpretation(interpretation, master_prompt_frozen=frozen)
+        write_json(ctx.paths.workflow_dir / "goal_interpretation" / "goal_interpretation.json", interpretation)
+        write_json(ctx.paths.workflow_dir / "goal_interpretation.json", interpretation)
+        write_validation_result(ctx.paths.workflow_dir, "goal_interpretation", accepted=True, errors=[])
+        append_operator_event(
+            ctx.root,
+            event_type="goal_interpretation_written",
+            severity="info",
+            stage="GOAL_SPEC_READY",
+            summary=f"Goal interpretation written with status {interpretation['interpretation_status']}.",
+            artifact_paths=[
+                ".codex-orchestrator/goal_interpretation/goal_interpretation.json",
+                ".codex-orchestrator/goal_interpretation/model_response.raw.json",
+            ],
+            details={
+                "interpretation_status": interpretation["interpretation_status"],
+                "goal_item_count": len(interpretation.get("goal_items", [])),
+                "proof_not_claimed_here": True,
+            },
+        )
+        provability = classify_goal_provability(
+            master_prompt_frozen=frozen,
+            goal_interpretation=interpretation,
+            repo_census=None,
+            capabilities={"local_execution": True},
+        )
+        write_provability_result(ctx.paths.workflow_dir, provability)
+        append_operator_event(
+            ctx.root,
+            event_type="provability_classified",
+            severity="info" if provability["can_start_product_patchlets"] else "warning",
+            stage="PROVABILITY_ASSESSMENT",
+            summary=f"provability classified: {provability['provability_status']}.",
+            artifact_paths=[".codex-orchestrator/provability/provability_result.json"],
+            details=provability,
+        )
+        if provability["can_start_product_patchlets"] is not True:
+            raise PlanningModelError("goal interpretation is not provable")
+        proof_request = build_proof_planning_request(
+            master_prompt_frozen=frozen,
+            goal_interpretation_path=".codex-orchestrator/goal_interpretation/goal_interpretation.json",
+        )
+        append_operator_event(
+            ctx.root,
+            event_type="proof_planning_model_requested",
+            severity="info",
+            stage="PROOF_PLANNING",
+            summary="Proof planning model requested.",
+            artifact_paths=[".codex-orchestrator/proof_planning/model_request.json"],
+        )
+        proof_output = run_planning_model(
+            workflow_root=ctx.paths.workflow_dir,
+            stage_dir_name="proof_planning",
+            response_kind="proof_obligations",
+            request=proof_request,
+            model_client=planning_client,
+        )
+        proof_obligations = normalize_proof_obligations(
+            master_prompt_frozen=frozen,
+            goal_interpretation=interpretation,
+            model_output=proof_output,
+        )
+        validate_proof_obligations(
+            proof_obligations=proof_obligations,
+            goal_interpretation=interpretation,
+            master_prompt_frozen=frozen,
+        )
+        write_json(ctx.paths.workflow_dir / "proof_planning" / "proof_obligations.json", proof_obligations)
+        write_json(ctx.paths.workflow_dir / "proof_obligations.json", proof_obligations)
+        write_validation_result(ctx.paths.workflow_dir, "proof_planning", accepted=True, errors=[])
+        append_operator_event(
+            ctx.root,
+            event_type="proof_obligations_written",
+            severity="info",
+            stage="PROOF_PLANNING",
+            summary=f"Proof obligations written: {len(proof_obligations.get('obligations', []))} required.",
+            artifact_paths=[
+                ".codex-orchestrator/proof_planning/proof_obligations.json",
+                ".codex-orchestrator/proof_planning/model_response.raw.json",
+            ],
+            details={"proof_obligation_count": len(proof_obligations.get("obligations", []))},
+        )
+        probe_request = build_probe_planning_request(
+            master_prompt_frozen=frozen,
+            proof_obligations_path=".codex-orchestrator/proof_planning/proof_obligations.json",
+        )
+        append_operator_event(
+            ctx.root,
+            event_type="probe_planning_model_requested",
+            severity="info",
+            stage="PROBE_PLANNING",
+            summary="Probe planning model requested.",
+            artifact_paths=[".codex-orchestrator/probe_planning/model_request.json"],
+        )
+        probe_output = run_planning_model(
+            workflow_root=ctx.paths.workflow_dir,
+            stage_dir_name="probe_planning",
+            response_kind="probe_plan",
+            request=probe_request,
+            model_client=planning_client,
+        )
+        probe_plan = normalize_probe_plan(
+            model_output=probe_output,
+            proof_obligations=proof_obligations,
+            master_prompt_frozen=frozen,
+        )
+        validate_probe_plan(proof_obligations=proof_obligations, probe_plan=probe_plan)
+        probe_coverage = validate_probe_plan_for_required_obligations(proof_obligations=proof_obligations, probe_plan=probe_plan)
+        write_json(ctx.paths.workflow_dir / "probe_planning" / "probe_plan.json", probe_plan)
+        write_json(ctx.paths.workflow_dir / "probe_plan.json", probe_plan)
+        write_validation_result(ctx.paths.workflow_dir, "probe_planning", accepted=True, errors=[])
+        append_operator_event(
+            ctx.root,
+            event_type="probe_plan_written",
+            severity="info",
+            stage="PROBE_PLANNING",
+            summary=f"Probe plan written: {len(probe_plan.get('probes', []))} probes.",
+            artifact_paths=[
+                ".codex-orchestrator/probe_planning/probe_plan.json",
+                ".codex-orchestrator/probe_planning/model_response.raw.json",
+            ],
+            details=probe_coverage,
+        )
+        provability = classify_goal_provability(
+            master_prompt_frozen=frozen,
+            goal_interpretation=interpretation,
+            proof_obligations=proof_obligations,
+            repo_census=None,
+            capabilities={"local_execution": True},
+        )
+        write_provability_result(ctx.paths.workflow_dir, provability)
+    except (PlanningModelError, ValueError) as exc:
+        for stage_dir in ["goal_interpretation", "proof_planning", "probe_planning"]:
+            path = ctx.paths.workflow_dir / stage_dir / "validation_result.json"
+            request_path = ctx.paths.workflow_dir / stage_dir / "model_request.json"
+            if request_path.exists() and not path.exists():
+                write_validation_result(ctx.paths.workflow_dir, stage_dir, accepted=False, errors=[str(exc)])
+        if provability is None:
+            provability = missing_goal_interpretation_provability(master_prompt_frozen=frozen, reason=str(exc))
+            write_provability_result(ctx.paths.workflow_dir, provability)
         append_operator_event(
             ctx.root,
             event_type="goal_ambiguous" if provability["provability_status"] == "AMBIGUOUS" else "goal_not_provable",
@@ -207,7 +311,7 @@ def normalize_master_prompt(ctx: TargetRepoContext) -> dict:
                 ".codex-orchestrator/provability/provability_result.json",
                 ".codex-orchestrator/provability/goal_not_provable_result.json",
             ],
-            details={"failure_signature": "goal_ambiguous" if provability["provability_status"] == "AMBIGUOUS" else "goal_not_provable"},
+            details={"failure_signature": "goal_ambiguous" if provability["provability_status"] == "AMBIGUOUS" else "goal_not_provable", "reason": str(exc)},
         )
     update_goal_progress(
         workflow_root=ctx.paths.workflow_dir,
@@ -218,10 +322,6 @@ def normalize_master_prompt(ctx: TargetRepoContext) -> dict:
         proof_obligations=proof_obligations,
         probe_plan=probe_plan,
     )
-    semantic_summary = semantic_goal_summary(semantic_spec)
-    if identity:
-        identity.update(semantic_summary)
-        write_workflow_identity(ctx, identity)
     upsert_prompt_index_entry(ctx.root, {
         "kind": "master_prompt",
         "stage": "GOAL_SPEC_READY",
@@ -233,26 +333,11 @@ def normalize_master_prompt(ctx: TargetRepoContext) -> dict:
         "model": None,
         "reasoning": None,
         "contracts": [],
-        "artifact_paths": [".codex-orchestrator/semantic_goal_spec.json", ".codex-orchestrator/goal_interpretation.json"],
-        **semantic_summary,
+        "artifact_paths": [
+            ".codex-orchestrator/master_prompt_frozen.json",
+            ".codex-orchestrator/goal_interpretation/model_request.json",
+        ],
     })
-    append_operator_event(
-        ctx.root,
-        event_type="semantic_goal_spec_created",
-        severity="info" if semantic_spec["semantic_mode"] == "structured" else "warning",
-        stage="GOAL_SPEC_READY",
-        summary=(
-            f"Semantic goal spec created with {len(semantic_spec.get('criteria', []))} structured criteria."
-            if semantic_spec["semantic_mode"] == "structured"
-            else "Semantic goal verification is unsupported for this prompt."
-        ),
-        artifact_paths=[".codex-orchestrator/semantic_goal_spec.json"],
-        details={
-            "semantic_mode": semantic_spec["semantic_mode"],
-            "semantic_status": semantic_spec["semantic_status"],
-            "semantic_criteria_count": len(semantic_spec.get("criteria", [])),
-        },
-    )
     goal = {
         "schema_version": "1.0",
         "kind": "goal_spec",
@@ -291,7 +376,6 @@ def normalize_master_prompt(ctx: TargetRepoContext) -> dict:
             "durable probe artifacts",
             "no blind retry",
         ]),
-        **semantic_summary,
     }
     write_json(ctx.paths.goal_spec, goal)
     state = load_state(ctx)

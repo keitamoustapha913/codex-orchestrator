@@ -1,1 +1,57 @@
-{"$schema":"https://json-schema.org/draft/2020-12/schema","title":"Proof Obligations","type":"object","required":["schema_version","kind","master_prompt_sha256","obligations"],"properties":{"schema_version":{"const":"1.0"},"kind":{"const":"proof_obligations"},"master_prompt_sha256":{"type":"string","pattern":"^[0-9a-f]{64}$"},"obligations":{"type":"array","items":{"type":"object","required":["obligation_id","goal_item_ids","source_span_ids","required","proof_kind","evidence_requirements","status"],"properties":{"obligation_id":{"type":"string","pattern":"^PO[0-9]{3}$"},"status":{"enum":["UNPROVEN","IN_PROGRESS","PROVEN_BY_WORKER","PROVEN_BY_ORCHESTRATOR","FAILED","BLOCKED","WAIVED_BY_POLICY"]}},"additionalProperties":true}}},"additionalProperties":true}
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Proof Obligations",
+  "type": "object",
+  "required": ["schema_version", "kind", "master_prompt_sha256", "obligations"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "kind": {"const": "proof_obligations"},
+    "workflow_id": {"type": ["string", "null"]},
+    "run_id": {"type": ["string", "null"]},
+    "master_prompt_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "goal_interpretation_path": {"type": "string"},
+    "obligations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "obligation_id",
+          "goal_item_ids",
+          "source_span_ids",
+          "required",
+          "evidence_requirements",
+          "status"
+        ],
+        "properties": {
+          "obligation_id": {"type": "string", "pattern": "^PO[0-9]{3}$"},
+          "goal_item_ids": {"type": "array", "items": {"type": "string"}},
+          "source_span_ids": {"type": "array", "items": {"type": "string"}},
+          "proof_strategy": {
+            "enum": ["executable_probe", "existing_test", "static_inspection", "artifact_inspection", "composite", "manual_blocked"]
+          },
+          "proof_kind": {
+            "enum": ["executable_probe", "existing_test", "static_inspection", "artifact_inspection", "composite", "manual_blocked"]
+          },
+          "status": {
+            "enum": [
+              "UNPROVEN",
+              "IN_PROGRESS",
+              "PROVEN_BY_WORKER",
+              "PROVEN_BY_ORCHESTRATOR",
+              "FAILED",
+              "BLOCKED",
+              "WAIVED_BY_POLICY"
+            ]
+          },
+          "evidence_requirements": {"type": "array", "items": {"type": "string"}}
+        },
+        "anyOf": [
+          {"required": ["proof_strategy"]},
+          {"required": ["proof_kind"]}
+        ],
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}

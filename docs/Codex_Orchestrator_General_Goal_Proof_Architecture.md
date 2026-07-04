@@ -271,8 +271,8 @@ Shape:
       "goal_item_id": "GI001",
       "source_span_ids": ["MPS001"],
       "goal_type": "behavior_change",
-      "subject": "app.py runtime behavior",
-      "desired_state": "app.main() returns \"me\"",
+      "subject": "target repository runtime behavior",
+      "desired_state": "the accepted integration state satisfies the frozen master prompt",
       "must_change_product": "unknown",
       "acceptance_meaning": "A direct runtime check observes the expected value."
     }
@@ -428,7 +428,7 @@ Shape:
       "goal_item_ids": ["GI001"],
       "source_span_ids": ["MPS001"],
       "obligation_type": "behavioral_runtime_claim",
-      "statement": "app.main() returns \"me\" in the accepted integration state.",
+      "statement": "The accepted integration state satisfies the requested behavior.",
       "required": true,
       "proof_kind": "executable_probe",
       "evidence_requirements": [

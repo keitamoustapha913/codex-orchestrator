@@ -30,10 +30,9 @@ class WorkerCapsule:
 REQUIRED_MEMORY_FILES = (
     "TASK_CONTRACT.md",
     "WORK_SLICE_CONTRACT.md",
-    "SEMANTIC_GOAL_CONTRACT.md",
     "REPORT_SCHEMA_CONTRACT.md",
     "FINAL_REPORT_CONTRACT.md",
-    "PYTHON_RUNTIME_SIDE_EFFECT_CONTRACT.md",
+    "RUNTIME_SIDE_EFFECT_CONTRACT.md",
     "LIVE_MEMORY.md",
     "LIVE_MEMORY.json",
     "KNOWN_FACTS.json",
@@ -346,17 +345,16 @@ def final_report_contract_text(*, patchlet_id: str, attempt_id: str, final_repor
     )
 
 
-def python_runtime_side_effect_contract_text() -> str:
+def runtime_side_effect_contract_text() -> str:
     return (
-        "# PYTHON RUNTIME SIDE EFFECT CONTRACT\n\n"
-        "- Do not create Python bytecode cache files under $CXOR_TARGET_ROOT.\n"
-        "- The worker environment sets PYTHONDONTWRITEBYTECODE=1.\n"
-        "- Prefer python -B for any probe that imports target or execution code.\n"
-        "- Do not import target-root product/runtime files in a way that writes cache files.\n"
-        "- If comparing target-root and execution-root code, use no-bytecode subprocesses.\n"
+        "# RUNTIME SIDE EFFECT CONTRACT\n\n"
+        "- Do not create language-runtime cache or build byproduct files under $CXOR_TARGET_ROOT.\n"
+        "- Run probes in a way that avoids writing transient runtime artifacts into the target root.\n"
+        "- Do not load target-root product/runtime files in a way that mutates the target root.\n"
+        "- If comparing target-root and execution-root behavior, keep transient outputs outside the target root.\n"
         "- Durable evidence belongs under .artifacts/probes/ and .codex-orchestrator/ only.\n"
-        "- Never leave __pycache__/ or *.pyc under target root.\n"
-        "- If a cache artifact appears, report it explicitly in the probe evidence instead of hiding it.\n"
+        "- Never leave runtime cache directories or compiled byproducts under target root.\n"
+        "- If a runtime byproduct appears, report it explicitly in the probe evidence instead of hiding it.\n"
     )
 
 
@@ -423,8 +421,7 @@ def _task_contract_text(
     target_root_worker_stage = run_context.target_root / "worker_stage"
     report_contract_path = run_context.run_dir / "worker_memory" / "REPORT_SCHEMA_CONTRACT.md"
     final_report_contract_path = run_context.run_dir / "worker_memory" / "FINAL_REPORT_CONTRACT.md"
-    python_contract_path = run_context.run_dir / "worker_memory" / "PYTHON_RUNTIME_SIDE_EFFECT_CONTRACT.md"
-    semantic_contract_path = run_context.run_dir / "worker_memory" / "SEMANTIC_GOAL_CONTRACT.md"
+    runtime_contract_path = run_context.run_dir / "worker_memory" / "RUNTIME_SIDE_EFFECT_CONTRACT.md"
     work_slice_contract_path = run_context.run_dir / "worker_memory" / "WORK_SLICE_CONTRACT.md"
     work_slice_id = patchlet.get("work_slice_id")
     dependency_patchlets = patchlet.get("dependency_patchlet_ids") or patchlet.get("depends_on", [])
@@ -445,8 +442,7 @@ def _task_contract_text(
         f"- required report path: `.codex-orchestrator/reports/{patchlet_id}.json`\n"
         f"- report schema contract: `{report_contract_path}`\n"
         f"- final report contract: `{final_report_contract_path}`\n"
-        f"- Python runtime side-effect contract: `{python_contract_path}`\n"
-        f"- semantic goal contract: `{semantic_contract_path}`\n"
+        f"- runtime side-effect contract: `{runtime_contract_path}`\n"
         f"- required probe root: `.artifacts/probes/{patchlet_id}`\n"
         f"- worker stage dir env: `$CXOR_WORKER_STAGE_DIR` = `{worker_stage_dir}`\n"
         f"- required preflight stage file: `$CXOR_WORKER_STAGE_DIR/00_preflight.md` = `{preflight_path}`\n"
@@ -468,30 +464,6 @@ def _task_contract_text(
         "- root-cause/probe contract reminder: direct probe first, then minimal fix, then deterministic proof and negative controls\n"
         "- no blind retry rule: blind retry is not allowed\n"
         "- orchestrator owns gate results: Codex may not write or overwrite gate result files\n"
-    )
-
-
-def _semantic_goal_contract_text(patchlet: dict) -> str:
-    behavior = patchlet.get("expected_behavior") or {}
-    criteria = patchlet.get("semantic_criteria") or []
-    if behavior.get("kind") != "python_module_function_returns":
-        return (
-            "# SEMANTIC GOAL CONTRACT\n\n"
-            "- Semantic goal spec: .codex-orchestrator/semantic_goal_spec.json\n"
-            "- Semantic mode: unsupported or unavailable for this patchlet.\n"
-        )
-    criterion_id = criteria[0] if criteria else "SGC001"
-    expected = behavior.get("expected_value")
-    module = behavior.get("module_name")
-    function = behavior.get("function_name")
-    return (
-        "# SEMANTIC GOAL CONTRACT\n\n"
-        "- Semantic goal spec: .codex-orchestrator/semantic_goal_spec.json\n"
-        f"- Required criterion: {criterion_id}\n"
-        f"- {module}.{function}() expected return value: {expected!r}\n"
-        "- VERIFIED_NO_CHANGE_NEEDED is allowed only if the criterion passes before edits.\n"
-        "- COMPLETE is allowed only if the criterion passes after edits.\n"
-        "- A negative control showing another value is not enough; the positive criterion must pass.\n"
     )
 
 
@@ -577,8 +549,7 @@ def ensure_worker_memory(
     )
     report_contract_path = capsule.worker_memory_dir / "REPORT_SCHEMA_CONTRACT.md"
     final_report_contract_path = capsule.worker_memory_dir / "FINAL_REPORT_CONTRACT.md"
-    python_contract_path = capsule.worker_memory_dir / "PYTHON_RUNTIME_SIDE_EFFECT_CONTRACT.md"
-    semantic_contract_path = capsule.worker_memory_dir / "SEMANTIC_GOAL_CONTRACT.md"
+    runtime_contract_path = capsule.worker_memory_dir / "RUNTIME_SIDE_EFFECT_CONTRACT.md"
     work_slice_contract_path = capsule.worker_memory_dir / "WORK_SLICE_CONTRACT.md"
     report_path = f".codex-orchestrator/reports/{patchlet['patchlet_id']}.json"
     final_report_path = f"{capsule.worker_stage_dir / '05_final_report.md'}"
@@ -601,8 +572,7 @@ def ensure_worker_memory(
         ),
         encoding="utf-8",
     )
-    python_contract_path.write_text(python_runtime_side_effect_contract_text(), encoding="utf-8")
-    semantic_contract_path.write_text(_semantic_goal_contract_text(patchlet), encoding="utf-8")
+    runtime_contract_path.write_text(runtime_side_effect_contract_text(), encoding="utf-8")
     work_slice_contract_path.write_text(
         "# WORK SLICE CONTRACT\n\n"
         f"- Work slice ID: {patchlet.get('work_slice_id') or 'legacy-invariant-slice'}\n"
@@ -627,8 +597,7 @@ def ensure_worker_memory(
         f"- report path: `{live_memory['required_report_path']}`\n"
         f"- report schema contract: `{report_contract_path}`\n"
         f"- final report contract: `{final_report_contract_path}`\n"
-        f"- Python runtime side-effect contract: `{python_contract_path}`\n"
-        f"- semantic goal contract: `{semantic_contract_path}`\n"
+        f"- runtime side-effect contract: `{runtime_contract_path}`\n"
         f"- work slice contract: `{work_slice_contract_path}`\n"
         f"- probe root: `{live_memory['required_probe_root']}`\n",
         encoding="utf-8",
@@ -658,8 +627,7 @@ def ensure_worker_memory(
         f"- `.codex-orchestrator/reports/{patchlet['patchlet_id']}.json`\n"
         f"- Read and obey `{report_contract_path}` before writing the report.\n"
         f"- Read and obey `{final_report_contract_path}` before writing the final Markdown report.\n"
-        f"- Read and obey `{python_contract_path}` before running Python probes.\n"
-        f"- Read and obey `{semantic_contract_path}` before claiming semantic success.\n"
+        f"- Read and obey `{runtime_contract_path}` before running runtime probes.\n"
         f"- Read and obey `{work_slice_contract_path}` before editing product/runtime code.\n"
         f"- `.artifacts/probes/{patchlet['patchlet_id']}/...`\n"
         + "\n"

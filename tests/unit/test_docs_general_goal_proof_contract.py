@@ -53,5 +53,7 @@ def test_docs_explain_done_requires_master_prompt_satisfaction():
     assert "DONE requires" in text and "master prompt satisfaction" in text
 
 
-def test_docs_explain_rc4_fast_path_as_special_case():
-    assert "SGC001 -> GI001 -> PO001 -> GP001" in _docs_text()
+def test_docs_explain_no_compatibility_fast_path():
+    text = _docs_text()
+    assert "no compatibility fast path" in text.lower()
+    assert "app.py" in text and "app.main" in text

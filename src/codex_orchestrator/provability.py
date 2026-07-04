@@ -11,22 +11,24 @@ def classify_goal_provability(
     *,
     master_prompt_frozen: dict[str, Any],
     goal_interpretation: dict[str, Any],
-    semantic_goal_spec: dict[str, Any] | None,
+    semantic_goal_spec: dict[str, Any] | None = None,
+    proof_obligations: dict[str, Any] | None = None,
     repo_census: dict[str, Any] | None,
     capabilities: dict[str, Any] | None,
 ) -> dict[str, Any]:
     available = sorted((capabilities or {"local_execution": True}).keys())
-    criteria = (semantic_goal_spec or {}).get("criteria", [])
-    if criteria and goal_interpretation.get("interpretation_status") == "CONCORDANT":
+    required_goal_items = [item for item in goal_interpretation.get("goal_items", []) if item.get("required") is True]
+    obligations = (proof_obligations or {}).get("obligations", [])
+    if goal_interpretation.get("interpretation_status") == "CONCORDANT" and required_goal_items:
         status = "PROVABLE"
         blocking: list[str] = []
-        reasons = ["At least one required proof obligation can be formed and independently checked."]
-        count = 1
+        reasons = ["Model-mediated goal interpretation is concordant and contains required goal items."]
+        count = len([row for row in obligations if row.get("required") is True]) or len(required_goal_items)
         can_start = True
     else:
-        status = "AMBIGUOUS"
-        blocking = goal_interpretation.get("ambiguities") or ["No objective proof obligation could be formed."]
-        reasons = ["The goal is ambiguous and no objective proof obligation could be formed."]
+        status = "AMBIGUOUS" if goal_interpretation.get("interpretation_status") != "CONTRADICTORY" else "UNPROVABLE"
+        blocking = goal_interpretation.get("ambiguities") or goal_interpretation.get("contradictions") or ["No validated model-mediated goal interpretation is available."]
+        reasons = ["The goal cannot proceed to product patchlets without a concordant model-mediated interpretation."]
         count = 0
         can_start = False
     return {
@@ -46,6 +48,29 @@ def classify_goal_provability(
         "proof_obligation_count": count,
         "probe_plan_required": bool(count),
         "can_start_product_patchlets": can_start,
+        "goal_interpretation_path": ".codex-orchestrator/goal_interpretation/goal_interpretation.json",
+    }
+
+
+def missing_goal_interpretation_provability(*, master_prompt_frozen: dict[str, Any], reason: str) -> dict[str, Any]:
+    return {
+        "schema_version": "1.0",
+        "kind": "provability_result",
+        "workflow_id": master_prompt_frozen.get("workflow_id"),
+        "run_id": master_prompt_frozen.get("run_id"),
+        "master_prompt_sha256": master_prompt_frozen.get("sha256"),
+        "created_at": now_iso(),
+        "provability_status": "AMBIGUOUS",
+        "provability_stage": "pre_patchlet",
+        "reasons": ["Model-mediated goal interpretation is required before product patchlets."],
+        "blocking_reasons": [reason],
+        "required_capabilities": [],
+        "available_capabilities": [],
+        "missing_capabilities": [],
+        "proof_obligation_count": 0,
+        "probe_plan_required": False,
+        "can_start_product_patchlets": False,
+        "goal_interpretation_path": ".codex-orchestrator/goal_interpretation/goal_interpretation.json",
     }
 
 
@@ -73,7 +98,7 @@ def goal_not_provable_result(result: dict[str, Any]) -> dict[str, Any]:
         "reasons": result.get("blocking_reasons") or result.get("reasons", []),
         "created_artifacts": [
             ".codex-orchestrator/master_prompt_frozen.json",
-            ".codex-orchestrator/goal_interpretation.json",
+            ".codex-orchestrator/goal_interpretation/goal_interpretation.json",
             ".codex-orchestrator/provability/provability_result.json",
         ],
     }

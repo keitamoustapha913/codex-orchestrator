@@ -482,26 +482,20 @@ recorded in `.codex-orchestrator/loop_governor.json`; warning mode emits
 --max-repeated-failure-signature 3` safe-fails with evidence. Default tests do
 not run real Codex.
 
-## Semantic Goal Satisfaction
+## Master Prompt Satisfaction
 
-For structured goals, `DONE` requires independent semantic proof in addition
-to report, wrapper, hygiene, integration, transaction, and global verifier
-checks. The built-in Python main-return parser recognizes prompts such as
-`Make app return ok and prove it.` and `Make app return me and prove it.`,
-writes `.codex-orchestrator/semantic_goal_spec.json`, and verifies
-`app.main()` against the requested value.
-
-`VERIFIED_NO_CHANGE_NEEDED` is accepted only when the semantic goal runner
-proves the criterion already passes. If the prompt requires `"me"` but
-`app.main()` returns `"ok"`, the goal satisfaction gate records
-`semantic_goal_unsatisfied` and the workflow does not reach `DONE`. See
+No app.py-specific, app.main-specific, Python-specific, or smoke-prompt regex
+parser is supported as the general architecture. `DONE` requires the
+model-mediated repo-agnostic path: goal interpretation, provability,
+proof-obligation planning, probe planning, mandatory decomposition, independent
+proof rerun or validation, goal coverage, and master-prompt satisfaction. See
 `docs/semantic_goal_satisfaction.md`.
 
 ## General goal proof contract
 
 cxor treats the master prompt as the read-only source of truth. Each workflow freezes `.codex-orchestrator/master_prompt.md`, records `.codex-orchestrator/master_prompt_frozen.json`, derives `goal_interpretation.json` without claiming proof, classifies `provability/provability_result.json` before product patchlets, and stops unsupported or ambiguous goals early with `goal_not_provable_result.json` evidence.
 
-Required proof is represented in `proof_obligations.json` and `probe_plan.json`. Worker-proposed proof is not enough: required obligations need orchestrator-owned rerun or validation in `independent_probe_rerun_result.json`, then `goal_coverage_gate_result.json` must pass. The rc4 semantic app.main path is now the concrete `SGC001 -> GI001 -> PO001 -> GP001` fast path inside this general contract.
+Required proof is represented in `proof_obligations.json` and `probe_plan.json`. Worker-proposed proof is not enough: required obligations need orchestrator-owned rerun or validation in `independent_probe_rerun_result.json`, then `goal_coverage_gate_result.json` must pass. There is no compatibility fast path for app.py, app.main, Python-specific prompts, or smoke regexes.
 
 Final DONE requires `master_prompt_concordance_result.json` and `master_prompt_satisfaction_result.json` in addition to transaction groups, integration validation, target hygiene, and unresolved-failure checks. Partial proof is not full DONE unless explicitly allowed by policy. See `docs/general_goal_proof_contract.md`.
 

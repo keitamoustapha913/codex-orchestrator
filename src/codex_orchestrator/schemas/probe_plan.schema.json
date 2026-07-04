@@ -1,1 +1,53 @@
-{"$schema":"https://json-schema.org/draft/2020-12/schema","title":"Probe Plan","type":"object","required":["schema_version","kind","master_prompt_sha256","probes"],"properties":{"schema_version":{"const":"1.0"},"kind":{"const":"probe_plan"},"master_prompt_sha256":{"type":"string","pattern":"^[0-9a-f]{64}$"},"probes":{"type":"array","items":{"type":"object","required":["probe_id","obligation_ids","probe_kind","owner","side_effect_policy","rerunnable_by_orchestrator","status"],"properties":{"probe_id":{"type":"string","pattern":"^GP[0-9]{3}$"},"owner":{"enum":["orchestrator_generated","worker_proposed","worker_proposed_validated","manual_policy"]},"status":{"enum":["PLANNED","WORKER_RAN","ORCHESTRATOR_RERAN","PASSED","FAILED","BLOCKED","INVALID"]}},"additionalProperties":true}}},"additionalProperties":true}
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Probe Plan",
+  "type": "object",
+  "required": ["schema_version", "kind", "master_prompt_sha256", "probes"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "kind": {"const": "probe_plan"},
+    "workflow_id": {"type": ["string", "null"]},
+    "run_id": {"type": ["string", "null"]},
+    "master_prompt_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "proof_obligations_path": {"type": "string"},
+    "probes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "probe_id",
+          "obligation_ids",
+          "probe_kind",
+          "owner",
+          "side_effect_policy",
+          "rerunnable_by_orchestrator",
+          "status"
+        ],
+        "properties": {
+          "probe_id": {"type": "string", "pattern": "^GP[0-9]{3}$"},
+          "obligation_ids": {"type": "array", "items": {"type": "string"}},
+          "probe_kind": {
+            "enum": ["executable", "static", "test", "artifact_inspection", "composite", "manual_blocked"]
+          },
+          "owner": {
+            "enum": [
+              "model_planned_orchestrator_validated",
+              "orchestrator_generated",
+              "worker_proposed",
+              "worker_proposed_validated",
+              "manual_policy"
+            ]
+          },
+          "execution_context": {
+            "enum": ["integration_candidate", "accepted_integration", "target_read_only", "artifact_only"]
+          },
+          "side_effect_policy": {"enum": ["no_product_mutation", "product_mutation", "unknown"]},
+          "rerunnable_by_orchestrator": {"type": "boolean"},
+          "status": {"enum": ["PLANNED", "WORKER_RAN", "ORCHESTRATOR_RERAN", "PASSED", "FAILED", "BLOCKED", "INVALID"]}
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}

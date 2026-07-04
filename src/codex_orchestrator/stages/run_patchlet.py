@@ -730,15 +730,13 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
         "contracts": [
             "TASK_CONTRACT.md",
             "WORK_SLICE_CONTRACT.md",
-            "SEMANTIC_GOAL_CONTRACT.md",
             "REPORT_SCHEMA_CONTRACT.md",
             "FINAL_REPORT_CONTRACT.md",
-            "PYTHON_RUNTIME_SIDE_EFFECT_CONTRACT.md",
+            "RUNTIME_SIDE_EFFECT_CONTRACT.md",
         ],
         "artifact_paths": [
             prompt_path,
             _record_path_for_manifest(ctx, worker_capsule.worker_memory_dir / "WORK_SLICE_CONTRACT.md"),
-            _record_path_for_manifest(ctx, worker_capsule.worker_memory_dir / "SEMANTIC_GOAL_CONTRACT.md"),
         ],
     })
     _append_patchlet_event(

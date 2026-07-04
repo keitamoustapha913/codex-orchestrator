@@ -260,16 +260,17 @@ likely stalled. Loop-governor warning mode emits `loop_governor_warning`; safe
 failure requires explicit `--loop-governor-mode safe-fail
 --max-repeated-failure-signature 3`. Default tests do not run real Codex.
 
-For supported structured semantic goals, `DONE` also means the independent
-semantic goal runner passed. For example, `Make app return me and prove it.`
-must be backed by evidence that `app.main()` returns `"me"`; `"ok"` is not an
-acceptable substitute.
+For supported goals, `DONE` also means model-mediated goal interpretation,
+proof planning, probe planning, independent proof rerun or validation, goal
+coverage, and master-prompt satisfaction passed. No app.py-specific,
+app.main-specific, Python-specific, or smoke-prompt regex parser is supported
+as the general architecture.
 
 ## General goal proof contract
 
 cxor treats the master prompt as the read-only source of truth. Each workflow freezes `.codex-orchestrator/master_prompt.md`, records `.codex-orchestrator/master_prompt_frozen.json`, derives `goal_interpretation.json` without claiming proof, classifies `provability/provability_result.json` before product patchlets, and stops unsupported or ambiguous goals early with `goal_not_provable_result.json` evidence.
 
-Required proof is represented in `proof_obligations.json` and `probe_plan.json`. Worker-proposed proof is not enough: required obligations need orchestrator-owned rerun or validation in `independent_probe_rerun_result.json`, then `goal_coverage_gate_result.json` must pass. The rc4 semantic app.main path is now the concrete `SGC001 -> GI001 -> PO001 -> GP001` fast path inside this general contract.
+Required proof is represented in `proof_obligations.json` and `probe_plan.json`. Worker-proposed proof is not enough: required obligations need orchestrator-owned rerun or validation in `independent_probe_rerun_result.json`, then `goal_coverage_gate_result.json` must pass. There is no compatibility fast path for app.py, app.main, Python-specific prompts, or smoke regexes.
 
 Final DONE requires `master_prompt_concordance_result.json` and `master_prompt_satisfaction_result.json` in addition to transaction groups, integration validation, target hygiene, and unresolved-failure checks. Partial proof is not full DONE unless explicitly allowed by policy. See `docs/general_goal_proof_contract.md`.
 

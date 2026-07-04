@@ -904,11 +904,13 @@ uv run --no-sync pytest -q tests/integration/test_general_goal_proof_operator_vi
 
 ---
 
-# Phase 13 — Integration with existing rc4 semantic app.main path
+# Phase 13 — Superseded rc4 shortcut removal
 
 ## Goal
 
-Keep the working rc4 semantic path, but express it through the general proof contract.
+This phase is superseded by the no-compatibility architecture. Do not preserve
+the rc4 semantic app/main shortcut; use model-mediated repo-agnostic goal
+interpretation, proof planning, and probe planning.
 
 ## Required behavior
 
@@ -1180,7 +1182,7 @@ Return exactly:
 - focused green result:
 - behavior:
 
-### Phase 13 — Integration with existing rc4 semantic app.main path
+### Phase 13 — Superseded rc4 shortcut removal
 - red tests:
 - files changed:
 - focused green command:

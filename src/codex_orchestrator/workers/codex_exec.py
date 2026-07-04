@@ -26,8 +26,8 @@ from codex_orchestrator.prompt_index import upsert_prompt_index_entry
 from codex_orchestrator.target_repo import TargetRepoContext
 from codex_orchestrator.worker_capsule import (
     final_report_contract_text,
-    python_runtime_side_effect_contract_text,
     report_schema_contract_text,
+    runtime_side_effect_contract_text,
 )
 
 from .base import Worker, WorkerResult, ensure_run_context
@@ -66,7 +66,7 @@ class CodexExecWorker(Worker):
         task_contract_path = run_dir / "worker_memory" / "TASK_CONTRACT.md"
         report_contract_path = run_dir / "worker_memory" / "REPORT_SCHEMA_CONTRACT.md"
         final_report_contract_path = run_dir / "worker_memory" / "FINAL_REPORT_CONTRACT.md"
-        python_contract_path = run_dir / "worker_memory" / "PYTHON_RUNTIME_SIDE_EFFECT_CONTRACT.md"
+        runtime_contract_path = run_dir / "worker_memory" / "RUNTIME_SIDE_EFFECT_CONTRACT.md"
         live_memory_md_path = run_dir / "worker_memory" / "LIVE_MEMORY.md"
         write_these_files_path = run_dir / "worker_memory" / "WRITE_THESE_FILES.md"
         worker_stage_dir = run_dir / "worker_stage"
@@ -84,7 +84,7 @@ class CodexExecWorker(Worker):
             f"- {task_contract_path}\n"
             f"- {report_contract_path}\n"
             f"- {final_report_contract_path}\n"
-            f"- {python_contract_path}\n"
+            f"- {runtime_contract_path}\n"
             f"- {live_memory_md_path}\n"
             f"- {write_these_files_path}\n\n"
             "Use explicit Worker Capsule paths from the environment:\n"
@@ -107,12 +107,9 @@ class CodexExecWorker(Worker):
             "BLOCKED or FAILED status and preserve what you learned. "
             "Do not keep investigating indefinitely. Do not use blind retry.\n\n"
             "Do not write gate results. The orchestrator writes gates.\n\n"
-            "When running Python probes, use one of:\n"
-            "- python -B <probe>\n"
-            "- PYTHONDONTWRITEBYTECODE=1 python <probe>\n\n"
-            "Do not import target-root app.py in the main Codex process if that import can create cache files.\n"
-            "Do not leave __pycache__/ anywhere under target root.\n"
-            "The target hygiene gate will detect and report Python cache leaks.\n\n"
+            "When running probes, avoid creating language-runtime caches or build byproducts under target root.\n"
+            "Do not load target-root product/runtime files in a way that mutates target-root state.\n"
+            "The target hygiene gate will detect and report runtime byproduct leaks.\n\n"
             "Use those files as the attempt-local contract. Then continue with the patchlet instructions below.\n\n"
             + prompt_path.read_text(encoding="utf-8")
         )
@@ -167,8 +164,8 @@ class CodexExecWorker(Worker):
                 report_path=f".codex-orchestrator/reports/{patchlet_id}.json",
                 probe_root=f".artifacts/probes/{patchlet_id}",
             )
-            + "\n\n## Embedded Python runtime side-effect contract\n\n"
-            + python_runtime_side_effect_contract_text()
+            + "\n\n## Embedded runtime side-effect contract\n\n"
+            + runtime_side_effect_contract_text()
         )
         attempt_prompt_path.write_text(attempt_prompt_text, encoding="utf-8")
         upsert_prompt_index_entry(ctx.root, {
@@ -188,7 +185,7 @@ class CodexExecWorker(Worker):
                 "TASK_CONTRACT.md",
                 "REPORT_SCHEMA_CONTRACT.md",
                 "FINAL_REPORT_CONTRACT.md",
-                "PYTHON_RUNTIME_SIDE_EFFECT_CONTRACT.md",
+                "RUNTIME_SIDE_EFFECT_CONTRACT.md",
             ],
             "artifact_paths": [str(attempt_prompt_path)],
         })

@@ -16,7 +16,7 @@ The current implementation has reached an important safety baseline:
 - semantic goal satisfaction prevents known false `DONE` cases;
 - the general goal-proof contract adds master-prompt source of truth, proof obligations, probe plans, independent reruns, goal coverage, goal progress, stop, and partial apply.
 
-However, the orchestration loop still has a work-decomposition bottleneck. Even when the target repository contains many runtime files and a broad master prompt, the current deterministic decomposition can collapse the whole target into one invariant, then compile one patchlet from that one invariant. The evidence report states that `extract_invariants` collapses to one invariant `I001`, and `compile_patchlets` creates one patchlet per invariant. Therefore complex targets still become `I001 -> P0001` unless the orchestrator gains a real work decomposition layer.
+Earlier pre-release builds had a work-decomposition bottleneck: broad work could collapse into one invariant and one patchlet when decomposition artifacts were absent. The no-compatibility architecture removes that behavior. Patchlet compilation now requires decomposition artifacts and a patchlet plan instead of silently compiling from invariants.
 
 This document defines that missing layer.
 
@@ -1146,7 +1146,7 @@ Mitigation:
 
 Mitigation:
 
-- map SGC001 -> GI001 -> PO001 -> GP001;
+- map model-mediated goal items to proof obligations and probes;
 - create one or more slices from the same proof obligation;
 - keep false-DONE tests green;
 - keep semantic gate before acceptance.

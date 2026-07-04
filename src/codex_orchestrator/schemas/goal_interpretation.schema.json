@@ -19,7 +19,7 @@
     "run_id": {"type": ["string", "null"]},
     "master_prompt_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "master_prompt_frozen_path": {"type": "string"},
-    "interpretation_status": {"enum": ["DRAFT", "CONCORDANT", "INCOMPLETE", "CONTRADICTORY", "AMBIGUOUS"]},
+    "interpretation_status": {"enum": ["DRAFT", "CONCORDANT", "INCOMPLETE", "CONTRADICTORY", "AMBIGUOUS", "INVALID"]},
     "goal_summary": {"type": "string"},
     "goal_items": {
       "type": "array",

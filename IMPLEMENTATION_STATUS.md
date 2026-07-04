@@ -365,14 +365,12 @@ Release evidence preserved for v0.1.0-rc4 semantic-goal smoke:
 /tmp/cxor-target-semantic-goal-smoke-20260704T070533Z
 ```
 
-This direct `cxor auto --worker-mode real_codex --use-worktree
---live-progress` smoke used the prompt `Make app return me and prove it.`.
-The workflow reached `DONE` only after the independent semantic goal check
-passed for SGC001 with expected value `"me"` and actual value `"me"`.
-`goal_satisfaction_gate_result.json` recorded `accepted=true`,
-`final_verification.json` recorded `semantic_goal_status=PASSED`, the accepted
-integration ref `refs/cxor/runs/R0001/integration` contains `app.py` returning
-`"me"`, and the final diff changes `ok -> me`.
+This preserved real-Codex smoke is historical evidence only. The current
+no-compatibility architecture supersedes the old shortcut: no app.py-specific,
+app.main-specific, Python-specific, or smoke-prompt regex parser is supported
+as the general path. Current validation must use model-mediated goal
+interpretation, proof planning, probe planning, mandatory decomposition,
+independent proof, goal coverage, and master-prompt satisfaction.
 
 Implemented: direct auto operator visibility and long-run control. Direct
 `cxor auto` now supports `--live-progress`, `--no-live-progress`,
@@ -397,17 +395,17 @@ Repeated repair-loop warnings emit `loop_governor_warning`; explicit safe
 failure is configured with `--loop-governor-mode safe-fail
 --max-repeated-failure-signature 3`. Default tests do not run real Codex.
 
-Implemented: semantic goal satisfaction for the built-in Python main-return
-prompt family. Structured goals write `semantic_goal_spec.json`, run
-independent semantic checks, gate patchlet acceptance through
-`goal_satisfaction_gate_result.json`, and prevent `DONE` when the requested
-value is not observed.
+Implemented: no-compatibility master-prompt satisfaction. Goals require
+model-mediated interpretation, proof planning, and probe planning; patchlet
+compilation requires decomposition artifacts and a patchlet plan; proof
+acceptance requires independent rerun or validation and goal coverage; `DONE`
+requires master-prompt concordance and satisfaction.
 
 ## General goal proof contract
 
 cxor treats the master prompt as the read-only source of truth. Each workflow freezes `.codex-orchestrator/master_prompt.md`, records `.codex-orchestrator/master_prompt_frozen.json`, derives `goal_interpretation.json` without claiming proof, classifies `provability/provability_result.json` before product patchlets, and stops unsupported or ambiguous goals early with `goal_not_provable_result.json` evidence.
 
-Required proof is represented in `proof_obligations.json` and `probe_plan.json`. Worker-proposed proof is not enough: required obligations need orchestrator-owned rerun or validation in `independent_probe_rerun_result.json`, then `goal_coverage_gate_result.json` must pass. The rc4 semantic app.main path is now the concrete `SGC001 -> GI001 -> PO001 -> GP001` fast path inside this general contract.
+Required proof is represented in `proof_obligations.json` and `probe_plan.json`. Worker-proposed proof is not enough: required obligations need orchestrator-owned rerun or validation in `independent_probe_rerun_result.json`, then `goal_coverage_gate_result.json` must pass. There is no compatibility fast path for app.py, app.main, Python-specific prompts, or smoke regexes.
 
 Final DONE requires `master_prompt_concordance_result.json` and `master_prompt_satisfaction_result.json` in addition to transaction groups, integration validation, target hygiene, and unresolved-failure checks. Partial proof is not full DONE unless explicitly allowed by policy. See `docs/general_goal_proof_contract.md`.
 

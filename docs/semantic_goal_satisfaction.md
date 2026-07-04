@@ -1,130 +1,57 @@
-# Semantic Goal Satisfaction
+# Master Prompt Satisfaction
 
-Codex Orchestrator has a semantic goal satisfaction plane for workflow goals that can be compiled into machine-checkable criteria. It is separate from report schema validation: a structurally valid patchlet report is not enough to prove the user's requested behavior.
+Codex Orchestrator no longer supports an app.py-specific, app.main-specific,
+Python-specific, or smoke-prompt regex semantic parser as the general
+architecture.
 
-## Semantic Goal Spec
-
-New workflows write `.codex-orchestrator/semantic_goal_spec.json`.
-
-For the built-in Python main return family, prompts such as:
+Goal satisfaction now uses the no-compatibility repo-agnostic path:
 
 ```text
-Make app return me and prove it.
-Make app.py return "ok" and prove it.
-Make app main return "hello world" and prove it.
+frozen master prompt
+-> model-mediated goal interpretation
+-> early provability classification
+-> model-mediated proof-obligation planning
+-> model/repo-aware probe planning
+-> mandatory decomposition artifacts
+-> patchlet plan
+-> independent proof rerun or validation
+-> goal coverage
+-> master-prompt concordance
+-> master-prompt satisfaction
 ```
 
-compile into structured criteria like:
+The master prompt is the source of truth. Model interpretation, proof
+obligations, probe plans, decomposition plans, patchlet plans, worker reports,
+and worker-authored probes are derived artifacts. They are not proof by
+themselves.
 
-```json
-{
-  "criterion_id": "SGC001",
-  "kind": "python_module_function_returns",
-  "target_file": "app.py",
-  "module_name": "app",
-  "function_name": "main",
-  "expected_value": "me",
-  "comparison": "equals",
-  "required": true
-}
-```
-
-Unsupported natural-language prompts are recorded with `semantic_mode: "unsupported"` and `semantic_status: "UNSUPPORTED"`. Unsupported does not mean passed.
-
-## Independent Runner
-
-The orchestrator runs its own semantic goal check and writes:
+Required artifacts include:
 
 ```text
-.codex-orchestrator/semantic_goal_checks/semantic_goal_check_result.json
-.codex-orchestrator/semantic_goal_checks/SGC001.stdout.txt
-.codex-orchestrator/semantic_goal_checks/SGC001.stderr.txt
+.codex-orchestrator/goal_interpretation/model_request.json
+.codex-orchestrator/goal_interpretation/model_response.raw.json
+.codex-orchestrator/goal_interpretation/goal_interpretation.json
+.codex-orchestrator/proof_planning/proof_obligations.json
+.codex-orchestrator/probe_planning/probe_plan.json
+.codex-orchestrator/decomposition/patchlet_plan.json
+.codex-orchestrator/global_verification/master_prompt_concordance_result.json
+.codex-orchestrator/global_verification/master_prompt_satisfaction_result.json
 ```
 
-For `python_module_function_returns`, the check runs under no-bytecode settings and verifies the accepted candidate state with an orchestrator-built Python probe equivalent to:
+If model-mediated goal interpretation, proof planning, probe planning, or
+decomposition cannot be produced and validated, the workflow safe-fails before
+product patchlets. Missing decomposition artifacts do not fall back to one
+global invariant or one patchlet.
 
-```bash
-PYTHONDONTWRITEBYTECODE=1 python -B -c 'import app; assert app.main() == "me"'
-```
+Every patchlet has exactly one allowed product/runtime file. Multiple patchlets
+may target the same file when the work slices are sequential. Patchlet prompts
+carry the configured `CODEX_PATCHLET_TIMEOUT_SECONDS` budget, default 600
+seconds, and use narrow scope so they do not require memory compacting.
 
-Worker-authored probes and report status are useful evidence, but they are not sufficient for structured semantic DONE.
+`DONE` requires accepted master-prompt concordance and accepted master-prompt
+satisfaction. Worker proof alone is not enough; the orchestrator must rerun or
+validate required proof obligations and the goal coverage gate must pass.
 
-## Goal Satisfaction Gate
-
-Patchlet attempts write:
-
-```text
-.codex-orchestrator/runs/<ATTEMPT_ID>/gates/goal_satisfaction_gate_result.json
-```
-
-For structured goals, every required semantic criterion must pass before patchlet acceptance. `VERIFIED_NO_CHANGE_NEEDED` is accepted only when the independent semantic gate proves the existing candidate already satisfies the criterion. `COMPLETE` is accepted only when the independent semantic gate proves the changed candidate satisfies the criterion.
-
-The known false-positive class is blocked:
-
-```text
-Prompt: Make app return me and prove it.
-Observed: app.main() returns "ok"
-Result: semantic_goal_unsatisfied, no DONE
-```
-
-`app.main()` returning `"ok"` does not satisfy a goal requiring `"me"`.
-
-## Reports
-
-Patchlet reports may include `semantic_goal_results`:
-
-```json
-{
-  "criterion_id": "SGC001",
-  "kind": "python_module_function_returns",
-  "expected_value": "me",
-  "actual_value": "ok",
-  "passed": false
-}
-```
-
-Report validation rejects self-contradictory semantic evidence, such as `expected_value: "me"`, `actual_value: "ok"`, and `passed: true`.
-
-## Verification
-
-Transaction and global verification include semantic status. For structured goals, final `DONE` requires semantic pass. Failed or unproven structured criteria keep the workflow out of `DONE` and record `semantic_goal_unsatisfied` evidence.
-
-`final_verification.json` and `verification_matrix.json` include semantic fields such as:
-
-```json
-{
-  "semantic_goal_status": "FAILED",
-  "failed_semantic_criterion_ids": ["SGC001"]
-}
-```
-
-## Operator Visibility
-
-Live progress, monitor output, and `cxor status --json` surface semantic goal state. Status JSON includes a `semantic_goal` object with mode, status, criteria count, passed criteria, failed criteria, and paths to semantic evidence.
-
-Compact progress can show:
-
-```text
-semantic goal SGC001 failed: expected app.main() == "me", observed "ok".
-goal satisfaction gate failed for P0001; patchlet not accepted.
-```
-
-This is distinct from report schema failures, target hygiene failures, and report-ingestion failures.
-
-## General goal proof contract
-
-cxor treats the master prompt as the read-only source of truth. Each workflow freezes `.codex-orchestrator/master_prompt.md`, records `.codex-orchestrator/master_prompt_frozen.json`, derives `goal_interpretation.json` without claiming proof, classifies `provability/provability_result.json` before product patchlets, and stops unsupported or ambiguous goals early with `goal_not_provable_result.json` evidence.
-
-Required proof is represented in `proof_obligations.json` and `probe_plan.json`. Worker-proposed proof is not enough: required obligations need orchestrator-owned rerun or validation in `independent_probe_rerun_result.json`, then `goal_coverage_gate_result.json` must pass. The rc4 semantic app.main path is now the concrete `SGC001 -> GI001 -> PO001 -> GP001` fast path inside this general contract.
-
-Final DONE requires `master_prompt_concordance_result.json` and `master_prompt_satisfaction_result.json` in addition to transaction groups, integration validation, target hygiene, and unresolved-failure checks. Partial proof is not full DONE unless explicitly allowed by policy. See `docs/general_goal_proof_contract.md`.
-
-## Goal progress, stop, and partial apply
-
-cxor writes `goal_progress.json` and append-only `goal_progress.jsonl`; `cxor goal-progress`, `cxor status --json`, `cxor monitor`, and `cxor auto --live-progress` expose the latest obligation counts, proof state, accepted checkpoint, and next action.
-
-`cxor stop` writes `control/stop_requested.json`; the orchestrator stops at a safe point and writes `control/stop_result.json`. `apply-results --scope accepted --allow-partial` is required for stopped non-DONE workflows and applies only latest accepted progress. In-progress unaccepted worker changes are not applied by default. `partial_apply_result.json` records the warning that the full master prompt may not be satisfied. See `docs/goal_progress_and_partial_apply.md`.
-
-## General Work Decomposition
-
-Structured semantic goals can now produce several bounded patchlets when impact analysis and proof obligations require it. The corrected contract is one patchlet -> exactly one allowed product/runtime file, not one file -> one patchlet. Multiple patchlets may target the same file, and semantic proof still requires orchestrator-owned coverage before DONE. See `docs/general_work_decomposition.md`.
+Partial apply is separate from `DONE`: `apply-results --scope accepted
+--allow-partial` applies only accepted checkpoints and warns that the full
+master prompt may not be satisfied.

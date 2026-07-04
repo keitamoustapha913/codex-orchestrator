@@ -9,10 +9,8 @@ from codex_orchestrator.jsonio import read_json, write_json
 from codex_orchestrator.operator_events import append_operator_event
 from codex_orchestrator.patchlet_planner import validate_patchlet_plan
 from codex_orchestrator.prompt_index import upsert_prompt_index_entry
-from codex_orchestrator.semantic_goals import load_semantic_goal_spec, required_structured_criteria
 from codex_orchestrator.state import load_state, transition
 from codex_orchestrator.target_repo import TargetRepoContext
-from codex_orchestrator.work_decomposition import build_work_decomposition_plan
 
 
 def _slug(path: str) -> str:
@@ -50,28 +48,27 @@ def _transaction_group_plan_path(ctx: TargetRepoContext) -> Path:
 
 
 def _ensure_decomposition_plan(ctx: TargetRepoContext, *, timeout_seconds: int) -> dict | None:
-    plan_path = _patchlet_plan_path(ctx)
-    if plan_path.exists():
-        plan = read_json(plan_path)
-        validate_patchlet_plan(plan)
-        return plan
-    required_paths = [
-        ctx.paths.inventory_graph,
-        ctx.paths.workflow_dir / "proof_obligations.json",
-        ctx.paths.workflow_dir / "goal_interpretation.json",
-        ctx.paths.workflow_dir / "master_prompt_frozen.json",
+    required_artifacts = [
+        _decomposition_dir(ctx) / "impact_dependency_analysis.json",
+        _decomposition_dir(ctx) / "work_decomposition_plan.json",
+        _decomposition_dir(ctx) / "work_slices.json",
+        _decomposition_dir(ctx) / "patchlet_plan.json",
+        _decomposition_dir(ctx) / "dependency_graph.json",
+        _decomposition_dir(ctx) / "transaction_group_plan.json",
     ]
-    if not all(path.exists() for path in required_paths):
-        return None
-    build_work_decomposition_plan(
-        repo_root=ctx.root,
-        workflow_root=ctx.paths.workflow_dir,
-        inventory_graph=read_json(ctx.paths.inventory_graph),
-        proof_obligations=read_json(ctx.paths.workflow_dir / "proof_obligations.json"),
-        goal_interpretation=read_json(ctx.paths.workflow_dir / "goal_interpretation.json"),
-        master_prompt_frozen=read_json(ctx.paths.workflow_dir / "master_prompt_frozen.json"),
-        timeout_seconds=timeout_seconds,
-    )
+    missing = [str(path.relative_to(ctx.root)) for path in required_artifacts if not path.exists()]
+    if missing:
+        append_operator_event(
+            ctx.root,
+            event_type="work_decomposition_invalid",
+            severity="error",
+            stage="PATCHLET_COMPILATION_REQUIRED",
+            summary="Patchlet compilation blocked: required decomposition artifacts are missing.",
+            artifact_paths=[],
+            details={"missing_artifacts": missing, "failure_signature": "missing_required_decomposition_artifact"},
+        )
+        raise RuntimeError("Cannot compile patchlets: missing required decomposition artifacts: " + ", ".join(missing))
+    plan_path = _patchlet_plan_path(ctx)
     plan = read_json(plan_path)
     validate_patchlet_plan(plan)
     return plan
@@ -205,13 +202,7 @@ def _compile_from_patchlet_plan(
     soft_deadline: int,
     real_codex_contract: str,
 ) -> tuple[list[dict], list[dict]]:
-    invariant = invariants[0] if invariants else {
-        "invariant_id": "I001",
-        "master_goal_id": "G001",
-        "evidence_ids": ["E001"],
-        "graph_node_ids": ["N001"],
-        "regression_commands": [],
-    }
+    invariant = invariants[0] if invariants else {}
     patchlets: list[dict] = []
     for idx, planned in enumerate(patchlet_plan.get("patchlets", []), start=1):
         runtime_file = planned["allowed_product_runtime_file"]
@@ -225,10 +216,10 @@ def _compile_from_patchlet_plan(
             "kind": "patchlet",
             "patchlet_id": patchlet_id,
             "subprompt_path": f".codex-orchestrator/subprompts/{idx:04d}_{slug}.md",
-            "master_goal_ids": [invariant.get("master_goal_id", "G001")],
-            "invariant_ids": [invariant.get("invariant_id", "I001")],
-            "evidence_ids": invariant.get("evidence_ids", ["E001"]),
-            "graph_node_ids": invariant.get("graph_node_ids", ["N001"]),
+            "master_goal_ids": [invariant["master_goal_id"]] if invariant.get("master_goal_id") else [],
+            "invariant_ids": [invariant["invariant_id"]] if invariant.get("invariant_id") else [],
+            "evidence_ids": invariant.get("evidence_ids", []),
+            "graph_node_ids": invariant.get("graph_node_ids", []),
             "allowed_product_runtime_file": runtime_file,
             "allowed_product_runtime_files": [runtime_file],
             "allowed_artifact_dirs": [
@@ -284,7 +275,7 @@ def _compile_from_patchlet_plan(
                 "transaction_group_id": group["transaction_group_id"],
                 "description": group.get("operator_summary") or f"Transaction group for {', '.join(group.get('patchlet_ids', []))}",
                 "patchlet_ids": list(group.get("patchlet_ids", [])),
-                "invariant_ids": [invariant.get("invariant_id", "I001")],
+                "invariant_ids": [invariant["invariant_id"]] if invariant.get("invariant_id") else [],
                 "proof_obligation_ids": list(group.get("proof_obligation_ids", [])),
                 "goal_item_ids": list(group.get("goal_item_ids", [])),
                 "dependency_patchlet_ids": list(group.get("dependency_patchlet_ids", [])),
@@ -335,93 +326,18 @@ def compile_patchlets(ctx: TargetRepoContext) -> dict:
     real_codex_contract = _real_codex_contract_text()
     timeout_seconds = resolve_patchlet_timeout_seconds(os.environ)
     soft_deadline = soft_deadline_seconds(timeout_seconds)
-    semantic_spec = load_semantic_goal_spec(ctx.root)
-    semantic_criteria = required_structured_criteria(semantic_spec)
+    semantic_criteria: list[dict] = []
     patchlet_plan = _ensure_decomposition_plan(ctx, timeout_seconds=timeout_seconds)
-    if patchlet_plan is not None:
-        patchlets, transaction_groups = _compile_from_patchlet_plan(
-            ctx,
-            patchlet_plan=patchlet_plan,
-            invariants=invariants,
-            existing_patchlets=existing_patchlets,
-            semantic_criteria=semantic_criteria,
-            timeout_seconds=timeout_seconds,
-            soft_deadline=soft_deadline,
-            real_codex_contract=real_codex_contract,
-        )
-    else:
-        node_file_map = _node_file_map(ctx)
-        patchlets = []
-        transaction_groups = []
-
-        for idx, invariant in enumerate(invariants, start=1):
-            patchlet_id = f"P{idx:04d}"
-            node_ids = invariant.get("graph_node_ids", [])
-            producer_nodes = invariant.get("producer_nodes", [])
-            candidate_nodes = producer_nodes + [node_id for node_id in node_ids if node_id not in producer_nodes]
-            runtime_file = next((node_file_map[node_id] for node_id in candidate_nodes if node_id in node_file_map), None)
-            if runtime_file is None:
-                raise RuntimeError(f"Cannot compile patchlet for invariant {invariant['invariant_id']}: no product/runtime file found")
-            slug = _slug(runtime_file)
-            subprompt_rel = f".codex-orchestrator/subprompts/{idx:04d}_{slug}.md"
-            existing = existing_patchlets.get(patchlet_id, {})
-            patchlet = {
-                "schema_version": "1.0",
-                "kind": "patchlet",
-                "patchlet_id": patchlet_id,
-                "subprompt_path": subprompt_rel,
-                "master_goal_ids": [invariant["master_goal_id"]],
-                "invariant_ids": [invariant["invariant_id"]],
-                "evidence_ids": invariant["evidence_ids"],
-                "graph_node_ids": invariant["graph_node_ids"],
-                "allowed_product_runtime_file": runtime_file,
-                "allowed_product_runtime_files": [runtime_file],
-                "allowed_artifact_dirs": [
-                    ".artifacts/probes/",
-                    ".codex-orchestrator/reports/",
-                    ".codex-orchestrator/runs/",
-                ],
-                "transaction_group_id": f"TG{idx:03d}",
-                "depends_on": [],
-                "dependency_patchlet_ids": [],
-                "downstream_patchlet_ids": [],
-                "time_budget_seconds": timeout_seconds,
-                "prompt_budget_policy": {
-                    "must_fit_within_timeout": True,
-                    "avoid_memory_compacting": True,
-                    "max_scope_files": 1,
-                    "max_product_runtime_edit_files": 1,
-                },
-                "prompt_scope": {"memory_compacting_required": False},
-                "status": existing.get("status", "PENDING"),
-            }
-            _semantic_fields(patchlet, semantic_criteria)
-            for key in ["repair_plan_id", "source_failure_ids", "is_repair_patchlet"]:
-                if key in existing:
-                    patchlet[key] = existing[key]
-            patchlets.append(patchlet)
-            transaction_groups.append({
-                "schema_version": "1.0",
-                "kind": "transaction_group",
-                "transaction_group_id": f"TG{idx:03d}",
-                "description": f"Transaction group for {patchlet_id}",
-                "patchlet_ids": [patchlet_id],
-                "invariant_ids": [invariant["invariant_id"]],
-                "verification_commands": invariant.get("regression_commands", []),
-                "status": "PENDING",
-                "result": None,
-                "failure_ids": [],
-            })
-            _write_patchlet_subprompt(
-                ctx,
-                patchlet=patchlet,
-                idx=idx,
-                runtime_file=runtime_file,
-                semantic_criteria=semantic_criteria,
-                timeout_seconds=timeout_seconds,
-                soft_deadline=soft_deadline,
-                real_codex_contract=real_codex_contract,
-            )
+    patchlets, transaction_groups = _compile_from_patchlet_plan(
+        ctx,
+        patchlet_plan=patchlet_plan,
+        invariants=invariants,
+        existing_patchlets=existing_patchlets,
+        semantic_criteria=semantic_criteria,
+        timeout_seconds=timeout_seconds,
+        soft_deadline=soft_deadline,
+        real_codex_contract=real_codex_contract,
+    )
 
     for patchlet_id, patchlet in existing_patchlets.items():
         if patchlet_id.startswith("P") and patchlet not in patchlets and patchlet.get("is_repair_patchlet"):

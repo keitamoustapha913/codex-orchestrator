@@ -54,7 +54,7 @@ def test_probe_plan_records_side_effect_policy(git_repo: Path):
 
 def test_probe_plan_records_expected_outputs(git_repo: Path):
     ctx = _ctx(git_repo)
-    assert read_json(ctx.paths.workflow_dir / "probe_plan.json")["probes"][0]["expected_outputs"][0]["expected"] == "me"
+    assert read_json(ctx.paths.workflow_dir / "probe_plan.json")["probes"][0]["expected_observation"]["type"] == "exit_code_zero"
 
 
 def test_worker_proposed_probe_is_not_enough_to_prove_obligation(git_repo: Path):
@@ -66,9 +66,9 @@ def test_worker_proposed_probe_is_not_enough_to_prove_obligation(git_repo: Path)
     assert validate_probe_plan_for_required_obligations(proof_obligations=obligations, probe_plan=plan)["accepted"] is False
 
 
-def test_orchestrator_generated_probe_can_cover_required_obligation(git_repo: Path):
+def test_model_planned_orchestrator_validated_probe_can_cover_required_obligation(git_repo: Path):
     ctx = _ctx(git_repo)
-    assert read_json(ctx.paths.workflow_dir / "probe_plan.json")["probes"][0]["owner"] == "orchestrator_generated"
+    assert read_json(ctx.paths.workflow_dir / "probe_plan.json")["probes"][0]["owner"] == "model_planned_orchestrator_validated"
 
 
 def test_invalid_probe_plan_blocks_goal_coverage(git_repo: Path):
