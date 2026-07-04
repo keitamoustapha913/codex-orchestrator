@@ -25,6 +25,17 @@ obligations, probe plans, decomposition plans, patchlet plans, worker reports,
 and worker-authored probes are derived artifacts. They are not proof by
 themselves.
 
+Real Codex reports may contain shorthand `semantic_goal_results`. A shorthand
+item is accepted only as a raw worker semantic claim when it links to the
+current patchlet's selected goal item, selected proof obligation, slice
+boundary, and probe plan. The raw worker output is preserved. The claim remains
+`LINKED_PENDING_ORCHESTRATOR_PROOF` and does not set `passed=true`.
+
+The orchestrator rejects vague shorthand (`done`, `ok`, `looks good`,
+`complete`, `seems fine`, `probably passes`) and rejects future-slice claims.
+Canonical semantic results are generated only after independent probe rerun
+evidence supplies expected and actual values.
+
 Required artifacts include:
 
 ```text

@@ -138,6 +138,13 @@ Invalid timeout env values are structured errors before Codex launches.
 includes the env var name, the bad value, and `expected positive integer
 seconds`.
 
+RC6B report ingestion accepts safe real-Codex shorthand `semantic_goal_results`
+only as raw worker semantic claims. The normalized claim is linked to the
+current patchlet goal item, proof obligation, slice boundary, and probe plan,
+preserves raw worker output, rejects vague shorthand and future-slice claims,
+and remains pending until orchestrator-owned independent proof canonicalizes
+the result. Worker claims are not proof and do not satisfy DONE.
+
 Real-Codex attempts write compact liveness events to `progress.jsonl`. This is
 not success evidence. Timeout safe-failure preserves evidence and containment;
 it is not task success and not `DONE`.

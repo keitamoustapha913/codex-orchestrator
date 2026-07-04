@@ -23,3 +23,19 @@ General work decomposition maps work slices and patchlets to proof obligations a
 ## RC6 Patchlet-Scoped Proof
 
 patchlet-scoped proof runs only selected current obligations for the active work slice. Future obligations remain unproven, not failed, until their patchlets run. PARTIAL progress accepts patchlet progress but blocks DONE; workflow-level DONE still requires all required proof obligations and master-prompt satisfaction. one allowed file per patchlet is necessary but not sufficient, so same-file proof must also respect the slice-level allowed-change boundary and reject future slice changes.
+
+## RC6B Semantic Result Normalization
+
+Real Codex may emit shorthand `semantic_goal_results` such as
+`{"goal_item": "GI001", "result": "status updated from pending to ready-no-compat"}`.
+The orchestrator accepts that shape only as a raw worker semantic claim, never
+as proof. The raw worker output is preserved and linked to the current
+patchlet goal item, proof obligation, slice boundary, and probe plan.
+
+Worker claims are not proof. Vague shorthand such as `done`, `ok`, `looks
+good`, `complete`, `seems fine`, or `probably passes` is rejected. Shorthand
+that claims future slices or final master-prompt satisfaction is rejected.
+
+Canonical `passed=true` or `passed=false` semantic results are created only
+after the orchestrator-owned independent probe rerun. DONE still requires all
+required obligations and master-prompt satisfaction.

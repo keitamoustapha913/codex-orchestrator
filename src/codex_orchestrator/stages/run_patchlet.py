@@ -31,6 +31,7 @@ from codex_orchestrator.operator_events import append_operator_event
 from codex_orchestrator.prompt_index import upsert_prompt_index_entry
 from codex_orchestrator.report_ingestion import ingest_patchlet_report
 from codex_orchestrator.run_records import upsert_run_record
+from codex_orchestrator.semantic_result_normalization import canonicalize_semantic_goal_results_after_probe
 from codex_orchestrator.semantic_goal_runner import run_semantic_goal_checks
 from codex_orchestrator.semantic_goals import load_semantic_goal_spec, required_structured_criteria
 from codex_orchestrator.state import load_state, now_iso, transition
@@ -1408,6 +1409,30 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
                 patchlet=patchlet,
                 scope="patchlet",
             )
+            semantic_normalization_path = run_dir / "gates" / "semantic_goal_results_normalization_result.json"
+            if semantic_normalization_path.exists():
+                semantic_canonicalization_result = canonicalize_semantic_goal_results_after_probe(
+                    normalization_result=read_json(semantic_normalization_path),
+                    independent_probe_rerun_result=independent_result,
+                    proof_obligations=proof_obligations,
+                    probe_plan=probe_plan,
+                )
+                semantic_canonicalization_path = run_dir / "gates" / "semantic_goal_results_canonicalization_result.json"
+                write_json(semantic_canonicalization_path, semantic_canonicalization_result)
+                append_operator_event(
+                    ctx.root,
+                    event_type="semantic_goal_results_canonicalized_after_probe",
+                    severity="success" if all(row.get("passed") is True for row in semantic_canonicalization_result.get("canonical_results", [])) else "error",
+                    stage="PATCHLET_EXECUTION_IN_PROGRESS",
+                    summary=f"independent proof canonicalized semantic result for {pid}.",
+                    artifact_paths=[_record_path_for_manifest(ctx, semantic_canonicalization_path)],
+                    patchlet_id=pid,
+                    attempt_id=run_id,
+                    details={
+                        "canonical_result_count": len(semantic_canonicalization_result.get("canonical_results", [])),
+                        "proof_source": "independent_probe_rerun",
+                    },
+                )
             append_operator_event(
                 ctx.root,
                 event_type="patchlet_scoped_probe_selected",

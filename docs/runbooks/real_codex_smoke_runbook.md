@@ -140,6 +140,15 @@ fields such as `changed_product_runtime_file`, `deterministic_run_counts`,
 `before_after_state`, `row_ledger`, and `trace_ledger` must exist. Repair
 patchlets receive a report skeleton and must not invent new statuses.
 
+For RC6B semantic result failures, inspect
+`semantic_goal_results_normalization_result.json` and
+`semantic_goal_results_canonicalization_result.json`. Shorthand
+`semantic_goal_results` are accepted only as raw worker semantic claims, not as
+proof. The orchestrator links them to the current goal item, proof obligation,
+slice boundary, and probe plan, preserves the raw worker output, rejects vague
+or future-slice claims, and canonicalizes passed/failed only after independent
+probe rerun.
+
 For probe artifacts, canonical `probe_artifact_refs` entries are objects.
 Raw real-Codex reports may contain string path refs only before report
 ingestion. Safe strings are normalized only when the referenced files exist

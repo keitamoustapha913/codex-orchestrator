@@ -54,19 +54,40 @@
     "semantic_goal_results": {
       "type": "array",
       "items": {
-        "type": "object",
-        "required": ["criterion_id", "kind", "expected_value", "actual_value", "passed"],
-        "properties": {
-          "criterion_id": {"type": "string"},
-          "kind": {"type": "string"},
-          "expected_value": {},
-          "actual_value": {},
-          "passed": {"type": "boolean"},
-          "probe_artifact_ref": {"type": "object"}
-        },
-        "additionalProperties": true
+        "oneOf": [
+          {
+            "type": "object",
+            "required": ["criterion_id", "kind", "expected_value", "actual_value", "passed"],
+            "properties": {
+              "criterion_id": {"type": "string"},
+              "kind": {"type": "string"},
+              "expected_value": {},
+              "actual_value": {},
+              "passed": {"type": "boolean"},
+              "probe_artifact_ref": {"type": "object"}
+            },
+            "additionalProperties": true
+          },
+          {
+            "type": "object",
+            "required": ["result"],
+            "anyOf": [
+              {"required": ["goal_item"]},
+              {"required": ["goal_item_id"]},
+              {"required": ["goal"]}
+            ],
+            "properties": {
+              "goal_item": {"type": "string"},
+              "goal_item_id": {"type": "string"},
+              "goal": {"type": "string"},
+              "result": {"type": "string", "minLength": 1}
+            },
+            "additionalProperties": true
+          }
+        ]
       }
     },
+    "worker_semantic_claims": {"type": "array", "items": {"type": "object"}},
     "acceptance_criteria_result": {"enum": ["pass", "fail", "blocked"]}
   },
   "additionalProperties": true

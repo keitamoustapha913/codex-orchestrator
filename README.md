@@ -82,6 +82,14 @@ into canonical objects and unsafe refs fail with
 `docs/report_contract.md` for the canonical object shape, valid and invalid
 examples, `probe_artifact_refs_not_objects`, and the report-only repair policy.
 
+Real Codex shorthand `semantic_goal_results` are accepted only as raw worker
+semantic claims. They are linked to the current goal item, proof obligation,
+slice boundary, and probe plan; raw worker output is preserved. Vague shorthand
+and future-slice claims are rejected. The orchestrator creates canonical
+passed/failed semantic results only after independent probe rerun, so worker
+text never owns proof and DONE still requires all obligations and
+master-prompt satisfaction.
+
 The root-cause gate is explicit:
 `ROOT-CAUSE PROBE-ONLY INVESTIGATION`
 

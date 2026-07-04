@@ -42,3 +42,9 @@ The corrected path compiles patchlets from `patchlet_plan.json`, which is genera
 ## RC6 Slice Boundary Contract
 
 one allowed file per patchlet is necessary but not sufficient for same-file multi-patchlet workflows. Same-file patchlets require a slice-level allowed-change boundary, and future slice changes are rejected even when they are inside the same allowed product/runtime file. The boundary is propagated through `work_slices.json`, `patchlet_plan.json`, `patchlet_index.json`, worker prompts, worker memory, and the diff guard. patchlet-scoped proof runs only selected current obligations; future obligations remain unproven, not failed. PARTIAL progress accepts patchlet progress but blocks DONE. Report ingestion accepts pass: / fail: / blocked: descriptive prefixes. Artifact directories are allowed only under approved roots.
+
+Worker reports do not expand a patchlet's ownership. If real Codex emits
+shorthand `semantic_goal_results`, those entries are raw worker semantic claims
+only. They must link to the current slice boundary and selected proof
+obligation, they must not claim future slices, and they become canonical
+passed/failed semantic results only after orchestrator-owned independent proof.

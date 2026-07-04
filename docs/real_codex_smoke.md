@@ -66,6 +66,14 @@ not an object, and `changed_product_runtime_file`, `deterministic_run_counts`,
 `before_after_state`, `row_ledger`, and `trace_ledger` must be present. Repair
 patchlets receive a report skeleton with these fields.
 
+Real Codex may write shorthand `semantic_goal_results` with `goal_item` and
+`result`. Report ingestion may normalize that shorthand into
+`worker_semantic_claims` only when it is linked to the current patchlet goal,
+proof obligation, slice boundary, and probe plan. The raw worker output is
+preserved. The shorthand is not proof and cannot set `passed=true`; the
+orchestrator canonicalizes the semantic result only after independent probe
+rerun. Vague shorthand and future-slice claims are rejected before proof.
+
 For probe artifacts, canonical reports require object-shaped
 `probe_artifact_refs`. Raw real-Codex string refs are preserved in
 `.codex-orchestrator/reports/<PATCHLET_ID>.raw.json` and may be normalized only
