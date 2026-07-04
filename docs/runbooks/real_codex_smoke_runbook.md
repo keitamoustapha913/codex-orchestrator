@@ -259,3 +259,8 @@ raw Codex JSON. `cxor status --json` distinguishes active-but-silent from
 likely stalled. Loop-governor warning mode emits `loop_governor_warning`; safe
 failure requires explicit `--loop-governor-mode safe-fail
 --max-repeated-failure-signature 3`. Default tests do not run real Codex.
+
+For supported structured semantic goals, `DONE` also means the independent
+semantic goal runner passed. For example, `Make app return me and prove it.`
+must be backed by evidence that `app.main()` returns `"me"`; `"ok"` is not an
+acceptable substitute.

@@ -130,6 +130,13 @@ report_path.write_text(json.dumps({
         "probe_root": f".artifacts/probes/{patchlet_id}",
         "run_id": "run_001"
     }],
+    "semantic_goal_results": [{
+        "criterion_id": "SGC001",
+        "kind": "python_module_function_returns",
+        "expected_value": "ok",
+        "actual_value": "ok",
+        "passed": True
+    }],
     "acceptance_criteria_result": "pass"
 }, indent=2) + "\\n", encoding="utf-8")
 

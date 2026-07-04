@@ -51,6 +51,22 @@
         "additionalProperties": true
       }
     },
+    "semantic_goal_results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["criterion_id", "kind", "expected_value", "actual_value", "passed"],
+        "properties": {
+          "criterion_id": {"type": "string"},
+          "kind": {"type": "string"},
+          "expected_value": {},
+          "actual_value": {},
+          "passed": {"type": "boolean"},
+          "probe_artifact_ref": {"type": "object"}
+        },
+        "additionalProperties": true
+      }
+    },
     "acceptance_criteria_result": {"enum": ["pass", "fail", "blocked"]}
   },
   "additionalProperties": true

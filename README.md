@@ -481,3 +481,18 @@ recorded in `.codex-orchestrator/loop_governor.json`; warning mode emits
 `loop_governor_warning`, and explicit `--loop-governor-mode safe-fail
 --max-repeated-failure-signature 3` safe-fails with evidence. Default tests do
 not run real Codex.
+
+## Semantic Goal Satisfaction
+
+For structured goals, `DONE` requires independent semantic proof in addition
+to report, wrapper, hygiene, integration, transaction, and global verifier
+checks. The built-in Python main-return parser recognizes prompts such as
+`Make app return ok and prove it.` and `Make app return me and prove it.`,
+writes `.codex-orchestrator/semantic_goal_spec.json`, and verifies
+`app.main()` against the requested value.
+
+`VERIFIED_NO_CHANGE_NEEDED` is accepted only when the semantic goal runner
+proves the criterion already passes. If the prompt requires `"me"` but
+`app.main()` returns `"ok"`, the goal satisfaction gate records
+`semantic_goal_unsatisfied` and the workflow does not reach `DONE`. See
+`docs/semantic_goal_satisfaction.md`.

@@ -226,3 +226,8 @@ active, silent_but_active, likely_stalled, done, and failed states. Repeated
 repair-loop warnings use `loop_governor_warning`; explicit safe failure uses
 `--loop-governor-mode safe-fail --max-repeated-failure-signature 3`. Default
 tests must not invoke real Codex.
+
+Semantic goal satisfaction adds a stricter `DONE` requirement for structured
+goals. Built-in Python main-return prompts write `semantic_goal_spec.json`,
+run an independent semantic check, write `semantic_goal_check_result.json`,
+and gate patchlet acceptance through `goal_satisfaction_gate_result.json`.

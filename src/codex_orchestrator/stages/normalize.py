@@ -3,8 +3,12 @@ from __future__ import annotations
 import re
 
 from codex_orchestrator.jsonio import write_json
+from codex_orchestrator.prompt_index import upsert_prompt_index_entry
+from codex_orchestrator.operator_events import append_operator_event
+from codex_orchestrator.semantic_goals import compile_semantic_goal_spec, semantic_goal_summary
 from codex_orchestrator.state import load_state, sha256_file, transition
 from codex_orchestrator.target_repo import TargetRepoContext
+from codex_orchestrator.workflow_identity import read_workflow_identity, write_workflow_identity
 
 
 SECTION_NAMES = {
@@ -105,11 +109,57 @@ def normalize_master_prompt(ctx: TargetRepoContext) -> dict:
     text = ctx.paths.master_prompt.read_text(encoding="utf-8").strip()
     sections = _parse_prompt_sections(text)
     first_line = _extract_first_meaningful_line(text)
+    prompt_sha = sha256_file(ctx.paths.master_prompt)
+    identity = read_workflow_identity(ctx.root) or {}
+    semantic_spec = compile_semantic_goal_spec(
+        master_prompt_text=text,
+        master_prompt_path=ctx.paths.master_prompt,
+        master_prompt_sha256=prompt_sha,
+        workflow_id=identity.get("workflow_id"),
+        run_id=identity.get("run_id"),
+    )
+    semantic_spec_path = ctx.paths.workflow_dir / "semantic_goal_spec.json"
+    write_json(semantic_spec_path, semantic_spec)
+    semantic_summary = semantic_goal_summary(semantic_spec)
+    if identity:
+        identity.update(semantic_summary)
+        write_workflow_identity(ctx, identity)
+    upsert_prompt_index_entry(ctx.root, {
+        "kind": "master_prompt",
+        "stage": "GOAL_SPEC_READY",
+        "title": "Master prompt",
+        "summary": "Copied master prompt for this workflow.",
+        "path": ctx.paths.master_prompt,
+        "patchlet_id": None,
+        "attempt_id": None,
+        "model": None,
+        "reasoning": None,
+        "contracts": [],
+        "artifact_paths": [".codex-orchestrator/semantic_goal_spec.json"],
+        **semantic_summary,
+    })
+    append_operator_event(
+        ctx.root,
+        event_type="semantic_goal_spec_created",
+        severity="info" if semantic_spec["semantic_mode"] == "structured" else "warning",
+        stage="GOAL_SPEC_READY",
+        summary=(
+            f"Semantic goal spec created with {len(semantic_spec.get('criteria', []))} structured criteria."
+            if semantic_spec["semantic_mode"] == "structured"
+            else "Semantic goal verification is unsupported for this prompt."
+        ),
+        artifact_paths=[".codex-orchestrator/semantic_goal_spec.json"],
+        details={
+            "semantic_mode": semantic_spec["semantic_mode"],
+            "semantic_status": semantic_spec["semantic_status"],
+            "semantic_criteria_count": len(semantic_spec.get("criteria", [])),
+        },
+    )
     goal = {
         "schema_version": "1.0",
         "kind": "goal_spec",
         "master_goal": text,
-        "master_prompt_sha256": sha256_file(ctx.paths.master_prompt),
+        "master_prompt_sha256": prompt_sha,
         "success_goals": _parse_goal_items(
             sections["success_goals"],
             default_id="G001",
@@ -142,6 +192,7 @@ def normalize_master_prompt(ctx: TargetRepoContext) -> dict:
             "durable probe artifacts",
             "no blind retry",
         ]),
+        **semantic_summary,
     }
     write_json(ctx.paths.goal_spec, goal)
     state = load_state(ctx)

@@ -10,6 +10,7 @@ from codex_orchestrator.operator_events import append_operator_event
 from codex_orchestrator.state import load_state, now_iso, transition
 from codex_orchestrator.target_repo import TargetRepoContext
 from codex_orchestrator.validators.report_validator import ReportValidationError, validate_patchlet_report_file
+from codex_orchestrator.semantic_goals import load_semantic_goal_spec, required_structured_criteria
 from .verify_group import verify_all_groups
 
 
@@ -45,6 +46,64 @@ def _repair_plan_summary(ctx: TargetRepoContext, plan_path: Path) -> dict:
         "application_exists": application_exists,
         "next_stage": application.get("next_stage"),
         "requires_patchlet_regeneration": bool(plan.get("requires_patchlet_regeneration", False)),
+    }
+
+
+def _latest_semantic_result(ctx: TargetRepoContext) -> dict:
+    spec = load_semantic_goal_spec(ctx.root)
+    criteria = required_structured_criteria(spec)
+    result_path = ctx.paths.workflow_dir / "semantic_goal_checks" / "semantic_goal_check_result.json"
+    result = read_json(result_path) if result_path.exists() else None
+    if not spec:
+        return _semantic_summary("UNSUPPORTED", None, [], [], [], [], [])
+    if not criteria:
+        return _semantic_summary("UNSUPPORTED", ".codex-orchestrator/semantic_goal_spec.json", [], [], [], [], [])
+    required_ids = [criterion["criterion_id"] for criterion in criteria]
+    if not result:
+        return _semantic_summary("BLOCKED", ".codex-orchestrator/semantic_goal_spec.json", [], [], required_ids, [], [])
+    rows = result.get("criteria", [])
+    proven = [row["criterion_id"] for row in rows if row.get("passed") is True]
+    failed = [row["criterion_id"] for row in rows if row.get("passed") is not True]
+    unproven = [criterion_id for criterion_id in required_ids if criterion_id not in proven and criterion_id not in failed]
+    status = "FAILED" if failed else ("BLOCKED" if unproven else "PASSED")
+    matrix_rows = [
+        {
+            "criterion_id": row.get("criterion_id"),
+            "status": "PASSED" if row.get("passed") else "FAILED",
+            "expected": row.get("expected_value"),
+            "actual": row.get("actual_value"),
+            "evidence": ".codex-orchestrator/semantic_goal_checks/semantic_goal_check_result.json",
+        }
+        for row in rows
+    ]
+    return _semantic_summary(
+        status,
+        ".codex-orchestrator/semantic_goal_spec.json",
+        [".codex-orchestrator/semantic_goal_checks/semantic_goal_check_result.json"],
+        proven,
+        unproven,
+        failed,
+        matrix_rows,
+    )
+
+
+def _semantic_summary(
+    status: str,
+    spec_path: str | None,
+    check_results: list[str],
+    proven: list[str],
+    unproven: list[str],
+    failed: list[str],
+    matrix_rows: list[dict],
+) -> dict:
+    return {
+        "semantic_goal_status": status,
+        "semantic_goal_spec_path": spec_path,
+        "semantic_goal_check_results": check_results,
+        "proven_semantic_criterion_ids": proven,
+        "unproven_semantic_criterion_ids": unproven,
+        "failed_semantic_criterion_ids": failed,
+        "semantic_goals": matrix_rows,
     }
 
 
@@ -214,6 +273,7 @@ def verify_global(ctx: TargetRepoContext) -> GlobalVerificationResult:
     unresolved_failures = [failure_id for failure_id in all_failure_ids if failure_id not in resolved_failure_ids]
     integration_final = write_final_diff(ctx)
     target_working_tree_clean = target_product_runtime_clean(ctx)
+    semantic = _latest_semantic_result(ctx)
 
     done = (
         bool(index.get("patchlets"))
@@ -225,6 +285,7 @@ def verify_global(ctx: TargetRepoContext) -> GlobalVerificationResult:
         and not unproven_invariant_ids
         and not unresolved_failures
         and not unproven_goal_ids
+        and semantic["semantic_goal_status"] in {"PASSED", "UNSUPPORTED"}
     )
     verification_dir = _global_verification_dir(ctx)
     verification_dir.mkdir(parents=True, exist_ok=True)
@@ -272,6 +333,7 @@ def verify_global(ctx: TargetRepoContext) -> GlobalVerificationResult:
             for patchlet in patchlets
         ],
         "failures": all_failure_ids,
+        "semantic_goals": semantic["semantic_goals"],
         "unresolved": unresolved_failures,
         "verdict": "DONE_ALLOWED" if done else "DONE_BLOCKED",
     }
@@ -286,7 +348,9 @@ def verify_global(ctx: TargetRepoContext) -> GlobalVerificationResult:
         or unproven
         or failed_invariant_ids
         or unproven_invariant_ids
-        or unproven_goal_ids,
+        or unproven_goal_ids
+        or semantic["failed_semantic_criterion_ids"]
+        or semantic["unproven_semantic_criterion_ids"],
     })
     status = "DONE" if done else "FAILED"
     final = {
@@ -312,6 +376,12 @@ def verify_global(ctx: TargetRepoContext) -> GlobalVerificationResult:
         "evidence": [str(item) for item in evidence],
         "verification_matrix": str(matrix_path),
         "global_gate_result": str(global_gate_path),
+        "semantic_goal_status": semantic["semantic_goal_status"],
+        "semantic_goal_spec_path": semantic["semantic_goal_spec_path"],
+        "semantic_goal_check_results": semantic["semantic_goal_check_results"],
+        "proven_semantic_criterion_ids": semantic["proven_semantic_criterion_ids"],
+        "unproven_semantic_criterion_ids": semantic["unproven_semantic_criterion_ids"],
+        "failed_semantic_criterion_ids": semantic["failed_semantic_criterion_ids"],
         **integration_final,
         "target_working_tree_clean": target_working_tree_clean,
     }

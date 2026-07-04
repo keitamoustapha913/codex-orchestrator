@@ -1693,3 +1693,11 @@ integration validation: passed
 target product files: clean
 release tag: v0.1.0-rc3
 ```
+
+## Semantic Goal Satisfaction
+
+For simple Python return-value prompts, Codex Orchestrator records a semantic
+goal spec and independently verifies the accepted state. A prompt such as
+`Make app return me and prove it.` requires `app.main()` to return `"me"`. If
+the app still returns `"ok"`, the goal satisfaction gate fails with
+`semantic_goal_unsatisfied` and the workflow must not reach `DONE`.

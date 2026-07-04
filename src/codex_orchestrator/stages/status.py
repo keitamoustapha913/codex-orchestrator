@@ -6,6 +6,7 @@ from codex_orchestrator.state import load_state
 from codex_orchestrator.target_repo import TargetRepoContext
 from codex_orchestrator.workflow_identity import read_workflow_identity
 from codex_orchestrator.workflow_lifecycle import read_workflow_registry
+from codex_orchestrator.semantic_goals import load_semantic_goal_spec
 import subprocess
 
 
@@ -39,6 +40,7 @@ def status(ctx: TargetRepoContext) -> dict:
                 "result_path": f".codex-orchestrator/runs/{attempt_id}/gates/report_ingestion_result.json",
             }
             break
+    semantic_goal = _semantic_goal_status(ctx)
     return {
         "schema_version": "1.0",
         "kind": "operator_status",
@@ -76,6 +78,7 @@ def status(ctx: TargetRepoContext) -> dict:
         "classification": activity.get("classification"),
         "next_action": activity.get("next_action"),
         "last_report_ingestion": last_report_ingestion,
+        "semantic_goal": semantic_goal,
     }
 
 
@@ -84,3 +87,34 @@ def _current_dirty_status(ctx: TargetRepoContext) -> list[str]:
     if result.returncode != 0:
         return []
     return [line for line in result.stdout.splitlines() if line and not line[3:].startswith((".codex-orchestrator/", ".artifacts/"))]
+
+
+def _semantic_goal_status(ctx: TargetRepoContext) -> dict:
+    spec = load_semantic_goal_spec(ctx.root)
+    result_path = ctx.paths.workflow_dir / "semantic_goal_checks" / "semantic_goal_check_result.json"
+    check = read_json(result_path) if result_path.exists() else None
+    if not spec:
+        return {"mode": "missing", "status": "UNSUPPORTED", "criteria_count": 0, "passed": [], "failed": [], "spec_path": None, "latest_check_result_path": None}
+    passed = []
+    failed = []
+    if check:
+        for row in check.get("criteria", []):
+            item = {
+                "criterion_id": row.get("criterion_id"),
+                "expected_value": row.get("expected_value"),
+                "actual_value": row.get("actual_value"),
+            }
+            if row.get("passed") is True:
+                passed.append(item)
+            else:
+                failed.append(item)
+    status_value = "FAILED" if failed else ("PASSED" if passed else spec.get("semantic_status"))
+    return {
+        "mode": spec.get("semantic_mode"),
+        "status": status_value,
+        "criteria_count": len(spec.get("criteria", [])),
+        "passed": passed,
+        "failed": failed,
+        "spec_path": ".codex-orchestrator/semantic_goal_spec.json",
+        "latest_check_result_path": ".codex-orchestrator/semantic_goal_checks/semantic_goal_check_result.json" if check else None,
+    }

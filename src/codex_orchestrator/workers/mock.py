@@ -12,6 +12,19 @@ from .base import Worker, WorkerResult, ensure_run_context
 
 def _default_report(patchlet: dict) -> dict:
     pid = patchlet["patchlet_id"]
+    semantic_goal_results = []
+    behavior = patchlet.get("expected_behavior") or {}
+    criteria = patchlet.get("semantic_criteria") or []
+    if behavior.get("kind") == "python_module_function_returns":
+        expected = behavior.get("expected_value")
+        semantic_goal_results.append({
+            "criterion_id": criteria[0] if criteria else "SGC001",
+            "kind": "python_module_function_returns",
+            "expected_value": expected,
+            "actual_value": expected,
+            "passed": True,
+            "probe_artifact_ref": {"path": f".artifacts/probes/{pid}/run_001/semantic_goal_result.json"},
+        })
     return {
         "schema_version": "1.0",
         "kind": "patchlet_report",
@@ -32,6 +45,7 @@ def _default_report(patchlet: dict) -> dict:
             "recursive_why_audit": [
                 "Why did the behavior appear change-worthy? Probe-driven investigation suggested no persistent runtime defect.",
                 "Why is the owner boundary sufficient? The allowed file defines the immediate runtime boundary under test.",
+                "Why is the mock result bounded? The mock worker only edits the allowed product/runtime file or durable artifacts.",
             ],
         },
         "before_after_state": [{"before": "satisfying", "after": "satisfying"}],
@@ -43,6 +57,7 @@ def _default_report(patchlet: dict) -> dict:
             "probe_root": f".artifacts/probes/{pid}",
             "run_id": "run_001",
         }],
+        "semantic_goal_results": semantic_goal_results,
         "acceptance_criteria_result": "pass",
     }
 
@@ -81,6 +96,7 @@ def _write_probe_run_artifacts(run_ctx: PatchletRunContext, patchlet_id: str) ->
         "before_state.json": json.dumps({"state": "before"}) + "\n",
         "after_state.json": json.dumps({"state": "after"}) + "\n",
         "cleanup_proof.json": json.dumps({"cleanup_passed": True}) + "\n",
+        "semantic_goal_result.json": json.dumps({"mock": "semantic"}) + "\n",
     }
     changed = [f".artifacts/probes/{patchlet_id}/probe.py"]
     for name, content in files_and_contents.items():
@@ -88,6 +104,17 @@ def _write_probe_run_artifacts(run_ctx: PatchletRunContext, patchlet_id: str) ->
         path.write_text(content, encoding="utf-8")
         changed.append(f".artifacts/probes/{patchlet_id}/run_001/{name}")
     return changed
+
+
+def _structured_python_return_content(patchlet: dict) -> str | None:
+    behavior = patchlet.get("expected_behavior") or {}
+    if behavior.get("kind") != "python_module_function_returns":
+        return None
+    if behavior.get("target_file") != patchlet.get("allowed_product_runtime_file"):
+        return None
+    if behavior.get("module_name") != "app" or behavior.get("function_name") != "main":
+        return None
+    return f"def main():\n    return {behavior.get('expected_value')!r}\n"
 
 
 class MockWorker(Worker):
@@ -114,12 +141,30 @@ class MockWorker(Worker):
             product = run_ctx.execution_root / patchlet["allowed_product_runtime_file"]
             with product.open("a", encoding="utf-8") as fh:
                 fh.write("\n# cxor mock allowed product change\n")
+        if scenario.get("allowed_product_content") is not None:
+            product = run_ctx.execution_root / patchlet["allowed_product_runtime_file"]
+            product.write_text(str(scenario["allowed_product_content"]), encoding="utf-8")
+        semantic_content = _structured_python_return_content(patchlet)
+        if semantic_content is not None and scenario.get("change_allowed_product"):
+            semantic_content += "\n# cxor mock allowed product change\n"
+        semantic_autofix_applied = False
+        if (
+            semantic_content is not None
+            and not scenario.get("disable_semantic_autofix")
+            and not scenario.get("force_failed_report")
+            and scenario.get("allowed_product_content") is None
+        ):
+            product = run_ctx.execution_root / patchlet["allowed_product_runtime_file"]
+            before = product.read_text(encoding="utf-8") if product.exists() else None
+            if before != semantic_content:
+                product.write_text(semantic_content, encoding="utf-8")
+                semantic_autofix_applied = True
 
         changed_probe_artifacts = _write_probe_run_artifacts(run_ctx, pid)
 
         report = _default_report(patchlet)
         report["changed_artifact_files"] = changed_probe_artifacts
-        if scenario.get("status") == "COMPLETE":
+        if scenario.get("status") == "COMPLETE" or semantic_autofix_applied:
             report["status"] = "COMPLETE"
             report["changed_product_runtime_file"] = patchlet["allowed_product_runtime_file"]
             report["acceptance_criteria_result"] = "pass"

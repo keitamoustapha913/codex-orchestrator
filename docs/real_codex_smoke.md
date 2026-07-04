@@ -319,3 +319,11 @@ uv run --no-sync cxor auto \
 ```
 
 Default tests do not invoke real Codex.
+
+## Semantic Goal Smoke Expectations
+
+For structured semantic prompts, the smoke should also show semantic goal
+evidence. If the prompt says `Make app return me and prove it.`, `DONE` is
+acceptable only when the accepted state has `app.main()` returning `"me"`. If
+real Codex reports no change needed while `app.main()` still returns `"ok"`,
+the semantic goal gate must block acceptance with `semantic_goal_unsatisfied`.

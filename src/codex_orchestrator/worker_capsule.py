@@ -29,6 +29,7 @@ class WorkerCapsule:
 
 REQUIRED_MEMORY_FILES = (
     "TASK_CONTRACT.md",
+    "SEMANTIC_GOAL_CONTRACT.md",
     "REPORT_SCHEMA_CONTRACT.md",
     "FINAL_REPORT_CONTRACT.md",
     "PYTHON_RUNTIME_SIDE_EFFECT_CONTRACT.md",
@@ -134,13 +135,50 @@ def _minimal_report_skeleton(patchlet_id: str) -> str:
                     ],
                 }
             ],
+            "semantic_goal_results": [],
             "acceptance_criteria_result": "pass",
         },
         indent=2,
     )
 
 
-def report_schema_contract_text(*, patchlet_id: str, report_path: str) -> str:
+def _semantic_contract_report_section(patchlet: dict | None = None) -> str:
+    criteria = (patchlet or {}).get("expected_behavior")
+    criterion_ids = (patchlet or {}).get("semantic_criteria") or []
+    if not criteria or criteria.get("kind") != "python_module_function_returns":
+        return ""
+    criterion_id = criterion_ids[0] if criterion_ids else "SGC001"
+    expected = criteria.get("expected_value")
+    return (
+        "## semantic_goal_results\n\n"
+        "When semantic_goal_spec.json has required criteria, the report must include semantic_goal_results.\n\n"
+        f"For {criterion_id}:\n\n"
+        "Expected:\n"
+        f"  {criteria.get('module_name')}.{criteria.get('function_name')}() == {expected!r}\n\n"
+        "Valid passing entry:\n"
+        "```json\n"
+        "{\n"
+        f"  \"criterion_id\": \"{criterion_id}\",\n"
+        "  \"kind\": \"python_module_function_returns\",\n"
+        f"  \"expected_value\": {json.dumps(expected)},\n"
+        f"  \"actual_value\": {json.dumps(expected)},\n"
+        "  \"passed\": true\n"
+        "}\n"
+        "```\n\n"
+        "Invalid for this goal:\n"
+        "```json\n"
+        "{\n"
+        f"  \"criterion_id\": \"{criterion_id}\",\n"
+        f"  \"expected_value\": {json.dumps(expected)},\n"
+        "  \"actual_value\": \"ok\",\n"
+        "  \"passed\": true\n"
+        "}\n"
+        "```\n\n"
+        f"If actual_value is \"ok\" and expected_value is {json.dumps(expected)}, passed must be false.\n\n"
+    )
+
+
+def report_schema_contract_text(*, patchlet_id: str, report_path: str, patchlet: dict | None = None) -> str:
     allowed = "\n".join(f"- {status}" for status in ALLOWED_REPORT_STATUSES)
     forbidden = "\n".join(f"- {status}" for status in FORBIDDEN_REPORT_STATUSES)
     return (
@@ -223,6 +261,7 @@ def report_schema_contract_text(*, patchlet_id: str, report_path: str) -> str:
         "```\n\n"
         "If no probe artifacts are produced, use `\"probe_artifact_refs\": []`.\n"
         "If probe artifacts are produced, every entry must be an object, never a string.\n\n"
+        f"{_semantic_contract_report_section(patchlet)}"
         "## Minimal valid JSON skeleton\n\n"
         "```json\n"
         f"{_minimal_report_skeleton(patchlet_id)}\n"
@@ -384,6 +423,7 @@ def _task_contract_text(
     report_contract_path = run_context.run_dir / "worker_memory" / "REPORT_SCHEMA_CONTRACT.md"
     final_report_contract_path = run_context.run_dir / "worker_memory" / "FINAL_REPORT_CONTRACT.md"
     python_contract_path = run_context.run_dir / "worker_memory" / "PYTHON_RUNTIME_SIDE_EFFECT_CONTRACT.md"
+    semantic_contract_path = run_context.run_dir / "worker_memory" / "SEMANTIC_GOAL_CONTRACT.md"
     return (
         "# TASK CONTRACT\n\n"
         f"- patchlet id: `{patchlet_id}`\n"
@@ -397,6 +437,7 @@ def _task_contract_text(
         f"- report schema contract: `{report_contract_path}`\n"
         f"- final report contract: `{final_report_contract_path}`\n"
         f"- Python runtime side-effect contract: `{python_contract_path}`\n"
+        f"- semantic goal contract: `{semantic_contract_path}`\n"
         f"- required probe root: `.artifacts/probes/{patchlet_id}`\n"
         f"- worker stage dir env: `$CXOR_WORKER_STAGE_DIR` = `{worker_stage_dir}`\n"
         f"- required preflight stage file: `$CXOR_WORKER_STAGE_DIR/00_preflight.md` = `{preflight_path}`\n"
@@ -413,6 +454,47 @@ def _task_contract_text(
         "- root-cause/probe contract reminder: direct probe first, then minimal fix, then deterministic proof and negative controls\n"
         "- no blind retry rule: blind retry is not allowed\n"
         "- orchestrator owns gate results: Codex may not write or overwrite gate result files\n"
+    )
+
+
+def _semantic_goal_contract_text(patchlet: dict) -> str:
+    behavior = patchlet.get("expected_behavior") or {}
+    criteria = patchlet.get("semantic_criteria") or []
+    if behavior.get("kind") != "python_module_function_returns":
+        return (
+            "# SEMANTIC GOAL CONTRACT\n\n"
+            "- Semantic goal spec: .codex-orchestrator/semantic_goal_spec.json\n"
+            "- Semantic mode: unsupported or unavailable for this patchlet.\n"
+        )
+    criterion_id = criteria[0] if criteria else "SGC001"
+    expected = behavior.get("expected_value")
+    module = behavior.get("module_name")
+    function = behavior.get("function_name")
+    return (
+        "# SEMANTIC GOAL CONTRACT\n\n"
+        "- Semantic goal spec: .codex-orchestrator/semantic_goal_spec.json\n"
+        f"- Required criterion: {criterion_id}\n"
+        f"- {module}.{function}() expected return value: {expected!r}\n"
+        "- VERIFIED_NO_CHANGE_NEEDED is allowed only if the criterion passes before edits.\n"
+        "- COMPLETE is allowed only if the criterion passes after edits.\n"
+        "- A negative control showing another value is not enough; the positive criterion must pass.\n"
+    )
+
+
+def _semantic_worker_prompt_section(patchlet: dict) -> str:
+    behavior = patchlet.get("expected_behavior") or {}
+    if behavior.get("kind") != "python_module_function_returns":
+        return ""
+    expected = behavior.get("expected_value")
+    module = behavior.get("module_name")
+    function = behavior.get("function_name")
+    mismatch = "ok" if expected != "ok" else "not ok"
+    return (
+        "## Semantic acceptance criteria\n\n"
+        f"The current semantic goal is: {module}.{function}() must return {expected!r}.\n\n"
+        f"Before reporting VERIFIED_NO_CHANGE_NEEDED, you must prove {module}.{function}() already returns {expected!r}.\n"
+        f"Before reporting COMPLETE, you must prove {module}.{function}() returns {expected!r} after your change.\n"
+        f"A probe that proves {module}.{function}() returns {mismatch!r} does not satisfy this goal.\n\n"
     )
 
 
@@ -476,6 +558,7 @@ def ensure_worker_memory(
     report_contract_path = capsule.worker_memory_dir / "REPORT_SCHEMA_CONTRACT.md"
     final_report_contract_path = capsule.worker_memory_dir / "FINAL_REPORT_CONTRACT.md"
     python_contract_path = capsule.worker_memory_dir / "PYTHON_RUNTIME_SIDE_EFFECT_CONTRACT.md"
+    semantic_contract_path = capsule.worker_memory_dir / "SEMANTIC_GOAL_CONTRACT.md"
     report_path = f".codex-orchestrator/reports/{patchlet['patchlet_id']}.json"
     final_report_path = f"{capsule.worker_stage_dir / '05_final_report.md'}"
     probe_root = f".artifacts/probes/{patchlet['patchlet_id']}"
@@ -483,6 +566,7 @@ def ensure_worker_memory(
         report_schema_contract_text(
             patchlet_id=patchlet["patchlet_id"],
             report_path=report_path,
+            patchlet=patchlet,
         ),
         encoding="utf-8",
     )
@@ -497,6 +581,7 @@ def ensure_worker_memory(
         encoding="utf-8",
     )
     python_contract_path.write_text(python_runtime_side_effect_contract_text(), encoding="utf-8")
+    semantic_contract_path.write_text(_semantic_goal_contract_text(patchlet), encoding="utf-8")
     write_json(capsule.worker_memory_dir / "LIVE_MEMORY.json", live_memory)
     (capsule.worker_memory_dir / "LIVE_MEMORY.md").write_text(
         "# LIVE MEMORY\n\n"
@@ -507,6 +592,7 @@ def ensure_worker_memory(
         f"- report schema contract: `{report_contract_path}`\n"
         f"- final report contract: `{final_report_contract_path}`\n"
         f"- Python runtime side-effect contract: `{python_contract_path}`\n"
+        f"- semantic goal contract: `{semantic_contract_path}`\n"
         f"- probe root: `{live_memory['required_probe_root']}`\n",
         encoding="utf-8",
     )
@@ -536,6 +622,7 @@ def ensure_worker_memory(
         f"- Read and obey `{report_contract_path}` before writing the report.\n"
         f"- Read and obey `{final_report_contract_path}` before writing the final Markdown report.\n"
         f"- Read and obey `{python_contract_path}` before running Python probes.\n"
+        f"- Read and obey `{semantic_contract_path}` before claiming semantic success.\n"
         f"- `.artifacts/probes/{patchlet['patchlet_id']}/...`\n"
         + "\n"
         "Product/runtime edits must happen only under `$CXOR_EXECUTION_ROOT`. "
@@ -703,6 +790,7 @@ def write_wrapper_gate_result(
     diff_allowed: bool | None,
     report_valid: bool | None,
     probe_valid: bool | None,
+    semantic_goal_valid: bool | None = None,
     next_state: str,
     report_path: Path | None = None,
     reasons: list[str] | None = None,
@@ -753,7 +841,7 @@ def write_wrapper_gate_result(
         "attempt_id": capsule.attempt_id,
         "worker_mode": worker_mode,
         "execution_mode": "worktree" if run_context.is_worktree else "direct",
-        "accepted": bool(worker_exit_ok and artifact_gate == "pass" and memory_gate == "pass" and stage_gate == "pass" and diff_allowed is not False and report_valid is not False and probe_valid is not False),
+        "accepted": bool(worker_exit_ok and artifact_gate == "pass" and memory_gate == "pass" and stage_gate == "pass" and diff_allowed is not False and report_valid is not False and probe_valid is not False and semantic_goal_valid is not False),
         "worker_exit_gate": "pass" if worker_exit_ok else "fail",
         "artifact_gate": artifact_gate,
         "memory_gate": memory_gate,
@@ -761,6 +849,7 @@ def write_wrapper_gate_result(
         "diff_gate": "pass" if diff_allowed is True else ("fail" if diff_allowed is False else "not_run"),
         "report_gate": "pass" if report_valid is True else ("fail" if report_valid is False else "not_run"),
         "probe_gate": "pass" if probe_valid is True else ("fail" if probe_valid is False else "not_run"),
+        "semantic_goal_gate": "pass" if semantic_goal_valid is True else ("fail" if semantic_goal_valid is False else "not_run"),
         "final_status_gate": final_status_gate,
         "final_status_claim": final_status_claim,
         "final_status_marker": final_status["marker"],

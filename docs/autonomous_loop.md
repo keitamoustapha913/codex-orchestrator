@@ -217,3 +217,16 @@ and failed classifications. Repeated repair loops are visible in
 `loop_governor_warning`, while `--loop-governor-mode safe-fail
 --max-repeated-failure-signature 3` safe-fails with evidence. Default tests do
 not run real Codex.
+
+## Semantic Goal Satisfaction
+
+When the master prompt compiles into a structured semantic goal, the loop also
+writes `.codex-orchestrator/semantic_goal_spec.json` and requires independent
+semantic goal satisfaction. For the built-in Python family, `Make app return
+me and prove it.` means `app.main()` must return `"me"`. A probe or report
+that only proves `"ok"` does not satisfy that goal.
+
+`VERIFIED_NO_CHANGE_NEEDED` requires independent semantic proof that no change
+is needed. Final `DONE` requires semantic pass for structured goals.
+Unsupported natural-language goals are recorded as unsupported rather than
+semantically proven.

@@ -233,6 +233,10 @@ def regenerate_patchlets(ctx: TargetRepoContext, *, from_repair_plan: str = "lat
             "source_failure_type": failure.get("source_type") or "patchlet",
             "source_transaction_group_id": failure.get("source_transaction_group_id") if failure.get("source_type") == "transaction_group" else None,
         }
+        if source_patchlet.get("semantic_criteria"):
+            repair_patchlet["semantic_criteria"] = source_patchlet.get("semantic_criteria")
+        if source_patchlet.get("expected_behavior"):
+            repair_patchlet["expected_behavior"] = source_patchlet.get("expected_behavior")
         index.setdefault("patchlets", []).append(repair_patchlet)
         write_json(ctx.paths.patchlet_index, index)
         subprompt = ctx.root / subprompt_rel
@@ -258,6 +262,7 @@ def regenerate_patchlets(ctx: TargetRepoContext, *, from_repair_plan: str = "lat
             + report_schema_contract_text(
                 patchlet_id=patchlet_id,
                 report_path=f".codex-orchestrator/reports/{patchlet_id}.json",
+                patchlet=repair_patchlet,
             )
             + "\n## Final report contract\n\n"
             + final_report_contract_text(

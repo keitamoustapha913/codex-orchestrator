@@ -381,3 +381,9 @@ Implemented: loop governance through `.codex-orchestrator/loop_governor.json`.
 Repeated repair-loop warnings emit `loop_governor_warning`; explicit safe
 failure is configured with `--loop-governor-mode safe-fail
 --max-repeated-failure-signature 3`. Default tests do not run real Codex.
+
+Implemented: semantic goal satisfaction for the built-in Python main-return
+prompt family. Structured goals write `semantic_goal_spec.json`, run
+independent semantic checks, gate patchlet acceptance through
+`goal_satisfaction_gate_result.json`, and prevent `DONE` when the requested
+value is not observed.

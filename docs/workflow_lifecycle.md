@@ -55,3 +55,18 @@ commit the applied product/runtime diff before starting a new goal. The latest
 apply result is also written to
 `.codex-orchestrator/apply_results/latest_apply_result.json` with rerun
 guidance.
+
+## Semantic Goal Satisfaction
+
+Workflow identity links to semantic goal metadata when the master prompt can
+be compiled into structured criteria. The semantic goal fingerprint changes
+when the parsed expected value changes, for example from `"ok"` to `"me"`.
+
+Structured semantic goals are persisted in
+`.codex-orchestrator/semantic_goal_spec.json`. The Python main-return built-in
+parser recognizes prompts such as `Make app return ok and prove it.` and
+`Make app return me and prove it.`.
+
+`VERIFIED_NO_CHANGE_NEEDED` requires independent goal proof. `DONE` requires
+semantic pass for structured goals. Unsupported goals are visible as
+unsupported and are not labeled as semantically proven.

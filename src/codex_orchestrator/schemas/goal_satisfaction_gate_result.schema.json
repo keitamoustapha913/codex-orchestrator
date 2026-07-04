@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Goal Satisfaction Gate Result",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "kind",
+    "accepted",
+    "patchlet_id",
+    "attempt_id",
+    "semantic_mode",
+    "overall_status",
+    "failed_criteria",
+    "reasons"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "kind": {"const": "goal_satisfaction_gate_result"},
+    "accepted": {"type": "boolean"},
+    "workflow_id": {"type": ["string", "null"]},
+    "run_id": {"type": ["string", "null"]},
+    "patchlet_id": {"type": "string"},
+    "attempt_id": {"type": "string"},
+    "semantic_goal_spec_path": {"type": ["string", "null"]},
+    "semantic_goal_check_result_path": {"type": ["string", "null"]},
+    "semantic_mode": {"enum": ["structured", "unsupported", "disabled", "missing"]},
+    "overall_status": {"enum": ["PASSED", "FAILED", "UNSUPPORTED", "BLOCKED"]},
+    "failed_criteria": {"type": "array", "items": {"type": "string"}},
+    "reasons": {"type": "array", "items": {"type": "string"}},
+    "report_status": {"type": ["string", "null"]},
+    "report_claimed_semantic_pass": {"type": "boolean"}
+  },
+  "additionalProperties": true
+}

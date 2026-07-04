@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Semantic Goal Spec",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "kind",
+    "source_master_prompt_path",
+    "source_master_prompt_sha256",
+    "semantic_mode",
+    "semantic_status",
+    "criteria",
+    "unsupported_reasons",
+    "semantic_goal_fingerprint"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "kind": {"const": "semantic_goal_spec"},
+    "workflow_id": {"type": ["string", "null"]},
+    "run_id": {"type": ["string", "null"]},
+    "source_master_prompt_path": {"type": "string"},
+    "source_master_prompt_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "source_master_prompt_text_excerpt": {"type": "string"},
+    "semantic_mode": {"enum": ["structured", "unsupported", "disabled"]},
+    "semantic_status": {"enum": ["PENDING", "PASSED", "FAILED", "UNSUPPORTED", "BLOCKED"]},
+    "semantic_goal_fingerprint": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "criteria": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["criterion_id", "kind", "title", "required"],
+        "properties": {
+          "criterion_id": {"type": "string", "pattern": "^SGC[0-9]{3}$"},
+          "kind": {"enum": ["python_module_function_returns", "unsupported_natural_language"]},
+          "title": {"type": "string"},
+          "target_file": {"type": "string"},
+          "module_name": {"type": "string"},
+          "function_name": {"type": "string"},
+          "expected_value": {"type": "string"},
+          "expected_value_type": {"const": "string"},
+          "comparison": {"enum": ["equals"]},
+          "required": {"type": "boolean"},
+          "source": {"type": "object"},
+          "probe": {"type": "object"}
+        },
+        "allOf": [
+          {
+            "if": {"properties": {"kind": {"const": "python_module_function_returns"}}},
+            "then": {"required": ["target_file", "module_name", "function_name", "expected_value", "expected_value_type", "comparison"]}
+          }
+        ],
+        "additionalProperties": true
+      }
+    },
+    "unsupported_reasons": {"type": "array", "items": {"type": "string"}}
+  },
+  "additionalProperties": true
+}

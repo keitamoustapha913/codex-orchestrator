@@ -192,7 +192,26 @@ def verify_group(ctx: TargetRepoContext, *, transaction_group_id: str) -> dict:
             "invariant_ids": patchlet.get("invariant_ids", []),
             "evidence_ids": patchlet.get("evidence_ids", []),
             "contradictions": [],
+            "semantic_goal_status": "UNSUPPORTED",
+            "semantic_goal_check_results": [],
+            "failed_semantic_criteria": [],
         }
+        goal_gate_path = None
+        if run_entry and run_entry.get("goal_satisfaction_gate_result"):
+            goal_gate_path = ctx.root / run_entry["goal_satisfaction_gate_result"]
+        elif run_entry and run_entry.get("attempt_id"):
+            candidate = ctx.paths.runs_dir / run_entry["attempt_id"] / "gates" / "goal_satisfaction_gate_result.json"
+            if candidate.exists():
+                goal_gate_path = candidate
+        if goal_gate_path and goal_gate_path.exists():
+            goal_gate = read_json(goal_gate_path)
+            row["semantic_goal_status"] = goal_gate.get("overall_status")
+            if goal_gate.get("semantic_goal_check_result_path"):
+                row["semantic_goal_check_results"] = [goal_gate["semantic_goal_check_result_path"]]
+            row["failed_semantic_criteria"] = goal_gate.get("failed_criteria", [])
+            if goal_gate.get("semantic_mode") == "structured" and goal_gate.get("accepted") is not True:
+                row["contradictions"].append("semantic_goal_unsatisfied")
+                gate_failure_reasons.extend(str(reason) for reason in goal_gate.get("reasons", []) if reason)
         if not report_path.exists():
             failed_patchlet_ids.append(patchlet_id)
             validation_errors.append(f"missing report {report_path}")
@@ -278,6 +297,9 @@ def verify_group(ctx: TargetRepoContext, *, transaction_group_id: str) -> dict:
             "matrix_path": str(matrix_path),
             "failure_ids": [failure_id],
             "reasons": validation_errors,
+            "semantic_goal_status": "FAILED" if any(row.get("failed_semantic_criteria") for row in matrix_rows) else "UNSUPPORTED",
+            "semantic_goal_check_results": [path for row in matrix_rows for path in row.get("semantic_goal_check_results", [])],
+            "failed_semantic_criteria": [cid for row in matrix_rows for cid in row.get("failed_semantic_criteria", [])],
         })
         _save_transaction_groups(ctx, groups)
         transition(ctx, state, "FAILURE_CLASSIFICATION_REQUIRED", reason=f"{transaction_group_id} verification failed")
@@ -326,6 +348,9 @@ def verify_group(ctx: TargetRepoContext, *, transaction_group_id: str) -> dict:
         "matrix_path": str(matrix_path),
         "failure_ids": [],
         "reasons": [],
+        "semantic_goal_status": "PASSED" if any(row.get("semantic_goal_status") == "PASSED" for row in matrix_rows) else "UNSUPPORTED",
+        "semantic_goal_check_results": [path for row in matrix_rows for path in row.get("semantic_goal_check_results", [])],
+        "failed_semantic_criteria": [],
     })
     _save_transaction_groups(ctx, groups)
     transition(ctx, state, "TRANSACTION_VERIFICATION_COMPLETE", reason=f"{transaction_group_id} verification passed")

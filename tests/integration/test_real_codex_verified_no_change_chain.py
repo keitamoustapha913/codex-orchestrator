@@ -78,13 +78,20 @@ report = {{
         "producer_transformer_consumer_boundary": "producer app.py -> consumer probe",
         "not_downstream_of_unprobed_state_proof": "direct probe",
         "negative_control_proof": "negative control",
-        "recursive_why_audit": []
+        "recursive_why_audit": ["why1", "why2", "why3"]
     }},
     "before_after_state": [{{"before": "ok", "after": "ok"}}],
     "row_ledger": [],
     "trace_ledger": [],
     "cleanup_proof": "cleanup ok",
     "probe_artifact_refs": [{{"patchlet_id": patchlet_id, "probe_root": f".artifacts/probes/{{patchlet_id}}", "run_id": "run_001"}}],
+    "semantic_goal_results": [{{
+        "criterion_id": "SGC001",
+        "kind": "python_module_function_returns",
+        "expected_value": "ok",
+        "actual_value": "ok",
+        "passed": True
+    }}],
     "acceptance_criteria_result": "pass"
 }}
 Path(os.environ["CXOR_REPORT_PATH"]).parent.mkdir(parents=True, exist_ok=True)

@@ -98,6 +98,13 @@ report_path.write_text(json.dumps({
         "probe_root": f".artifacts/probes/{patchlet_id}",
         "run_id": "run_001"
     }],
+    "semantic_goal_results": [{
+        "criterion_id": "SGC001",
+        "kind": "python_module_function_returns",
+        "expected_value": "ok",
+        "actual_value": "ok",
+        "passed": True
+    }],
     "acceptance_criteria_result": "pass"
 }, indent=2) + "\\n", encoding="utf-8")
 print(str(execution_root))
@@ -236,6 +243,13 @@ report_path.write_text(json.dumps({
         "patchlet_id": patchlet_id,
         "probe_root": f".artifacts/probes/{patchlet_id}",
         "run_id": "run_001"
+    }],
+    "semantic_goal_results": [{
+        "criterion_id": "SGC001",
+        "kind": "python_module_function_returns",
+        "expected_value": "ok",
+        "actual_value": "ok",
+        "passed": True
     }],
     "acceptance_criteria_result": "pass"
 }, indent=2) + "\\n", encoding="utf-8")
@@ -519,6 +533,13 @@ report_path.write_text(json.dumps({
         "patchlet_id": patchlet_id,
         "probe_root": f".artifacts/probes/{patchlet_id}",
         "run_id": "run_001"
+    }],
+    "semantic_goal_results": [{
+        "criterion_id": "SGC001",
+        "kind": "python_module_function_returns",
+        "expected_value": "ok",
+        "actual_value": "ok",
+        "passed": True
     }],
     "acceptance_criteria_result": "pass"
 }, indent=2) + "\\n", encoding="utf-8")
@@ -1565,6 +1586,13 @@ report_path.write_text(json.dumps({
         "probe_root": f".artifacts/probes/{patchlet_id}",
         "run_id": "run_001"
     }],
+    "semantic_goal_results": [{
+        "criterion_id": "SGC001",
+        "kind": "python_module_function_returns",
+        "expected_value": "ok",
+        "actual_value": "ok",
+        "passed": True
+    }],
     "acceptance_criteria_result": "pass"
 }, indent=2) + "\\n", encoding="utf-8")
 """,
@@ -1652,6 +1680,13 @@ report_path.write_text(json.dumps({
         "probe_root": f".artifacts/probes/{patchlet_id}",
         "run_id": "run_001"
     }],
+    "semantic_goal_results": [{
+        "criterion_id": "SGC001",
+        "kind": "python_module_function_returns",
+        "expected_value": "ok",
+        "actual_value": "ok",
+        "passed": True
+    }],
     "acceptance_criteria_result": "pass"
 }, indent=2) + "\\n", encoding="utf-8")
 """,
@@ -1726,6 +1761,13 @@ report_path.write_text(json.dumps({
         "patchlet_id": "P0001",
         "probe_root": ".artifacts/probes/P0001",
         "run_id": "run_001"
+    }],
+    "semantic_goal_results": [{
+        "criterion_id": "SGC001",
+        "kind": "python_module_function_returns",
+        "expected_value": "ok",
+        "actual_value": "ok",
+        "passed": True
     }],
     "acceptance_criteria_result": "pass"
 }, indent=2) + "\\n", encoding="utf-8")

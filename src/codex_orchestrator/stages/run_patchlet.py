@@ -22,6 +22,8 @@ from codex_orchestrator.operator_events import append_operator_event
 from codex_orchestrator.prompt_index import upsert_prompt_index_entry
 from codex_orchestrator.report_ingestion import ingest_patchlet_report
 from codex_orchestrator.run_records import upsert_run_record
+from codex_orchestrator.semantic_goal_runner import run_semantic_goal_checks
+from codex_orchestrator.semantic_goals import load_semantic_goal_spec, required_structured_criteria
 from codex_orchestrator.state import load_state, now_iso, transition
 from codex_orchestrator.target_hygiene import run_target_hygiene_gate
 from codex_orchestrator.target_repo import TargetRepoContext
@@ -31,6 +33,7 @@ from codex_orchestrator.worker_capsule import (
     ensure_worker_capsule,
     ensure_worker_memory,
     ensure_worker_stage_templates,
+    _semantic_worker_prompt_section,
     write_wrapper_gate_result,
 )
 from codex_orchestrator.validators.diff_validator import validate_changed_paths
@@ -245,6 +248,12 @@ def _record_failure(
         record["report_ingestion_result_path"] = report_ingestion_result_path
     if report_validation_errors_path:
         record["report_validation_errors_path"] = report_validation_errors_path
+    if failure_signature == "semantic_goal_unsatisfied":
+        record["diagnosis"] = {
+            "primary_category": "semantic_goal_unsatisfied",
+            "confidence": "high",
+            "summary": observed_failure,
+        }
     write_json(ctx.paths.failures_dir / f"{failure_id}.json", record)
     (ctx.paths.failures_dir / f"{failure_id}.md").write_text(f"# {failure_id}\n\n{observed_failure}\n", encoding="utf-8")
     record_failure_signature(
@@ -403,6 +412,139 @@ def _merge_hygiene_cache_evidence(final_result: dict, pre_result: dict | None) -
     return merged
 
 
+def _write_goal_satisfaction_gate(
+    ctx: TargetRepoContext,
+    *,
+    patchlet: dict,
+    run_ctx: PatchletRunContext,
+    report_status: str,
+    report: dict | None,
+) -> dict:
+    pid = patchlet["patchlet_id"]
+    attempt_id = run_ctx.run_dir.name
+    spec = load_semantic_goal_spec(ctx.root)
+    gate_path = run_ctx.run_dir / "gates" / "goal_satisfaction_gate_result.json"
+    if not spec:
+        result = {
+            "schema_version": "1.0",
+            "kind": "goal_satisfaction_gate_result",
+            "accepted": True,
+            "workflow_id": None,
+            "run_id": None,
+            "patchlet_id": pid,
+            "attempt_id": attempt_id,
+            "semantic_goal_spec_path": None,
+            "semantic_goal_check_result_path": None,
+            "semantic_mode": "missing",
+            "overall_status": "UNSUPPORTED",
+            "failed_criteria": [],
+            "reasons": ["No semantic goal spec exists."],
+            "report_status": report_status,
+            "report_claimed_semantic_pass": False,
+        }
+        write_json(gate_path, result)
+        return result
+    criteria = required_structured_criteria(spec)
+    if not criteria:
+        result = {
+            "schema_version": "1.0",
+            "kind": "goal_satisfaction_gate_result",
+            "accepted": True,
+            "workflow_id": spec.get("workflow_id"),
+            "run_id": spec.get("run_id"),
+            "patchlet_id": pid,
+            "attempt_id": attempt_id,
+            "semantic_goal_spec_path": ".codex-orchestrator/semantic_goal_spec.json",
+            "semantic_goal_check_result_path": None,
+            "semantic_mode": spec.get("semantic_mode", "unsupported"),
+            "overall_status": "UNSUPPORTED",
+            "failed_criteria": [],
+            "reasons": spec.get("unsupported_reasons", ["Semantic goal verification is unsupported."]),
+            "report_status": report_status,
+            "report_claimed_semantic_pass": False,
+        }
+        write_json(gate_path, result)
+        append_operator_event(
+            ctx.root,
+            event_type="semantic_goal_unverified",
+            severity="warning",
+            stage="PATCHLET_EXECUTION_IN_PROGRESS",
+            summary="Semantic goal verification is unsupported for this workflow.",
+            artifact_paths=[_record_path_for_manifest(ctx, gate_path)],
+            patchlet_id=pid,
+            attempt_id=attempt_id,
+            details={"semantic_mode": result["semantic_mode"]},
+        )
+        return result
+    append_operator_event(
+        ctx.root,
+        event_type="goal_satisfaction_gate_started",
+        severity="info",
+        stage="PATCHLET_EXECUTION_IN_PROGRESS",
+        summary=f"Goal satisfaction gate started for {pid}.",
+        artifact_paths=[".codex-orchestrator/semantic_goal_spec.json"],
+        patchlet_id=pid,
+        attempt_id=attempt_id,
+    )
+    check = run_semantic_goal_checks(
+        repo_root=ctx.root,
+        execution_root=run_ctx.execution_root,
+        integration_ref=None,
+        semantic_goal_spec=spec,
+        patchlet_id=pid,
+        attempt_id=attempt_id,
+    )
+    failed = [row["criterion_id"] for row in check.get("criteria", []) if row.get("passed") is not True]
+    reasons = [
+        f"{row['criterion_id']} expected app.main() == {row.get('expected_value')!r} but observed {row.get('actual_value')!r}."
+        for row in check.get("criteria", [])
+        if row.get("passed") is not True
+    ]
+    accepted = check.get("overall_status") == "PASSED" and not failed
+    report_claimed = all(item.get("passed") is True for item in (report or {}).get("semantic_goal_results", []))
+    result = {
+        "schema_version": "1.0",
+        "kind": "goal_satisfaction_gate_result",
+        "accepted": accepted,
+        "workflow_id": spec.get("workflow_id"),
+        "run_id": spec.get("run_id"),
+        "patchlet_id": pid,
+        "attempt_id": attempt_id,
+        "semantic_goal_spec_path": ".codex-orchestrator/semantic_goal_spec.json",
+        "semantic_goal_check_result_path": ".codex-orchestrator/semantic_goal_checks/semantic_goal_check_result.json",
+        "semantic_mode": "structured",
+        "overall_status": check.get("overall_status"),
+        "failed_criteria": failed,
+        "reasons": reasons,
+        "report_status": report_status,
+        "report_claimed_semantic_pass": report_claimed,
+    }
+    write_json(gate_path, result)
+    append_operator_event(
+        ctx.root,
+        event_type="goal_satisfaction_gate_passed" if accepted else "goal_satisfaction_gate_failed",
+        severity="success" if accepted else "error",
+        stage="PATCHLET_EXECUTION_IN_PROGRESS",
+        summary=(
+            f"goal satisfaction gate passed for {pid}."
+            if accepted
+            else f"goal satisfaction gate failed for {pid}; patchlet not accepted."
+        ),
+        artifact_paths=[
+            _record_path_for_manifest(ctx, gate_path),
+            ".codex-orchestrator/semantic_goal_checks/semantic_goal_check_result.json",
+        ],
+        patchlet_id=pid,
+        attempt_id=attempt_id,
+        details={
+            "failed_criteria": failed,
+            "failure_signature": None if accepted else "semantic_goal_unsatisfied",
+            "semantic_goal_check_result_path": ".codex-orchestrator/semantic_goal_checks/semantic_goal_check_result.json",
+        },
+    )
+    return result
+
+
 def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_worktree: bool = False) -> PatchletExecutionResult:
     index = _load_patchlet_index(ctx)
     patchlet = _next_pending_patchlet(index)
@@ -479,6 +621,7 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
         final_contract = worker_capsule.worker_memory_dir / "FINAL_REPORT_CONTRACT.md"
         attempt_prompt_path.write_text(
             f"# Worker Prompt Pending\n\nPatchlet: {pid}\nAttempt: {run_id}\nSubprompt: {patchlet['subprompt_path']}\n\n"
+            f"{_semantic_worker_prompt_section(patchlet)}"
             "## Report schema contract\n\n"
             f"{report_contract.read_text(encoding='utf-8') if report_contract.exists() else ''}\n\n"
             "## Final report contract\n\n"
@@ -500,11 +643,15 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
         "reasoning": None,
         "contracts": [
             "TASK_CONTRACT.md",
+            "SEMANTIC_GOAL_CONTRACT.md",
             "REPORT_SCHEMA_CONTRACT.md",
             "FINAL_REPORT_CONTRACT.md",
             "PYTHON_RUNTIME_SIDE_EFFECT_CONTRACT.md",
         ],
-        "artifact_paths": [prompt_path],
+        "artifact_paths": [
+            prompt_path,
+            _record_path_for_manifest(ctx, worker_capsule.worker_memory_dir / "SEMANTIC_GOAL_CONTRACT.md"),
+        ],
     })
     _append_patchlet_event(
         ctx,
@@ -714,6 +861,9 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
     report_ingestion_result: dict | None = None
     report_validation_errors: list[dict] = []
     report_failure_signature: str | None = None
+    report: dict | None = None
+    integration_checkpoint_sha: str | None = None
+    goal_gate_result: dict | None = None
     try:
         if not diff_result.allowed:
             if not use_worktree:
@@ -879,27 +1029,69 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
                 )
                 report_status = "FAILED_WITH_EVIDENCE"
 
-            integration_checkpoint_sha: str | None = None
             if report_valid and report_status not in {"COMPLETE", "VERIFIED_NO_CHANGE_NEEDED"} and not use_worktree:
                 _cleanup_direct_worker_changes(ctx, changed_paths)
-            if report_valid and report_status in {"COMPLETE", "VERIFIED_NO_CHANGE_NEEDED"} and diff_text:
-                if use_worktree and worktree_ctx is not None:
-                    integration_checkpoint_sha = advance_integration_ref_from_worktree(
-                        ctx,
-                        worktree_path=worktree_ctx.path,
-                        patchlet_id=pid,
-                        changed_product_runtime_files=diff_result.product_runtime_paths,
-                    )
-                else:
-                    integration_checkpoint_sha = advance_integration_ref_from_diff(
-                        ctx,
-                        diff_path=diff_path,
-                        patchlet_id=pid,
-                        changed_product_runtime_files=diff_result.product_runtime_paths,
-                    )
-                    _reverse_validated_diff_from_target(ctx, diff_path=diff_path)
     finally:
         pass
+
+    if report_valid and report_status in {"COMPLETE", "VERIFIED_NO_CHANGE_NEEDED"} and diff_result.allowed:
+        goal_gate_result = _write_goal_satisfaction_gate(
+            ctx,
+            patchlet=patchlet,
+            run_ctx=run_ctx,
+            report_status=report_status,
+            report=report,
+        )
+        _upsert_attempt(
+            ctx,
+            attempt_id=run_id,
+            lifecycle_status="GOAL_SATISFACTION_GATE_EVALUATED",
+            goal_satisfaction_gate_result=_record_path_for_manifest(ctx, run_dir / "gates" / "goal_satisfaction_gate_result.json"),
+            goal_satisfaction_accepted=goal_gate_result.get("accepted"),
+        )
+        if not goal_gate_result.get("accepted"):
+            if not use_worktree:
+                _cleanup_direct_worker_changes(ctx, changed_paths)
+            report_status = "FAILED_WITH_EVIDENCE"
+            report_error = "; ".join(goal_gate_result.get("reasons", [])) or "semantic goal unsatisfied"
+            failure_id = _record_failure(
+                ctx,
+                source_id=pid,
+                observed_failure=report_error,
+                changed_paths=changed_paths,
+                failure_signature="semantic_goal_unsatisfied",
+            )
+            _append_patchlet_event(
+                ctx,
+                "patchlet_failed_with_evidence",
+                patchlet_id=pid,
+                attempt_id=run_id,
+                severity="error",
+                summary=f"Patchlet {pid} failed with evidence; semantic goal unsatisfied.",
+                artifact_paths=[
+                    _record_path_for_manifest(ctx, run_dir / "gates" / "goal_satisfaction_gate_result.json"),
+                    ".codex-orchestrator/semantic_goal_checks/semantic_goal_check_result.json",
+                    _record_path_for_manifest(ctx, ctx.paths.failures_dir / f"{failure_id}.json"),
+                ],
+                next_action="Classifying semantic goal failure.",
+                details={"failure_signature": "semantic_goal_unsatisfied"},
+            )
+        elif diff_text:
+            if use_worktree and worktree_ctx is not None:
+                integration_checkpoint_sha = advance_integration_ref_from_worktree(
+                    ctx,
+                    worktree_path=worktree_ctx.path,
+                    patchlet_id=pid,
+                    changed_product_runtime_files=diff_result.product_runtime_paths,
+                )
+            else:
+                integration_checkpoint_sha = advance_integration_ref_from_diff(
+                    ctx,
+                    diff_path=diff_path,
+                    patchlet_id=pid,
+                    changed_product_runtime_files=diff_result.product_runtime_paths,
+                )
+                _reverse_validated_diff_from_target(ctx, diff_path=diff_path)
 
     next_state = (
         "FAILURE_CLASSIFICATION_REQUIRED"
@@ -915,6 +1107,7 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
         diff_allowed=diff_result.allowed,
         report_valid=report_valid,
         probe_valid=report_valid,
+        semantic_goal_valid=goal_gate_result.get("accepted") if goal_gate_result else None,
         next_state=next_state,
         report_path=worker_result.report_path,
         reasons=([report_error] if report_error else []),

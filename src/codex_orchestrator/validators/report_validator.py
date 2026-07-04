@@ -6,6 +6,7 @@ import hashlib
 
 from codex_orchestrator.jsonio import read_json
 from codex_orchestrator.report_validation_errors import detail_from_jsonschema_error, report_validation_error_detail
+from codex_orchestrator.semantic_goals import load_semantic_goal_spec, required_structured_criteria
 
 from .probe_artifact_validator import validate_probe_artifact_run
 from .schema_validator import iter_jsonschema_errors, validate_json
@@ -138,6 +139,40 @@ def _semantic_probe_ref_errors(report: dict, *, patchlet: dict | None, repo_root
     return errors
 
 
+def _semantic_goal_result_errors(report: dict, *, repo_root: Path | None) -> list[dict[str, Any]]:
+    spec = load_semantic_goal_spec(repo_root) if repo_root else None
+    criteria = required_structured_criteria(spec)
+    if not criteria:
+        return []
+    errors: list[dict[str, Any]] = []
+    results = report.get("semantic_goal_results")
+    if not isinstance(results, list):
+        return [
+            _error(
+                "semantic_goal_results",
+                "Structured semantic goals require semantic_goal_results in patchlet reports",
+                signature="semantic_goal_results_missing",
+                pointer="/semantic_goal_results",
+            )
+        ]
+    by_id = {item.get("criterion_id"): item for item in results if isinstance(item, dict)}
+    for criterion in criteria:
+        criterion_id = criterion["criterion_id"]
+        result = by_id.get(criterion_id)
+        if result is None:
+            errors.append(_error("semantic_goal_results", f"Missing semantic result for required criterion {criterion_id}", signature="semantic_goal_results_missing_required_criterion", pointer="/semantic_goal_results"))
+            continue
+        if result.get("expected_value") != criterion.get("expected_value"):
+            errors.append(_error("semantic_goal_results", f"Semantic result {criterion_id} expected_value does not match semantic goal spec", signature="semantic_goal_results_wrong_expected_value", pointer="/semantic_goal_results"))
+        actual = result.get("actual_value")
+        expected = result.get("expected_value")
+        if result.get("passed") is True and actual != expected:
+            errors.append(_error("semantic_goal_results", f"Semantic result {criterion_id} cannot pass when actual_value differs from expected_value", signature="semantic_goal_results_self_contradictory", pointer="/semantic_goal_results"))
+        if report.get("status") in {"COMPLETE", "VERIFIED_NO_CHANGE_NEEDED"} and result.get("passed") is not True:
+            errors.append(_error("semantic_goal_results", f"{report.get('status')} requires semantic result {criterion_id} to pass", signature="semantic_goal_results_failed", pointer="/semantic_goal_results"))
+    return errors
+
+
 def validate_patchlet_report_structured(report: dict, patchlet: dict | None = None, *, repo_root: Path | None = None) -> dict[str, Any]:
     structured = [
         detail_from_jsonschema_error(error, error_id=f"RVE{index:06d}", patchlet_id=report.get("patchlet_id") or (patchlet or {}).get("patchlet_id"))
@@ -206,6 +241,7 @@ def validate_patchlet_report_structured(report: dict, patchlet: dict | None = No
         if not _nonempty(report.get("failed_probe_evidence")):
             semantic_errors.append(_error("failed_probe_evidence", "FAILED_WITH_EVIDENCE requires failed_probe_evidence"))
     semantic_errors.extend(_semantic_probe_ref_errors(report, patchlet=patchlet, repo_root=repo_root))
+    semantic_errors.extend(_semantic_goal_result_errors(report, repo_root=repo_root))
     if semantic_errors:
         for index, error in enumerate(semantic_errors, start=1):
             error["error_id"] = f"RVE{index:06d}"

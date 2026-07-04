@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Semantic Goal Check Result",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "kind",
+    "created_at",
+    "semantic_goal_spec_path",
+    "execution_context",
+    "overall_status",
+    "criteria"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "kind": {"const": "semantic_goal_check_result"},
+    "created_at": {"type": "string"},
+    "workflow_id": {"type": ["string", "null"]},
+    "run_id": {"type": ["string", "null"]},
+    "patchlet_id": {"type": ["string", "null"]},
+    "attempt_id": {"type": ["string", "null"]},
+    "semantic_goal_spec_path": {"type": "string"},
+    "execution_context": {"enum": ["integration_ref", "execution_root", "target_root", "unsupported"]},
+    "integration_ref": {"type": ["string", "null"]},
+    "overall_status": {"enum": ["PASSED", "FAILED", "UNSUPPORTED", "BLOCKED"]},
+    "criteria": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["criterion_id", "kind", "expected_value", "passed", "exit_code"],
+        "properties": {
+          "criterion_id": {"type": "string"},
+          "kind": {"type": "string"},
+          "target_file": {"type": "string"},
+          "module_name": {"type": "string"},
+          "function_name": {"type": "string"},
+          "expected_value": {},
+          "actual_value": {},
+          "passed": {"type": "boolean"},
+          "command": {"type": "string"},
+          "exit_code": {"type": "integer"},
+          "stdout_path": {"type": "string"},
+          "stderr_path": {"type": "string"}
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}

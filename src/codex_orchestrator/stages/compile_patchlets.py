@@ -7,6 +7,7 @@ from pathlib import Path, PurePosixPath
 from codex_orchestrator.codex_execution_policy import resolve_patchlet_timeout_seconds, soft_deadline_seconds
 from codex_orchestrator.jsonio import read_json, write_json
 from codex_orchestrator.prompt_index import upsert_prompt_index_entry
+from codex_orchestrator.semantic_goals import load_semantic_goal_spec, required_structured_criteria
 from codex_orchestrator.state import load_state, transition
 from codex_orchestrator.target_repo import TargetRepoContext
 
@@ -57,6 +58,8 @@ def compile_patchlets(ctx: TargetRepoContext) -> dict:
     real_codex_contract = _real_codex_contract_text()
     timeout_seconds = resolve_patchlet_timeout_seconds(os.environ)
     soft_deadline = soft_deadline_seconds(timeout_seconds)
+    semantic_spec = load_semantic_goal_spec(ctx.root)
+    semantic_criteria = required_structured_criteria(semantic_spec)
     patchlets: list[dict] = []
     transaction_groups: list[dict] = []
 
@@ -90,6 +93,21 @@ def compile_patchlets(ctx: TargetRepoContext) -> dict:
             "depends_on": [],
             "status": existing.get("status", "PENDING"),
         }
+        if semantic_criteria:
+            criterion = semantic_criteria[0]
+            patchlet["semantic_criteria"] = [item["criterion_id"] for item in semantic_criteria]
+            patchlet["expected_behavior"] = {
+                "kind": criterion.get("kind"),
+                "target_file": criterion.get("target_file"),
+                "module_name": criterion.get("module_name"),
+                "function_name": criterion.get("function_name"),
+                "expected_value": criterion.get("expected_value"),
+            }
+            if criterion.get("kind") == "python_module_function_returns":
+                patchlet["title"] = (
+                    f"{runtime_file} — make {criterion.get('module_name')}.{criterion.get('function_name')} "
+                    f"return {criterion.get('expected_value')!r}"
+                )
         for key in ["repair_plan_id", "source_failure_ids", "is_repair_patchlet"]:
             if key in existing:
                 patchlet[key] = existing[key]
@@ -109,9 +127,11 @@ def compile_patchlets(ctx: TargetRepoContext) -> dict:
 
         subprompt = ctx.root / subprompt_rel
         subprompt.parent.mkdir(parents=True, exist_ok=True)
+        semantic_section = _semantic_subprompt_section(semantic_criteria)
         subprompt.write_text(
             f"# Root-Cause Patchlet {patchlet_id}\n\n"
             f"Allowed product/runtime file: `{runtime_file}`\n\n"
+            f"{semantic_section}"
             "## ROOT-CAUSE PROBE-ONLY INVESTIGATION\n\n"
             f"First create and run a minimal direct runtime probe under `.artifacts/probes/{patchlet_id}/`. "
             "Do not edit product/runtime code during this investigation gate.\n\n"
@@ -144,7 +164,7 @@ def compile_patchlets(ctx: TargetRepoContext) -> dict:
             "stage": "PATCHLET_COMPILATION_REQUIRED",
             "patchlet_id": patchlet_id,
             "attempt_id": None,
-            "title": f"{runtime_file} — patchlet {patchlet_id}",
+            "title": patchlet.get("title") or f"{runtime_file} — patchlet {patchlet_id}",
             "summary": f"Patchlet subprompt for {patchlet_id}.",
             "path": subprompt,
             "subprompt_path": subprompt_rel,
@@ -173,3 +193,28 @@ def compile_patchlets(ctx: TargetRepoContext) -> dict:
     ]
     transition(ctx, state, "PATCHLETS_READY", reason="patchlets compiled")
     return index
+
+
+def _semantic_subprompt_section(criteria: list[dict]) -> str:
+    if not criteria:
+        return ""
+    lines = ["## Semantic acceptance criteria", ""]
+    for criterion in criteria:
+        if criterion.get("kind") == "python_module_function_returns":
+            expected = criterion.get("expected_value")
+            lines.extend(
+                [
+                    f"Criterion {criterion['criterion_id']}:",
+                    "- Kind: python_module_function_returns",
+                    f"- Target file: {criterion.get('target_file')}",
+                    f"- Module: {criterion.get('module_name')}",
+                    f"- Function: {criterion.get('function_name')}",
+                    f"- Expected return value: {expected!r}",
+                    f"- Required: {'yes' if criterion.get('required') else 'no'}",
+                    "",
+                    "This patchlet is not complete unless this criterion is satisfied.",
+                    "Do not report VERIFIED_NO_CHANGE_NEEDED unless the criterion already passes.",
+                    "",
+                ]
+            )
+    return "\n".join(lines)

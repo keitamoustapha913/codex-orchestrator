@@ -433,3 +433,12 @@ Repeated repair-loop warnings emit `loop_governor_warning`; explicit
 `--loop-governor-mode safe-fail --max-repeated-failure-signature 3` stops
 repeated identical failures with preserved evidence. Default tests do not run
 real Codex.
+
+## Semantic Goal Status
+
+For structured semantic goals, `cxor status --json` includes a `semantic_goal`
+object with the mode, status, criteria count, failed criteria, and latest
+semantic check artifact. `cxor monitor` shows semantic events such as
+`semantic_goal_check_failed` and `goal_satisfaction_gate_failed`. A prompt like
+`Make app return me and prove it.` cannot reach `DONE` while `app.main()`
+returns `"ok"`.
