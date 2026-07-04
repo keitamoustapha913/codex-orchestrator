@@ -1,0 +1,1 @@
+{"$schema":"https://json-schema.org/draft/2020-12/schema","title":"Stop Result","type":"object","required":["schema_version","kind","stopped","stopped_at","stop_stage","applyable_progress"],"properties":{"schema_version":{"const":"1.0"},"kind":{"const":"stop_result"},"stopped":{"const":true},"applyable_progress":{"type":"boolean"}},"additionalProperties":true}

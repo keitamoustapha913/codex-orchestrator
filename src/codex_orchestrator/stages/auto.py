@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from codex_orchestrator.errors import StagePreconditionError
+from codex_orchestrator.control import honor_stop_if_requested
+from codex_orchestrator.jsonio import read_json
 from codex_orchestrator.locks import workflow_lock
 from codex_orchestrator.state import WorkflowState, load_state
 from codex_orchestrator.target_repo import TargetRepoContext
@@ -106,12 +108,21 @@ def run_auto(
 
         for _ in range(max_iterations):
             state = load_state(ctx)
+            if honor_stop_if_requested(ctx, stop_stage=state.stage):
+                return load_state(ctx)
             state.current_loop_iteration += 1
             from codex_orchestrator.state import save_state, transition
             save_state(ctx, state)
             stage = state.stage
             if stage == until:
                 return state
+            if _early_unprovable_patchlet_boundary(ctx, stage=stage):
+                from codex_orchestrator.state import transition
+
+                transition(ctx, state, "FAILURE_CLASSIFICATION_REQUIRED", reason="goal_not_provable")
+                if until == "FAILURE_CLASSIFICATION_REQUIRED":
+                    return load_state(ctx)
+                return load_state(ctx)
             if not ctx.paths.master_prompt.exists():
                 if master is None:
                     raise FileNotFoundError("Missing master prompt; pass --master or initialize first")
@@ -190,3 +201,20 @@ def run_auto(
         with workflow_lock(ctx.paths.lock, target_repo_root=ctx.root):
             return _run()
     return _run()
+
+
+def _early_unprovable_patchlet_boundary(ctx: TargetRepoContext, *, stage: str) -> bool:
+    if stage != "PATCHLETS_READY":
+        return False
+    provability_path = ctx.paths.workflow_dir / "provability" / "provability_result.json"
+    if not provability_path.exists():
+        return False
+    provability = read_json(provability_path)
+    if provability.get("can_start_product_patchlets") is True:
+        return False
+    if not ctx.paths.patchlet_index.exists():
+        return True
+    try:
+        return not bool(read_json(ctx.paths.patchlet_index).get("patchlets"))
+    except Exception:
+        return True

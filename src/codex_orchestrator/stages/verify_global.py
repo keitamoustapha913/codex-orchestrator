@@ -6,6 +6,8 @@ from pathlib import Path
 from codex_orchestrator.errors import StagePreconditionError
 from codex_orchestrator.integration_state import target_product_runtime_clean, write_final_diff
 from codex_orchestrator.jsonio import read_json, write_json
+from codex_orchestrator.goal_progress import load_goal_progress, update_goal_progress
+from codex_orchestrator.master_prompt_verifier import evaluate_master_prompt_concordance, evaluate_master_prompt_satisfaction
 from codex_orchestrator.operator_events import append_operator_event
 from codex_orchestrator.state import load_state, now_iso, transition
 from codex_orchestrator.target_repo import TargetRepoContext
@@ -105,6 +107,18 @@ def _semantic_summary(
         "failed_semantic_criterion_ids": failed,
         "semantic_goals": matrix_rows,
     }
+
+
+def _read_optional(ctx: TargetRepoContext, rel_path: str) -> dict:
+    path = ctx.root / rel_path
+    return read_json(path) if path.exists() else {}
+
+
+def _coverage_results(ctx: TargetRepoContext) -> list[dict]:
+    results: list[dict] = []
+    for path in sorted(ctx.paths.runs_dir.glob("*/gates/goal_coverage_gate_result.json")):
+        results.append(read_json(path))
+    return results
 
 
 def verify_global(ctx: TargetRepoContext) -> GlobalVerificationResult:
@@ -274,6 +288,62 @@ def verify_global(ctx: TargetRepoContext) -> GlobalVerificationResult:
     integration_final = write_final_diff(ctx)
     target_working_tree_clean = target_product_runtime_clean(ctx)
     semantic = _latest_semantic_result(ctx)
+    master_prompt_frozen = _read_optional(ctx, ".codex-orchestrator/master_prompt_frozen.json")
+    goal_interpretation = _read_optional(ctx, ".codex-orchestrator/goal_interpretation.json")
+    proof_obligations = _read_optional(ctx, ".codex-orchestrator/proof_obligations.json")
+    coverage_results = _coverage_results(ctx)
+    goal_progress = load_goal_progress(ctx.paths.workflow_dir) or {}
+    concordance = evaluate_master_prompt_concordance(
+        master_prompt_frozen=master_prompt_frozen,
+        goal_interpretation=goal_interpretation,
+        proof_obligations=proof_obligations,
+    ) if master_prompt_frozen and goal_interpretation and proof_obligations else {
+        "accepted": False,
+        "coverage_status": "FAILED",
+        "failure_signature": "master_prompt_concordance_failed",
+        "covered_source_span_ids": [],
+        "uncovered_source_span_ids": [],
+        "covered_goal_item_ids": [],
+        "uncovered_goal_item_ids": [],
+    }
+    satisfaction = evaluate_master_prompt_satisfaction(
+        master_prompt_frozen=master_prompt_frozen,
+        proof_obligations=proof_obligations,
+        goal_progress=goal_progress,
+        coverage_results=coverage_results,
+    ) if master_prompt_frozen and proof_obligations else {
+        "accepted": False,
+        "satisfaction_status": "NOT_SATISFIED",
+        "failure_signature": "master_prompt_not_satisfied",
+        "proven_obligation_ids": [],
+        "failed_obligation_ids": [],
+        "unproven_obligation_ids": [],
+        "blocked_obligation_ids": [],
+    }
+    verification_dir = _global_verification_dir(ctx)
+    verification_dir.mkdir(parents=True, exist_ok=True)
+    concordance_path = verification_dir / "master_prompt_concordance_result.json"
+    satisfaction_path = verification_dir / "master_prompt_satisfaction_result.json"
+    write_json(concordance_path, concordance)
+    write_json(satisfaction_path, satisfaction)
+    append_operator_event(
+        ctx.root,
+        event_type="master_prompt_concordance_passed" if concordance.get("accepted") else "master_prompt_concordance_failed",
+        severity="success" if concordance.get("accepted") else "error",
+        stage="GLOBAL_VERIFICATION",
+        summary=f"Master prompt concordance {concordance.get('coverage_status')}.",
+        artifact_paths=[str(concordance_path.relative_to(ctx.root))],
+        details=concordance,
+    )
+    append_operator_event(
+        ctx.root,
+        event_type="master_prompt_satisfaction_passed" if satisfaction.get("accepted") else "master_prompt_satisfaction_failed",
+        severity="success" if satisfaction.get("accepted") else "error",
+        stage="GLOBAL_VERIFICATION",
+        summary=f"Master prompt satisfaction {satisfaction.get('satisfaction_status')}.",
+        artifact_paths=[str(satisfaction_path.relative_to(ctx.root))],
+        details=satisfaction,
+    )
 
     done = (
         bool(index.get("patchlets"))
@@ -286,9 +356,9 @@ def verify_global(ctx: TargetRepoContext) -> GlobalVerificationResult:
         and not unresolved_failures
         and not unproven_goal_ids
         and semantic["semantic_goal_status"] in {"PASSED", "UNSUPPORTED"}
+        and concordance.get("accepted") is True
+        and satisfaction.get("accepted") is True
     )
-    verification_dir = _global_verification_dir(ctx)
-    verification_dir.mkdir(parents=True, exist_ok=True)
     matrix_path = verification_dir / "verification_matrix.json"
     global_gate_path = verification_dir / "gates" / "global_gate_result.json"
     global_gate_path.parent.mkdir(parents=True, exist_ok=True)
@@ -334,6 +404,13 @@ def verify_global(ctx: TargetRepoContext) -> GlobalVerificationResult:
         ],
         "failures": all_failure_ids,
         "semantic_goals": semantic["semantic_goals"],
+        "master_prompt_concordance_result": str(concordance_path.relative_to(ctx.root)),
+        "master_prompt_satisfaction_result": str(satisfaction_path.relative_to(ctx.root)),
+        "master_prompt_concordance_status": concordance.get("coverage_status"),
+        "master_prompt_satisfaction_status": satisfaction.get("satisfaction_status"),
+        "proven_obligation_ids": satisfaction.get("proven_obligation_ids", []),
+        "failed_obligation_ids": satisfaction.get("failed_obligation_ids", []),
+        "unproven_obligation_ids": satisfaction.get("unproven_obligation_ids", []),
         "unresolved": unresolved_failures,
         "verdict": "DONE_ALLOWED" if done else "DONE_BLOCKED",
     }
@@ -382,6 +459,12 @@ def verify_global(ctx: TargetRepoContext) -> GlobalVerificationResult:
         "proven_semantic_criterion_ids": semantic["proven_semantic_criterion_ids"],
         "unproven_semantic_criterion_ids": semantic["unproven_semantic_criterion_ids"],
         "failed_semantic_criterion_ids": semantic["failed_semantic_criterion_ids"],
+        "master_prompt_concordance_result": str(concordance_path.relative_to(ctx.root)),
+        "master_prompt_satisfaction_result": str(satisfaction_path.relative_to(ctx.root)),
+        "master_prompt_satisfaction_status": satisfaction.get("satisfaction_status"),
+        "proven_obligation_ids": satisfaction.get("proven_obligation_ids", []),
+        "failed_obligation_ids": satisfaction.get("failed_obligation_ids", []),
+        "unproven_obligation_ids": satisfaction.get("unproven_obligation_ids", []),
         **integration_final,
         "target_working_tree_clean": target_working_tree_clean,
     }
@@ -393,6 +476,13 @@ def verify_global(ctx: TargetRepoContext) -> GlobalVerificationResult:
         f"Proven invariants: {', '.join(proven_invariant_ids) or 'none'}\n\n"
         f"Unresolved failures: {', '.join(unresolved_failures) or 'none'}\n",
         encoding="utf-8",
+    )
+    update_goal_progress(
+        workflow_root=ctx.paths.workflow_dir,
+        event_reason="global_verification",
+        workflow_iteration=state.current_loop_iteration,
+        proof_obligations=proof_obligations,
+        latest_gate_result=coverage_results[-1] if coverage_results else None,
     )
     if done:
         transition(ctx, state, "DONE", reason="global verification passed")

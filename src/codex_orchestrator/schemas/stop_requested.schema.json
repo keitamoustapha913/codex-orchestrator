@@ -1,0 +1,1 @@
+{"$schema":"https://json-schema.org/draft/2020-12/schema","title":"Stop Requested","type":"object","required":["schema_version","kind","created_at","requested_mode","reason","requested_by"],"properties":{"schema_version":{"const":"1.0"},"kind":{"const":"stop_requested"},"requested_mode":{"enum":["after_current_attempt","now"]}},"additionalProperties":true}

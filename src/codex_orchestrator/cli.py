@@ -97,6 +97,46 @@ def cmd_status(args: argparse.Namespace) -> int:
         time.sleep(args.interval)
 
 
+def cmd_goal_progress(args: argparse.Namespace) -> int:
+    import time
+
+    from codex_orchestrator.goal_progress import load_goal_progress
+
+    ctx = _ctx(args)
+    iterations = 0
+    while True:
+        progress = load_goal_progress(ctx.paths.workflow_dir)
+        if progress is None:
+            progress = {"schema_version": "1.0", "kind": "goal_progress", "overall_goal_status": "NOT_STARTED", "counts": {}}
+        if args.json:
+            print(json.dumps(progress, indent=2, sort_keys=True))
+        else:
+            counts = progress.get("counts", {})
+            print(f"workflow_id: {progress.get('workflow_id') or '-'}")
+            print(f"run_id: {progress.get('run_id') or '-'}")
+            print(f"overall goal status: {progress.get('overall_goal_status')}")
+            print(f"provability status: {progress.get('provability_status') or '-'}")
+            print(
+                "counts: "
+                f"required={counts.get('required_obligations', 0)} "
+                f"proven={counts.get('proven', 0)} "
+                f"failed={counts.get('failed', 0)} "
+                f"blocked={counts.get('blocked', 0)} "
+                f"unproven={counts.get('unproven', 0)}"
+            )
+            for obligation in progress.get("obligations", []):
+                print(f"- {obligation.get('obligation_id')}: {obligation.get('status')} {obligation.get('operator_summary', '')}")
+            print(f"latest accepted checkpoint: {progress.get('latest_accepted_checkpoint') or '-'}")
+            print(f"applyable progress: {progress.get('applyable_progress')}")
+            print(f"next action: {progress.get('next_action') or '-'}")
+        if not args.watch:
+            return 0
+        iterations += 1
+        if args.max_iterations is not None and iterations >= args.max_iterations:
+            return 0
+        time.sleep(args.interval)
+
+
 def cmd_validate_state(args: argparse.Namespace) -> int:
     from codex_orchestrator.validators.state_validator import validate_state_file
 
@@ -315,8 +355,21 @@ def cmd_apply_results(args: argparse.Namespace) -> int:
     from codex_orchestrator.apply_results import apply_results
 
     ctx = _ctx(args)
-    result = apply_results(ctx, mode=args.mode)
+    result = apply_results(ctx, mode=args.mode, scope=args.scope, allow_partial=args.allow_partial)
     print(json.dumps(result, indent=2, sort_keys=True))
+    return 0
+
+
+def cmd_stop(args: argparse.Namespace) -> int:
+    from codex_orchestrator.control import request_stop
+
+    ctx = _ctx(args)
+    mode = "now" if args.now else "after_current_attempt"
+    result = request_stop(ctx, mode=mode)
+    if args.json:
+        print(json.dumps(result, indent=2, sort_keys=True))
+    else:
+        print(f"stop requested mode={mode} repo={ctx.root}")
     return 0
 
 
@@ -759,6 +812,14 @@ def build_parser() -> argparse.ArgumentParser:
     status.add_argument("--max-iterations", type=int, default=None)
     status.set_defaults(func=cmd_status)
 
+    goal_progress = sub.add_parser("goal-progress")
+    _add_repo_flags(goal_progress)
+    goal_progress.add_argument("--json", action="store_true")
+    goal_progress.add_argument("--watch", action="store_true")
+    goal_progress.add_argument("--interval", type=float, default=2.0)
+    goal_progress.add_argument("--max-iterations", type=int, default=None, help=argparse.SUPPRESS)
+    goal_progress.set_defaults(func=cmd_goal_progress)
+
     validate_state = sub.add_parser("validate-state")
     _add_repo_flags(validate_state)
     validate_state.set_defaults(func=cmd_validate_state)
@@ -881,7 +942,17 @@ def build_parser() -> argparse.ArgumentParser:
     apply_results = sub.add_parser("apply-results")
     _add_repo_flags(apply_results)
     apply_results.add_argument("--mode", default="patch", choices=["patch", "branch", "working-tree"])
+    apply_results.add_argument("--scope", default="final", choices=["final", "accepted"])
+    apply_results.add_argument("--allow-partial", action="store_true")
     apply_results.set_defaults(func=cmd_apply_results)
+
+    stop = sub.add_parser("stop")
+    _add_repo_flags(stop)
+    stop_mode = stop.add_mutually_exclusive_group()
+    stop_mode.add_argument("--now", action="store_true")
+    stop_mode.add_argument("--after-current-attempt", action="store_true")
+    stop.add_argument("--json", action="store_true")
+    stop.set_defaults(func=cmd_stop)
 
     archive = sub.add_parser("archive")
     _add_repo_flags(archive)

@@ -15,6 +15,9 @@ from codex_orchestrator.integration_state import (
     advance_integration_ref_from_worktree,
     record_accepted_change,
 )
+from codex_orchestrator.goal_coverage import evaluate_goal_coverage_gate
+from codex_orchestrator.goal_progress import update_goal_progress
+from codex_orchestrator.independent_probe_rerun import run_independent_probe_rerun_gate
 from codex_orchestrator.patchlet_run_context import PatchletRunContext, build_patchlet_run_context
 from codex_orchestrator.jsonio import read_json, write_json
 from codex_orchestrator.loop_governor import record_failure_signature
@@ -1049,6 +1052,94 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
             goal_satisfaction_gate_result=_record_path_for_manifest(ctx, run_dir / "gates" / "goal_satisfaction_gate_result.json"),
             goal_satisfaction_accepted=goal_gate_result.get("accepted"),
         )
+        proof_obligations_path = ctx.paths.workflow_dir / "proof_obligations.json"
+        probe_plan_path = ctx.paths.workflow_dir / "probe_plan.json"
+        if goal_gate_result.get("accepted") and proof_obligations_path.exists() and probe_plan_path.exists():
+            proof_obligations = read_json(proof_obligations_path)
+            probe_plan = read_json(probe_plan_path)
+            append_operator_event(
+                ctx.root,
+                event_type="independent_probe_rerun_started",
+                severity="info",
+                stage="PATCHLET_EXECUTION_IN_PROGRESS",
+                summary=f"Independent probe rerun started for {pid}.",
+                artifact_paths=[".codex-orchestrator/probe_plan.json"],
+                patchlet_id=pid,
+                attempt_id=run_id,
+            )
+            independent_result = run_independent_probe_rerun_gate(
+                repo_root=ctx.root,
+                workflow_root=ctx.paths.workflow_dir,
+                attempt_id=run_id,
+                patchlet_id=pid,
+                proof_obligations=proof_obligations,
+                probe_plan=probe_plan,
+                integration_ref=None,
+                execution_root=run_ctx.execution_root,
+            )
+            coverage_result = evaluate_goal_coverage_gate(
+                proof_obligations=proof_obligations,
+                probe_plan=probe_plan,
+                independent_probe_rerun_result=independent_result,
+                patchlet_id=pid,
+                attempt_id=run_id,
+            )
+            coverage_path = run_dir / "gates" / "goal_coverage_gate_result.json"
+            write_json(coverage_path, coverage_result)
+            _upsert_attempt(
+                ctx,
+                attempt_id=run_id,
+                lifecycle_status="GOAL_COVERAGE_GATE_EVALUATED",
+                independent_probe_rerun_result=_record_path_for_manifest(ctx, run_dir / "gates" / "independent_probe_rerun_result.json"),
+                goal_coverage_gate_result=_record_path_for_manifest(ctx, coverage_path),
+                goal_coverage_accepted=coverage_result.get("accepted"),
+            )
+            append_operator_event(
+                ctx.root,
+                event_type="independent_probe_rerun_passed" if independent_result.get("accepted") else "independent_probe_rerun_failed",
+                severity="success" if independent_result.get("accepted") else "error",
+                stage="PATCHLET_EXECUTION_IN_PROGRESS",
+                summary=(
+                    f"independent probe rerun passed for {', '.join(independent_result.get('proven_obligation_ids', []))}."
+                    if independent_result.get("accepted")
+                    else "independent probe rerun failed."
+                ),
+                artifact_paths=[_record_path_for_manifest(ctx, run_dir / "gates" / "independent_probe_rerun_result.json")],
+                patchlet_id=pid,
+                attempt_id=run_id,
+                details=independent_result,
+            )
+            append_operator_event(
+                ctx.root,
+                event_type="goal_coverage_gate_passed" if coverage_result.get("accepted") else "goal_coverage_gate_failed",
+                severity="success" if coverage_result.get("accepted") else "error",
+                stage="PATCHLET_EXECUTION_IN_PROGRESS",
+                summary=f"Goal coverage gate {coverage_result.get('coverage_status')} for {pid}.",
+                artifact_paths=[_record_path_for_manifest(ctx, coverage_path)],
+                patchlet_id=pid,
+                attempt_id=run_id,
+                details=coverage_result,
+            )
+            update_goal_progress(
+                workflow_root=ctx.paths.workflow_dir,
+                event_reason="goal_coverage_gate",
+                workflow_iteration=load_state(ctx).current_loop_iteration,
+                proof_obligations=proof_obligations,
+                probe_plan=probe_plan,
+                latest_gate_result=coverage_result,
+            )
+            if not coverage_result.get("accepted"):
+                if not use_worktree:
+                    _cleanup_direct_worker_changes(ctx, changed_paths)
+                report_status = "FAILED_WITH_EVIDENCE"
+                report_error = "; ".join(coverage_result.get("failed_obligation_ids", [])) or "goal coverage failed"
+                failure_id = _record_failure(
+                    ctx,
+                    source_id=pid,
+                    observed_failure=report_error,
+                    changed_paths=changed_paths,
+                    failure_signature="goal_coverage_failed",
+                )
         if not goal_gate_result.get("accepted"):
             if not use_worktree:
                 _cleanup_direct_worker_changes(ctx, changed_paths)

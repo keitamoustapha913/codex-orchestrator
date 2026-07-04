@@ -6,6 +6,7 @@ from pathlib import Path, PurePosixPath
 
 from codex_orchestrator.codex_execution_policy import resolve_patchlet_timeout_seconds, soft_deadline_seconds
 from codex_orchestrator.jsonio import read_json, write_json
+from codex_orchestrator.operator_events import append_operator_event
 from codex_orchestrator.prompt_index import upsert_prompt_index_entry
 from codex_orchestrator.semantic_goals import load_semantic_goal_spec, required_structured_criteria
 from codex_orchestrator.state import load_state, transition
@@ -52,6 +53,25 @@ def _real_codex_contract_text() -> str:
 
 
 def compile_patchlets(ctx: TargetRepoContext) -> dict:
+    provability_path = ctx.paths.workflow_dir / "provability" / "provability_result.json"
+    if provability_path.exists():
+        provability = read_json(provability_path)
+        if provability.get("can_start_product_patchlets") is not True:
+            append_operator_event(
+                ctx.root,
+                event_type="goal_not_provable" if provability.get("provability_status") != "AMBIGUOUS" else "goal_ambiguous",
+                severity="warning",
+                stage="PROVABILITY_ASSESSMENT",
+                summary="Product patchlet compilation blocked by early provability classification.",
+                artifact_paths=[".codex-orchestrator/provability/provability_result.json"],
+                details=provability,
+            )
+            index = {"schema_version": "1.0", "kind": "patchlet_index", "patchlets": []}
+            write_json(ctx.paths.patchlet_index, index)
+            state = load_state(ctx)
+            state.pending_patchlets = []
+            transition(ctx, state, "PATCHLETS_READY", reason="goal_not_provable_no_product_patchlets")
+            return index
     node_file_map = _node_file_map(ctx)
     invariants = _load_invariants(ctx)
     existing_patchlets = _existing_patchlets(ctx)

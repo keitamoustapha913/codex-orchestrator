@@ -22,6 +22,9 @@ def status(ctx: TargetRepoContext) -> dict:
     latest_preflight = read_json(preflight_path) if preflight_path.exists() else None
     latest_apply_result_path = ctx.paths.workflow_dir / "apply_results" / "latest_apply_result.json"
     latest_apply_result = read_json(latest_apply_result_path) if latest_apply_result_path.exists() else None
+    goal_progress = _goal_progress_status(ctx)
+    master_prompt_proof = _master_prompt_proof_status(ctx)
+    applyable_progress = _applyable_progress_status(ctx, goal_progress)
     last_report_ingestion = None
     for run in reversed(runs):
         attempt_id = run.get("attempt_id")
@@ -79,6 +82,9 @@ def status(ctx: TargetRepoContext) -> dict:
         "next_action": activity.get("next_action"),
         "last_report_ingestion": last_report_ingestion,
         "semantic_goal": semantic_goal,
+        "master_prompt_proof": master_prompt_proof,
+        "goal_progress": goal_progress,
+        "applyable_progress": applyable_progress,
     }
 
 
@@ -117,4 +123,48 @@ def _semantic_goal_status(ctx: TargetRepoContext) -> dict:
         "failed": failed,
         "spec_path": ".codex-orchestrator/semantic_goal_spec.json",
         "latest_check_result_path": ".codex-orchestrator/semantic_goal_checks/semantic_goal_check_result.json" if check else None,
+    }
+
+
+def _goal_progress_status(ctx: TargetRepoContext) -> dict:
+    path = ctx.paths.workflow_dir / "goal_progress.json"
+    if not path.exists():
+        return {"overall_goal_status": "NOT_STARTED", "required_obligations": 0, "proven": 0, "failed": 0, "blocked": 0, "unproven": 0}
+    progress = read_json(path)
+    counts = progress.get("counts", {})
+    return {
+        "overall_goal_status": progress.get("overall_goal_status"),
+        "required_obligations": counts.get("required_obligations", 0),
+        "proven": counts.get("proven", 0),
+        "failed": counts.get("failed", 0),
+        "blocked": counts.get("blocked", 0),
+        "unproven": counts.get("unproven", 0),
+        "goal_progress_path": ".codex-orchestrator/goal_progress.json",
+    }
+
+
+def _master_prompt_proof_status(ctx: TargetRepoContext) -> dict:
+    frozen = read_json(ctx.paths.workflow_dir / "master_prompt_frozen.json") if (ctx.paths.workflow_dir / "master_prompt_frozen.json").exists() else {}
+    provability = read_json(ctx.paths.workflow_dir / "provability" / "provability_result.json") if (ctx.paths.workflow_dir / "provability" / "provability_result.json").exists() else {}
+    concordance = read_json(ctx.paths.workflow_dir / "global_verification" / "master_prompt_concordance_result.json") if (ctx.paths.workflow_dir / "global_verification" / "master_prompt_concordance_result.json").exists() else {}
+    satisfaction = read_json(ctx.paths.workflow_dir / "global_verification" / "master_prompt_satisfaction_result.json") if (ctx.paths.workflow_dir / "global_verification" / "master_prompt_satisfaction_result.json").exists() else {}
+    return {
+        "master_prompt_sha256": frozen.get("sha256"),
+        "provability_status": provability.get("provability_status"),
+        "goal_progress_path": ".codex-orchestrator/goal_progress.json" if (ctx.paths.workflow_dir / "goal_progress.json").exists() else None,
+        "proof_obligations_path": ".codex-orchestrator/proof_obligations.json" if (ctx.paths.workflow_dir / "proof_obligations.json").exists() else None,
+        "probe_plan_path": ".codex-orchestrator/probe_plan.json" if (ctx.paths.workflow_dir / "probe_plan.json").exists() else None,
+        "master_prompt_concordance_status": concordance.get("coverage_status"),
+        "master_prompt_satisfaction_status": satisfaction.get("satisfaction_status"),
+    }
+
+
+def _applyable_progress_status(ctx: TargetRepoContext, goal_progress: dict) -> dict:
+    path = ctx.paths.workflow_dir / "goal_progress.json"
+    progress = read_json(path) if path.exists() else {}
+    checkpoint = progress.get("latest_accepted_checkpoint")
+    return {
+        "available": bool(checkpoint),
+        "latest_accepted_checkpoint": checkpoint,
+        "requires_allow_partial": load_state(ctx).stage != "DONE",
     }

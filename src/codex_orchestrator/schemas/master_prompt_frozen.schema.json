@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Master Prompt Frozen",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "kind",
+    "source_path",
+    "frozen_copy_path",
+    "sha256",
+    "size_bytes",
+    "created_at",
+    "read_only_source_of_truth",
+    "source_spans"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "kind": {"const": "master_prompt_frozen"},
+    "workflow_id": {"type": ["string", "null"]},
+    "run_id": {"type": ["string", "null"]},
+    "source_path": {"type": "string"},
+    "frozen_copy_path": {"type": "string"},
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "size_bytes": {"type": "integer", "minimum": 0},
+    "created_at": {"type": "string"},
+    "read_only_source_of_truth": {"const": true},
+    "source_spans": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "span_id",
+          "start_offset",
+          "end_offset",
+          "line_start",
+          "line_end",
+          "column_start",
+          "column_end",
+          "text",
+          "role"
+        ],
+        "properties": {
+          "span_id": {"type": "string", "pattern": "^MPS[0-9]{3}$"},
+          "start_offset": {"type": "integer", "minimum": 0},
+          "end_offset": {"type": "integer", "minimum": 0},
+          "line_start": {"type": "integer", "minimum": 1},
+          "line_end": {"type": "integer", "minimum": 1},
+          "column_start": {"type": "integer", "minimum": 1},
+          "column_end": {"type": "integer", "minimum": 1},
+          "text": {"type": "string"},
+          "role": {"type": "string"}
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}
