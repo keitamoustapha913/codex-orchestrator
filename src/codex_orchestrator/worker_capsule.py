@@ -349,10 +349,13 @@ def runtime_side_effect_contract_text() -> str:
     return (
         "# RUNTIME SIDE EFFECT CONTRACT\n\n"
         "- Do not create language-runtime cache or build byproduct files under $CXOR_TARGET_ROOT.\n"
+        "- Do not create scratch/check files at the execution-root or target-root top level.\n"
+        "- Put temporary validation scratch files under `/tmp`; put durable evidence only under `.artifacts/probes/<patchlet_id>/`.\n"
         "- Run probes in a way that avoids writing transient runtime artifacts into the target root.\n"
         "- Do not load target-root product/runtime files in a way that mutates the target root.\n"
         "- If comparing target-root and execution-root behavior, keep transient outputs outside the target root.\n"
         "- Durable evidence belongs under .artifacts/probes/ and .codex-orchestrator/ only.\n"
+        "- Root-level scratch files such as `.report_check.json` are unauthorized and will make the diff gate reject the patchlet.\n"
         "- Never leave runtime cache directories or compiled byproducts under target root.\n"
         "- If a runtime byproduct appears, report it explicitly in the probe evidence instead of hiding it.\n"
     )
@@ -373,6 +376,32 @@ def _execution_root_contract_text(run_context: PatchletRunContext, allowed_file:
         f"Allowed product/runtime edit path: `$CXOR_EXECUTION_ROOT/{allowed_file}` (`{run_context.execution_root / allowed_file}`)\n"
         f"Forbidden product/runtime edit path: `$CXOR_TARGET_ROOT/{allowed_file}` (`{run_context.target_root / allowed_file}`)\n"
         "Target-root artifact directories remain writable only for orchestrator evidence under `.codex-orchestrator/` and `.artifacts/probes/`.\n"
+    )
+
+
+def slice_boundary_contract_text(patchlet: dict) -> str:
+    boundary = patchlet.get("slice_change_boundary") or {}
+    if not boundary:
+        return "- Slice change boundary: BOUNDARY_UNENFORCEABLE\n"
+    allowed_lines: list[str] = []
+    for change in boundary.get("allowed_changes") or []:
+        if change.get("operation") == "replace_line":
+            allowed_lines.append(f"- replace exactly `{change.get('old_line')}` with `{change.get('new_line')}`")
+        elif change.get("key"):
+            allowed_lines.append(f"- update key `{change.get('key')}`")
+    forbidden_lines = [f"- `{row.get('key')}` ({row.get('reason')})" for row in boundary.get("forbidden_changes", []) if row.get("key")]
+    future_obligations = ", ".join(boundary.get("forbidden_future_proof_obligation_ids", [])) or "none"
+    return (
+        f"- Slice change boundary ID: {boundary.get('boundary_id')}\n"
+        f"- Slice change boundary type: {boundary.get('boundary_type')}\n"
+        "- Allowed change boundary:\n"
+        + ("\n".join(allowed_lines) if allowed_lines else "- none")
+        + "\n"
+        "- Do not change future-slice keys:\n"
+        + ("\n".join(forbidden_lines) if forbidden_lines else "- none")
+        + "\n"
+        f"- Future proof obligations not owned by this patchlet: {future_obligations}\n"
+        "- Future slice changes are rejected even when they are inside the same allowed product/runtime file.\n"
     )
 
 
@@ -438,6 +467,7 @@ def _task_contract_text(
         f"- dependency patchlets: `{', '.join(dependency_patchlets) or 'none'}`\n"
         f"- proof obligations: `{', '.join(patchlet.get('proof_obligation_ids', [])) or 'none'}`\n"
         f"- goal items: `{', '.join(patchlet.get('goal_item_ids', [])) or 'none'}`\n"
+        f"- slice change boundary: `{(patchlet.get('slice_change_boundary') or {}).get('boundary_id') or patchlet.get('boundary_enforcement_status') or 'none'}`\n"
         f"- work slice contract: `{work_slice_contract_path}`\n"
         f"- required report path: `.codex-orchestrator/reports/{patchlet_id}.json`\n"
         f"- report schema contract: `{report_contract_path}`\n"
@@ -453,14 +483,18 @@ def _task_contract_text(
         f"- soft deadline: Aim to finish by {soft_deadline} seconds\n"
         "- if blocked near the budget, write `$CXOR_FINAL_REPORT_PATH` with explicit BLOCKED or FAILED status and preserve what you learned\n"
         "- Do not create target-root worker_stage/; all Worker Capsule stage files must stay under `$CXOR_WORKER_STAGE_DIR`\n"
+        "- Do not create execution-root or target-root top-level scratch files; use `/tmp` for scratch checks and `.artifacts/probes/<patchlet_id>/` for durable evidence\n"
         "- forbidden edit paths: any product/runtime file other than the allowed file; do not edit orchestrator source paths\n\n"
         "This patchlet is a small bounded work unit.\n\n"
         "Do not attempt to solve unrelated work slices.\n\n"
         "Do not edit any product/runtime file except the single allowed file.\n\n"
+        "Do not create root-level scratch/check files such as `.report_check.json`; use `/tmp` for scratch checks.\n\n"
         "Do not compact memory by summarizing broad unrelated context.\n\n"
         "Finish within the patchlet time budget.\n\n"
         "## Execution-root edit contract\n\n"
         f"{_execution_root_contract_text(run_context, allowed_file)}\n"
+        "## Slice-level allowed-change boundary\n\n"
+        f"{slice_boundary_contract_text(patchlet)}\n"
         "- root-cause/probe contract reminder: direct probe first, then minimal fix, then deterministic proof and negative controls\n"
         "- no blind retry rule: blind retry is not allowed\n"
         "- orchestrator owns gate results: Codex may not write or overwrite gate result files\n"
@@ -497,6 +531,7 @@ def _live_memory_json(run_context: PatchletRunContext, patchlet: dict) -> dict:
         "dependency_patchlet_ids": patchlet.get("dependency_patchlet_ids", patchlet.get("depends_on", [])),
         "proof_obligation_ids": patchlet.get("proof_obligation_ids", []),
         "goal_item_ids": patchlet.get("goal_item_ids", []),
+        "slice_change_boundary": patchlet.get("slice_change_boundary"),
         "memory_compacting_required": patchlet.get("prompt_scope", {}).get("memory_compacting_required", False),
         "goal_ids": patchlet.get("master_goal_ids", []),
         "invariant_ids": patchlet.get("invariant_ids", []),
@@ -523,6 +558,7 @@ def _allowed_paths_json(run_context: PatchletRunContext, patchlet: dict) -> dict
             ".codex-orchestrator/runs",
             ".artifacts/probes",
         ],
+        "slice_change_boundary": patchlet.get("slice_change_boundary"),
         "forbidden_roots": [
             ".git",
             ".codex-orchestrator/gates",
@@ -582,6 +618,7 @@ def ensure_worker_memory(
         f"- Dependency patchlets: {', '.join(patchlet.get('dependency_patchlet_ids', patchlet.get('depends_on', []))) or 'none'}\n"
         f"- Proof obligations: {', '.join(patchlet.get('proof_obligation_ids', [])) or 'none'}\n"
         f"- Goal items: {', '.join(patchlet.get('goal_item_ids', [])) or 'none'}\n"
+        f"{slice_boundary_contract_text(patchlet)}"
         f"- Scope statement: {patchlet.get('prompt_scope', {}).get('scope_statement') or patchlet.get('scope_statement') or 'bounded patchlet scope'}\n"
         "- Do not edit other product/runtime files.\n"
         "- Do not solve unrelated slices.\n"

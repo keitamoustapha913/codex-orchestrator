@@ -59,7 +59,8 @@ def test_goal_coverage_partial_records_progress_but_not_done():
     obligations["obligations"].append({"obligation_id": "PO002", "goal_item_ids": ["GI002"], "required": True})
     result = evaluate_goal_coverage_gate(proof_obligations=obligations, probe_plan=_plan(), independent_probe_rerun_result=_rerun(proven=["PO001"]), patchlet_id="P0001", attempt_id="P0001_attempt1")
     assert result["coverage_status"] == "PARTIAL"
-    assert result["accepted"] is False
+    assert result["accepted_for_patchlet_progress"] is True
+    assert result["accepted_for_done"] is False
 
 
 def test_goal_coverage_links_independent_rerun_evidence():

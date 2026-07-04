@@ -13,7 +13,12 @@ from codex_orchestrator.codex_execution_policy import (
 )
 from codex_orchestrator.codex_model_profile import resolve_codex_model_profile
 from codex_orchestrator.command_runner import CommandRunner
-from codex_orchestrator.errors import WorkerExecutionError, WorkerPreconditionError
+from codex_orchestrator.errors import (
+    WorkerExecutionError,
+    WorkerInterruptedError,
+    WorkerPreconditionError,
+    WorkerTimeoutError,
+)
 from codex_orchestrator.git_guard import repo_head
 from codex_orchestrator.live_progress import (
     LiveProgressPolicyError,
@@ -21,6 +26,7 @@ from codex_orchestrator.live_progress import (
     compact_codex_signal,
     resolve_live_progress_policy,
 )
+from codex_orchestrator.operator_events import append_operator_event
 from codex_orchestrator.patchlet_run_context import PatchletRunContext
 from codex_orchestrator.prompt_index import upsert_prompt_index_entry
 from codex_orchestrator.target_repo import TargetRepoContext
@@ -101,11 +107,14 @@ class CodexExecWorker(Worker):
             f"- $CXOR_FINAL_REPORT_PATH ({final_report_stage_path})\n\n"
             f"Do not create target-root worker_stage/ at {forbidden_target_worker_stage}/. "
             "All Worker Capsule stage files must stay under $CXOR_WORKER_STAGE_DIR.\n\n"
-            f"You have a hard timeout of {self.timeout_seconds} seconds. "
+            f"You have a hard {self.timeout_seconds}-second wall-clock budget for this patchlet. "
+            "The orchestrator will terminate this patchlet after the budget expires. "
             f"Aim to finish by {self.soft_deadline_seconds} seconds. "
             "If you cannot complete, write $CXOR_FINAL_REPORT_PATH with an explicit "
             "BLOCKED or FAILED status and preserve what you learned. "
-            "Do not keep investigating indefinitely. Do not use blind retry.\n\n"
+            "Do not attempt future slices. Do not broaden the task. "
+            "Do not perform open-ended investigation. Do not keep investigating indefinitely. "
+            "Do not use blind retry.\n\n"
             "Do not write gate results. The orchestrator writes gates.\n\n"
             "When running probes, avoid creating language-runtime caches or build byproducts under target root.\n"
             "Do not load target-root product/runtime files in a way that mutates target-root state.\n"
@@ -154,15 +163,15 @@ class CodexExecWorker(Worker):
             + "## Embedded report schema contract\n\n"
             + report_schema_contract_text(
                 patchlet_id=patchlet_id,
-                report_path=f".codex-orchestrator/reports/{patchlet_id}.json",
+                report_path=str(report_path),
             )
             + "\n\n## Embedded final report contract\n\n"
             + final_report_contract_text(
                 patchlet_id=patchlet_id,
                 attempt_id=run_dir.name,
                 final_report_path=str(final_report_stage_path),
-                report_path=f".codex-orchestrator/reports/{patchlet_id}.json",
-                probe_root=f".artifacts/probes/{patchlet_id}",
+                report_path=str(report_path),
+                probe_root=str(probe_root),
             )
             + "\n\n## Embedded runtime side-effect contract\n\n"
             + runtime_side_effect_contract_text()
@@ -222,6 +231,33 @@ class CodexExecWorker(Worker):
             if compact_signal:
                 live_progress.emit(compact_signal, elapsed_seconds)
 
+        def record_liveness(payload: dict) -> None:
+            write_progress_event(payload)
+            event_type = payload.get("event_type")
+            elapsed = float(payload.get("elapsed_seconds") or 0)
+            if event_type == "patchlet_timed_out":
+                message = "patchlet timed out: terminating real_codex subprocess"
+            elif event_type == "patchlet_budget_warning":
+                message = f"patchlet budget warning: {int(payload.get('remaining_seconds') or 0)}s remaining"
+            else:
+                message = (
+                    "codex alive: "
+                    f"last_event={payload.get('last_event_type')} "
+                    f"no_progress_for={int(payload.get('no_progress_for_seconds') or 0)}s"
+                )
+            live_progress.emit_status(message, elapsed, force=event_type != "codex_liveness")
+            append_operator_event(
+                ctx.root,
+                event_type=str(event_type or "codex_liveness"),
+                severity="warning" if event_type in {"patchlet_timed_out", "patchlet_budget_warning"} else "info",
+                stage="PATCHLET_EXECUTION_IN_PROGRESS",
+                summary=f"{message} for {run_dir.name}.",
+                artifact_paths=[str(progress_path.relative_to(ctx.root))],
+                patchlet_id=patchlet_id,
+                attempt_id=run_dir.name,
+                details=payload,
+            )
+
         write_progress_event({
             "schema_version": "1.0",
             "kind": "codex_progress",
@@ -266,6 +302,14 @@ class CodexExecWorker(Worker):
             stdout_path=run_dir / "stdout.txt",
             stderr_path=run_dir / "stderr.txt",
             stdout_line_callback=record_progress,
+            liveness_callback=record_liveness,
+            progress_interval_seconds=min(
+                self.progress_interval_seconds,
+                self.live_progress_policy.interval_seconds,
+            ),
+            no_progress_stall_seconds=max(self.progress_interval_seconds * 2, 1),
+            patchlet_id=patchlet_id,
+            attempt_id=run_dir.name,
         )
         live_progress.emit(f"exited {result.exit_code}", result.duration_seconds, force=True)
         repo_sha_after = repo_head(run_ctx.execution_root)
@@ -290,7 +334,9 @@ class CodexExecWorker(Worker):
             "repo_sha_before": repo_sha_before,
             "repo_sha_after": repo_sha_after,
             "timed_out": result.timed_out,
+            "interrupted": result.interrupted,
             "timeout_seconds": result.timeout_seconds,
+            "termination_signal": result.termination_signal,
             "soft_deadline_seconds": self.soft_deadline_seconds,
             "selected_model": self.codex_model,
             "selected_reasoning": self.codex_reasoning,
@@ -323,17 +369,37 @@ class CodexExecWorker(Worker):
             "repo_sha_before": repo_sha_before,
             "repo_sha_after": repo_sha_after,
             "timed_out": result.timed_out,
+            "interrupted": result.interrupted,
             "timeout_seconds": result.timeout_seconds,
+            "termination_signal": result.termination_signal,
             "soft_deadline_seconds": self.soft_deadline_seconds,
             "selected_model": self.codex_model,
             "selected_reasoning": self.codex_reasoning,
         }) + "\n", encoding="utf-8")
+        if result.interrupted:
+            raise WorkerInterruptedError(
+                f"codex worker interrupted; exit_code={result.exit_code}; "
+                f"cwd={run_ctx.execution_root}; target repo={run_ctx.target_root}"
+            )
+        if result.timed_out:
+            raise WorkerTimeoutError(
+                f"codex worker failed with exit_code={result.exit_code}; "
+                f"timed out after {result.timeout_seconds}s; "
+                f"cwd={run_ctx.execution_root}; target repo={run_ctx.target_root}"
+            )
         if result.exit_code != 0:
             timeout_note = f" timed out after {result.timeout_seconds}s;" if result.timed_out else ""
             raise WorkerExecutionError(
                 f"codex worker failed with exit_code={result.exit_code};{timeout_note} "
                 f"cwd={run_ctx.execution_root}; target repo={run_ctx.target_root}"
             )
+        execution_report_path = run_ctx.execution_root / ".codex-orchestrator" / "reports" / f"{patchlet_id}.json"
+        if not report_path.exists() and execution_report_path.exists():
+            report_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(execution_report_path, report_path)
+        execution_probe_root = run_ctx.execution_root / ".artifacts" / "probes" / patchlet_id
+        if execution_probe_root.exists() and execution_probe_root.resolve() != probe_root.resolve():
+            shutil.copytree(execution_probe_root, probe_root, dirs_exist_ok=True)
         if not report_path.exists():
             raise WorkerExecutionError(f"codex worker did not produce report: {report_path}")
         return WorkerResult(

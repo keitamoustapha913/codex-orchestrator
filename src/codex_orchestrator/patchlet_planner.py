@@ -67,6 +67,8 @@ def build_patchlet_plan(
                 },
                 "prompt_scope": row.get("prompt_scope", {}),
                 "scope_statement": row.get("scope_statement"),
+                "slice_change_boundary": row.get("slice_change_boundary"),
+                "boundary_enforcement_status": row.get("boundary_enforcement_status"),
                 "title": row.get("title"),
                 "expected_patchlet_statuses": [
                     "COMPLETE",

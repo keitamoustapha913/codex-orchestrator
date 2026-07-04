@@ -35,6 +35,31 @@
               "memory_compacting_required": {"const": false}
             },
             "additionalProperties": true
+          },
+          "slice_change_boundary": {
+            "type": "object",
+            "required": ["boundary_id", "boundary_type", "allowed_product_runtime_file", "allowed_changes"],
+            "properties": {
+              "boundary_id": {"type": "string"},
+              "boundary_type": {
+                "enum": [
+                  "text_key_value_update",
+                  "section_key_value_update",
+                  "line_exact_change",
+                  "file_presence_change",
+                  "artifact_only",
+                  "model_planned_custom_static_boundary"
+                ]
+              },
+              "allowed_product_runtime_file": {"type": "string"},
+              "goal_item_ids": {"type": "array", "items": {"type": "string"}},
+              "proof_obligation_ids": {"type": "array", "items": {"type": "string"}},
+              "allowed_changes": {"type": "array", "items": {"type": "object"}},
+              "forbidden_future_goal_item_ids": {"type": "array", "items": {"type": "string"}},
+              "forbidden_future_proof_obligation_ids": {"type": "array", "items": {"type": "string"}},
+              "forbidden_changes": {"type": "array", "items": {"type": "object"}}
+            },
+            "additionalProperties": true
           }
         },
         "additionalProperties": true

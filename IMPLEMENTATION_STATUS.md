@@ -438,3 +438,7 @@ cxor writes `goal_progress.json` and append-only `goal_progress.jsonl`; `cxor go
 ## General Work Decomposition Status
 
 Implemented deterministic general work decomposition artifacts and compiler integration. The current architecture is not one file -> one patchlet; it is one patchlet -> exactly one allowed product/runtime file. Multiple patchlets may target the same file, patchlet prompts carry the 600 second default timeout or `CODEX_PATCHLET_TIMEOUT_SECONDS`, and transaction groups derive from dependency layers. See `docs/general_work_decomposition.md`.
+
+## RC6 Slice Boundary Status
+
+one allowed file per patchlet is necessary but not sufficient for same-file multi-patchlet workflows. Same-file patchlets require a slice-level allowed-change boundary, and future slice changes are rejected even when they are inside the same allowed product/runtime file. patchlet-scoped proof runs only selected current obligations; future obligations remain unproven, not failed. PARTIAL progress accepts patchlet progress but blocks DONE. Report ingestion accepts pass: / fail: / blocked: descriptive prefixes while rejecting vague success strings. Approved artifact directories are allowed only under approved roots. The full real-Codex matrix must pass before rc6.

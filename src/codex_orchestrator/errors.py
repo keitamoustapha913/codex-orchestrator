@@ -41,3 +41,11 @@ class WorkerPreconditionError(CxorError):
 
 class WorkerExecutionError(CxorError):
     """Raised when a worker starts but fails to produce a valid execution result."""
+
+
+class WorkerTimeoutError(WorkerExecutionError):
+    """Raised when the orchestrator terminates a worker after its wall-clock budget."""
+
+
+class WorkerInterruptedError(WorkerExecutionError):
+    """Raised when a worker attempt is interrupted and evidence has been preserved."""

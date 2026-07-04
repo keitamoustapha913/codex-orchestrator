@@ -460,3 +460,7 @@ cxor writes `goal_progress.json` and append-only `goal_progress.jsonl`; `cxor go
 ## General Work Decomposition CLI
 
 Use `cxor decomposition --repo <repo>` to inspect generated `impact_dependency_analysis.json`, `work_decomposition_plan.json`, `work_slices.json`, `patchlet_plan.json`, `dependency_graph.json`, and `transaction_group_plan.json`. The CLI shows that decomposition is not one file -> one patchlet; each patchlet has exactly one allowed product/runtime file, and multiple patchlets may target the same file. `--json`, `--patchlets`, and `--dependencies` expose the same contract for automation. See `docs/general_work_decomposition.md`.
+
+## RC6 CLI Visibility
+
+`cxor status --json`, `cxor decomposition --json`, and `cxor goal-progress --json` expose that one allowed file per patchlet is necessary but not sufficient. Same-file patchlets require a slice-level allowed-change boundary, and future slice changes are rejected even when they are inside the same allowed product/runtime file. patchlet-scoped proof runs only selected current obligations; future obligations remain unproven, not failed. PARTIAL progress accepts patchlet progress but blocks DONE. Report ingestion accepts pass: / fail: / blocked: descriptive prefixes. Artifact directories are allowed only under approved roots.

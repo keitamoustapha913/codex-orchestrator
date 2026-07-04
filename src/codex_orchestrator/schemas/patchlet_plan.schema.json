@@ -35,6 +35,9 @@
             "additionalProperties": true
           },
           "expected_patchlet_statuses": {"type": "array", "minItems": 4, "items": {"type": "string"}}
+          ,
+          "slice_change_boundary": {"type": ["object", "null"]},
+          "boundary_enforcement_status": {"type": ["string", "null"]}
         },
         "additionalProperties": true
       }

@@ -45,6 +45,7 @@ def build_work_decomposition_plan(
     transaction_group_plan = build_transaction_group_plan(patchlet_plan, dependency_graph)
     decomp_dir = workflow_root / "decomposition"
     write_json(decomp_dir / "work_slices.json", work_slices)
+    boundary_count = sum(1 for row in work_slices.get("slices", []) if row.get("slice_change_boundary"))
     append_operator_event(
         repo_root,
         event_type="work_slices_written",
@@ -53,6 +54,16 @@ def build_work_decomposition_plan(
         summary=f"Work slices written: {len(work_slices.get('slices', []))}.",
         artifact_paths=[".codex-orchestrator/decomposition/work_slices.json"],
     )
+    if boundary_count:
+        append_operator_event(
+            repo_root,
+            event_type="slice_boundary_planned",
+            severity="info",
+            stage="WORK_DECOMPOSITION",
+            summary=f"Slice change boundaries planned: {boundary_count}.",
+            artifact_paths=[".codex-orchestrator/decomposition/work_slices.json"],
+            details={"slice_change_boundary_count": boundary_count},
+        )
     write_json(decomp_dir / "patchlet_plan.json", patchlet_plan)
     append_operator_event(
         repo_root,

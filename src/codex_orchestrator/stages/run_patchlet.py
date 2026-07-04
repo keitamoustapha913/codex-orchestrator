@@ -9,7 +9,12 @@ from pathlib import Path
 
 from codex_orchestrator.codex_adapter import worker_for_mode
 from codex_orchestrator.codex_execution_policy import soft_deadline_seconds
-from codex_orchestrator.errors import WorkerExecutionError, WorkerPreconditionError
+from codex_orchestrator.errors import (
+    WorkerExecutionError,
+    WorkerInterruptedError,
+    WorkerPreconditionError,
+    WorkerTimeoutError,
+)
 from codex_orchestrator.git_guard import changed_between, git_diff, snapshot_status
 from codex_orchestrator.integration_state import (
     advance_integration_ref_from_diff,
@@ -38,6 +43,7 @@ from codex_orchestrator.worker_capsule import (
     ensure_worker_memory,
     ensure_worker_stage_templates,
     _semantic_worker_prompt_section,
+    slice_boundary_contract_text,
     write_wrapper_gate_result,
 )
 from codex_orchestrator.validators.diff_validator import validate_changed_paths
@@ -94,6 +100,106 @@ CAPSULE_LIKE_TARGET_ROOT_DIRS = (
     "diagnostics",
 )
 
+EXECUTION_ROOT_SCRATCH_FILENAMES = {
+    ".report_check.json",
+    "report_validation.json",
+}
+
+EXECUTION_ROOT_SCRATCH_ROLE_TOKENS = {
+    "report",
+    "probe",
+    "validation",
+}
+
+
+def _declared_scratch_artifacts(report_path: Path | None) -> set[str]:
+    if report_path is None or not report_path.exists():
+        return set()
+    try:
+        data = json.loads(report_path.read_text(encoding="utf-8"))
+    except Exception:
+        return set()
+    declared: set[str] = set()
+    for value in data.get("changed_artifact_files", []):
+        if isinstance(value, str) and "/" not in value and value:
+            declared.add(value)
+    return declared
+
+
+def _is_quarantinable_declared_scratch(path: Path, *, declared: set[str], allowed_product_runtime_file: str | None) -> bool:
+    if path.name not in declared:
+        return False
+    if path.name == allowed_product_runtime_file:
+        return False
+    if path.suffix.lower() in {".cfg", ".py", ".toml", ".yaml", ".yml", ".ini"}:
+        return False
+    return path.suffix.lower() in {".json", ".txt", ".log", ".md"}
+
+
+def _is_known_role_scratch_file(path: Path, *, allowed_product_runtime_file: str | None) -> bool:
+    if path.name == allowed_product_runtime_file:
+        return False
+    if path.suffix.lower() not in {".json", ".txt", ".log", ".md"}:
+        return False
+    stem = path.stem.lower().replace("-", "_")
+    tokens = [part for part in stem.split("_") if part]
+    return bool(tokens and tokens[0] in EXECUTION_ROOT_SCRATCH_ROLE_TOKENS)
+
+
+def _quarantine_execution_root_scratch_files(
+    run_ctx: PatchletRunContext,
+    *,
+    report_path: Path | None,
+    allowed_product_runtime_file: str | None,
+) -> list[dict]:
+    quarantined: list[dict] = []
+    quarantine_dir = run_ctx.run_dir / "quarantined_scratch"
+    declared = _declared_scratch_artifacts(report_path)
+    root_files = [path for path in run_ctx.execution_root.iterdir() if path.is_file()]
+    for path in sorted(root_files, key=lambda item: item.name):
+        name = path.name
+        if name in EXECUTION_ROOT_SCRATCH_FILENAMES or _is_known_role_scratch_file(
+            path,
+            allowed_product_runtime_file=allowed_product_runtime_file,
+        ):
+            quarantine_dir.mkdir(parents=True, exist_ok=True)
+            dest = quarantine_dir / path.name
+            shutil.move(str(path), dest)
+            quarantined.append({
+                "original_path": name,
+                "quarantine_path": str(dest.relative_to(run_ctx.target_root)),
+                "reason": "worker_root_scratch_artifact",
+                "declared_by_report": name in declared,
+            })
+    for name in sorted(declared):
+        path = run_ctx.execution_root / name
+        if not path.exists() or not path.is_file():
+            continue
+        if any(item["original_path"] == name for item in quarantined):
+            continue
+        if not _is_quarantinable_declared_scratch(
+            path,
+            declared=declared,
+            allowed_product_runtime_file=allowed_product_runtime_file,
+        ):
+            continue
+        quarantine_dir.mkdir(parents=True, exist_ok=True)
+        dest = quarantine_dir / path.name
+        shutil.move(str(path), dest)
+        quarantined.append({
+            "original_path": name,
+            "quarantine_path": str(dest.relative_to(run_ctx.target_root)),
+            "reason": "worker_root_scratch_artifact",
+            "declared_by_report": True,
+        })
+    if quarantined:
+        write_json(quarantine_dir / "quarantined_scratch_files.json", {
+            "schema_version": "1.0",
+            "kind": "quarantined_scratch_files",
+            "quarantined_scratch_files": quarantined,
+        })
+    return quarantined
+
 
 def _capsule_path_violation_reasons(ctx: TargetRepoContext, run_ctx: PatchletRunContext) -> list[str]:
     reasons: list[str] = []
@@ -131,7 +237,25 @@ def _append_failed_worker_run_record(
     command = _read_command_from_run_dir(run_dir)
     exit_code = command.get("exit_code")
     paths = _base_manifest_paths(ctx, run_dir)
-    _upsert_attempt(ctx, attempt_id=run_dir.name, lifecycle_status="ATTEMPT_FAILED_WITH_EVIDENCE", **{
+    timed_out = isinstance(worker_error, WorkerTimeoutError) or command.get("timed_out") is True
+    interrupted = isinstance(worker_error, WorkerInterruptedError) or command.get("interrupted") is True
+    lifecycle_status = (
+        "ATTEMPT_TIMED_OUT"
+        if timed_out
+        else "ATTEMPT_INTERRUPTED"
+        if interrupted
+        else "ATTEMPT_FAILED_WITH_EVIDENCE"
+    )
+    failure_category = (
+        "orchestrator_subprocess_timeout"
+        if timed_out
+        else "attempt_interrupted"
+        if interrupted
+        else "worker_capsule_path_violation"
+        if _is_capsule_path_violation_error(worker_error)
+        else "worker_exception"
+    )
+    _upsert_attempt(ctx, attempt_id=run_dir.name, lifecycle_status=lifecycle_status, **{
         "stage": "PATCHLET_EXECUTION_IN_PROGRESS",
         "worker": worker_mode,
         "worker_mode": worker_mode,
@@ -160,12 +284,17 @@ def _append_failed_worker_run_record(
             "message": str(worker_error),
             "exit_code": exit_code,
             "timed_out": command.get("timed_out"),
+            "interrupted": command.get("interrupted"),
             "timeout_seconds": command.get("timeout_seconds"),
+            "started_at": command.get("started_at"),
+            "ended_at": command.get("ended_at"),
+            "duration_seconds": command.get("duration_seconds"),
+            "termination_signal": command.get("termination_signal"),
             "selected_model": command.get("selected_model"),
             "selected_reasoning": command.get("selected_reasoning"),
             "retryable": False,
             "blind_retry_allowed": False,
-            "failure_category": "worker_capsule_path_violation" if _is_capsule_path_violation_error(worker_error) else "worker_exception",
+            "failure_category": failure_category,
         },
         "artifact_preservation": {
             "run_dir_exists": run_dir.exists(),
@@ -178,7 +307,12 @@ def _append_failed_worker_run_record(
         },
         "wrapper_gate_result": wrapper_gate_result,
         "timed_out": command.get("timed_out"),
+        "interrupted": command.get("interrupted"),
         "timeout_seconds": command.get("timeout_seconds"),
+        "started_at": command.get("started_at"),
+        "ended_at": command.get("ended_at"),
+        "duration_seconds": command.get("duration_seconds"),
+        "termination_signal": command.get("termination_signal"),
         "selected_model": command.get("selected_model"),
         "selected_reasoning": command.get("selected_reasoning"),
         "progress_path": paths["progress_jsonl"],
@@ -687,6 +821,7 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
         work_slice_contract = worker_capsule.worker_memory_dir / "WORK_SLICE_CONTRACT.md"
         forbidden_files = patchlet.get("prompt_scope", {}).get("forbidden_edit_files", [])
         forbidden_text = "\n".join(f"- `{path}`" for path in forbidden_files) or "- any product/runtime file other than the single allowed file"
+        boundary_text = slice_boundary_contract_text(patchlet)
         attempt_prompt_path.write_text(
             f"# Worker Prompt Pending\n\nPatchlet: {pid}\nAttempt: {run_id}\nSubprompt: {patchlet['subprompt_path']}\n\n"
             "This patchlet is a small bounded work unit.\n\n"
@@ -699,9 +834,12 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
             f"Soft deadline seconds: `{soft_deadline_seconds(int(patchlet.get('time_budget_seconds') or 1))}`\n\n"
             f"Proof obligations: `{', '.join(patchlet.get('proof_obligation_ids', [])) or 'none'}`\n\n"
             f"Goal items: `{', '.join(patchlet.get('goal_item_ids', [])) or 'none'}`\n\n"
+            "## Slice-level allowed-change boundary\n\n"
+            f"{boundary_text}\n"
             f"Dependency patchlets: `{', '.join(patchlet.get('dependency_patchlet_ids', patchlet.get('depends_on', []))) or 'none'}`\n\n"
             "Do not attempt to solve unrelated work slices.\n\n"
             "Do not edit any product/runtime file except the single allowed file.\n\n"
+            "Do not create root-level scratch/check files such as `.report_check.json`; use `/tmp` for scratch checks.\n\n"
             "Do not compact memory by summarizing broad unrelated context.\n\n"
             "Finish within the patchlet time budget.\n\n"
             "If blocked, write BLOCKED_WITH_EVIDENCE with the specific missing dependency or proof obstacle.\n\n"
@@ -750,6 +888,20 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
         details={"prompt_id": prompt_entry.get("prompt_id")},
         next_action="Starting worker.",
     )
+    if patchlet.get("slice_change_boundary"):
+        _append_patchlet_event(
+            ctx,
+            "slice_boundary_prompted",
+            patchlet_id=pid,
+            attempt_id=run_id,
+            summary=f"Slice boundary prompted for {pid}.",
+            artifact_paths=[prompt_path, _record_path_for_manifest(ctx, worker_capsule.worker_memory_dir / "WORK_SLICE_CONTRACT.md")],
+            details={
+                "boundary_type": patchlet["slice_change_boundary"].get("boundary_type"),
+                "allowed_change_count": len(patchlet["slice_change_boundary"].get("allowed_changes", [])),
+                "forbidden_future_change_count": len(patchlet["slice_change_boundary"].get("forbidden_changes", [])),
+            },
+        )
     append_worker_event(
         ctx,
         worker_capsule,
@@ -834,6 +986,29 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
                 "output_jsonl_path": _record_path_for_manifest(ctx, run_dir / "output.jsonl"),
             },
         )
+        quarantined_scratch_files = _quarantine_execution_root_scratch_files(
+            run_ctx,
+            report_path=worker_result.report_path,
+            allowed_product_runtime_file=patchlet.get("allowed_product_runtime_file"),
+        )
+        if quarantined_scratch_files:
+            append_worker_event(
+                ctx,
+                worker_capsule,
+                run_ctx,
+                event="after_execution_root_scratch_quarantine",
+                worker_mode=worker_mode,
+                details={"quarantined_scratch_files": quarantined_scratch_files},
+            )
+            _append_patchlet_event(
+                ctx,
+                "execution_root_scratch_quarantined",
+                patchlet_id=pid,
+                attempt_id=run_id,
+                summary=f"Quarantined execution-root scratch files for {pid}.",
+                artifact_paths=[_record_path_for_manifest(ctx, run_dir / "quarantined_scratch" / "quarantined_scratch_files.json")],
+                details={"quarantined_scratch_files": quarantined_scratch_files},
+            )
         after = snapshot_status(run_ctx.execution_root)
         changed_paths = changed_between(before, after)
         diff_text = git_diff(run_ctx.execution_root)
@@ -851,7 +1026,40 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
                 "changed_paths": changed_paths,
             },
         )
-        diff_result = validate_changed_paths(changed_paths, patchlet)
+        diff_result = validate_changed_paths(changed_paths, patchlet, diff_text=diff_text)
+        _append_patchlet_event(
+            ctx,
+            "slice_boundary_diff_accepted" if diff_result.allowed else "slice_boundary_diff_rejected",
+            patchlet_id=pid,
+            attempt_id=run_id,
+            severity="info" if diff_result.allowed else "error",
+            summary=(
+                f"Diff allowed for {pid}."
+                if diff_result.allowed
+                else f"Diff rejected for {pid}: {', '.join(diff_result.unauthorized_paths)}."
+            ),
+            artifact_paths=[_record_path_for_manifest(ctx, diff_path)],
+            details={
+                "changed_paths": changed_paths,
+                "path_classifications": diff_result.path_classifications or {},
+                "slice_boundary_violations": diff_result.slice_boundary_violations or [],
+            },
+        )
+        artifact_dirs = [
+            path
+            for path, classification in (diff_result.path_classifications or {}).items()
+            if classification == "ARTIFACT_ALLOWED" and (ctx.root / path).is_dir()
+        ]
+        if artifact_dirs:
+            _append_patchlet_event(
+                ctx,
+                "artifact_directory_diff_allowed",
+                patchlet_id=pid,
+                attempt_id=run_id,
+                summary=f"Allowed artifact directory diff paths for {pid}.",
+                artifact_paths=artifact_dirs,
+                details={"artifact_directories": artifact_dirs},
+            )
     except (WorkerExecutionError, WorkerPreconditionError) as exc:
         worker_error = exc
         _append_patchlet_event(
@@ -886,6 +1094,37 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
         )
 
     if worker_error is not None:
+        command = _read_command_from_run_dir(run_dir)
+        timed_out = isinstance(worker_error, WorkerTimeoutError) or command.get("timed_out") is True
+        interrupted = isinstance(worker_error, WorkerInterruptedError) or command.get("interrupted") is True
+        failure_signature = (
+            "orchestrator_subprocess_timeout"
+            if timed_out
+            else "attempt_interrupted"
+            if interrupted
+            else "worker_execution_failed"
+        )
+        event_type = "patchlet_timed_out" if timed_out else "patchlet_interrupted" if interrupted else "patchlet_failed_with_evidence"
+        summary = (
+            f"Patchlet {pid} timed out after {command.get('timeout_seconds')} seconds."
+            if timed_out
+            else f"Patchlet {pid} interrupted with evidence preserved."
+            if interrupted
+            else f"Patchlet {pid} failed with evidence; worker failed before acceptance."
+        )
+        failure_id = _record_failure(
+            ctx,
+            source_id=pid,
+            observed_failure=str(worker_error),
+            changed_paths=changed_paths,
+            failure_signature=failure_signature,
+        )
+        state = load_state(ctx)
+        if pid not in state.failed_patchlets:
+            state.failed_patchlets.append(pid)
+        if pid in state.pending_patchlets:
+            state.pending_patchlets.remove(pid)
+        transition(ctx, state, "FAILURE_CLASSIFICATION_REQUIRED", reason=f"{pid} {failure_signature} {failure_id}")
         if worktree_ctx is not None:
             worktree_ctx = cleanup_patchlet_worktree(worktree_ctx)
             cleanup_status = worktree_ctx.cleanup_status
@@ -927,14 +1166,21 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
         )
         _append_patchlet_event(
             ctx,
-            "patchlet_failed_with_evidence",
+            event_type,
             patchlet_id=pid,
             attempt_id=run_id,
             severity="error",
-            summary=f"Patchlet {pid} failed with evidence; worker failed before acceptance.",
-            artifact_paths=[wrapper_gate_result_path],
+            summary=summary,
+            artifact_paths=[
+                wrapper_gate_result_path,
+                _record_path_for_manifest(ctx, ctx.paths.failures_dir / f"{failure_id}.json"),
+            ],
             next_action="Preserving worker failure evidence.",
-            details={"error_type": type(worker_error).__name__, "error_message": str(worker_error)},
+            details={
+                "error_type": type(worker_error).__name__,
+                "error_message": str(worker_error),
+                "failure_signature": failure_signature,
+            },
         )
         raise worker_error
 
@@ -1159,7 +1405,35 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
                 probe_plan=probe_plan,
                 integration_ref=None,
                 execution_root=run_ctx.execution_root,
+                patchlet=patchlet,
+                scope="patchlet",
             )
+            append_operator_event(
+                ctx.root,
+                event_type="patchlet_scoped_probe_selected",
+                severity="info",
+                stage="PATCHLET_EXECUTION_IN_PROGRESS",
+                summary=f"Selected {len(independent_result.get('selected_obligation_ids', []))} current obligations for {pid}.",
+                artifact_paths=[_record_path_for_manifest(ctx, run_dir / "gates" / "independent_probe_rerun_result.json")],
+                patchlet_id=pid,
+                attempt_id=run_id,
+                details={
+                    "selected_obligation_ids": independent_result.get("selected_obligation_ids", []),
+                    "future_obligation_ids": independent_result.get("not_selected_future_obligation_ids", []),
+                },
+            )
+            if independent_result.get("not_selected_future_obligation_ids"):
+                append_operator_event(
+                    ctx.root,
+                    event_type="future_obligations_deferred",
+                    severity="info",
+                    stage="PATCHLET_EXECUTION_IN_PROGRESS",
+                    summary=f"Deferred future obligations for {pid}.",
+                    artifact_paths=[_record_path_for_manifest(ctx, run_dir / "gates" / "independent_probe_rerun_result.json")],
+                    patchlet_id=pid,
+                    attempt_id=run_id,
+                    details={"future_obligation_ids": independent_result.get("not_selected_future_obligation_ids", [])},
+                )
             coverage_result = evaluate_goal_coverage_gate(
                 proof_obligations=proof_obligations,
                 probe_plan=probe_plan,
@@ -1203,6 +1477,29 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
                 attempt_id=run_id,
                 details=coverage_result,
             )
+            if coverage_result.get("accepted_for_patchlet_progress") and not coverage_result.get("accepted_for_done"):
+                append_operator_event(
+                    ctx.root,
+                    event_type="partial_goal_coverage_accepted",
+                    severity="info",
+                    stage="PATCHLET_EXECUTION_IN_PROGRESS",
+                    summary=f"Partial coverage accepted patchlet progress for {pid}; DONE remains blocked.",
+                    artifact_paths=[_record_path_for_manifest(ctx, coverage_path)],
+                    patchlet_id=pid,
+                    attempt_id=run_id,
+                    details=coverage_result,
+                )
+                append_operator_event(
+                    ctx.root,
+                    event_type="workflow_done_blocked_by_future_obligations",
+                    severity="info",
+                    stage="PATCHLET_EXECUTION_IN_PROGRESS",
+                    summary=f"DONE blocked by future obligations after {pid}.",
+                    artifact_paths=[_record_path_for_manifest(ctx, coverage_path)],
+                    patchlet_id=pid,
+                    attempt_id=run_id,
+                    details={"future_obligation_ids": coverage_result.get("future_obligation_ids", [])},
+                )
             update_goal_progress(
                 workflow_root=ctx.paths.workflow_dir,
                 event_reason="goal_coverage_gate",
@@ -1509,12 +1806,14 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
             "diff": _record_path_for_manifest(ctx, diff_path),
         },
         "diff_allowed": diff_result.allowed,
-        "diff_validation": {
-            "valid": diff_result.allowed,
-            "changed_product_runtime_files": diff_result.product_runtime_paths,
-            "artifact_files": diff_result.artifact_paths,
-            "unauthorized_files": diff_result.unauthorized_paths,
-        },
+            "diff_validation": {
+                "valid": diff_result.allowed,
+                "changed_product_runtime_files": diff_result.product_runtime_paths,
+                "artifact_files": diff_result.artifact_paths,
+                "unauthorized_files": diff_result.unauthorized_paths,
+                "slice_boundary_violations": diff_result.slice_boundary_violations or [],
+                "path_classifications": diff_result.path_classifications or {},
+            },
         "report_validation": {
             "valid": report_valid,
             "reason": None if report_valid else report_error,

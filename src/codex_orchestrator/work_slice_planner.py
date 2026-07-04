@@ -22,6 +22,101 @@ def _obligation_ids(candidate: dict[str, Any]) -> list[str]:
     return list(candidate.get("proof_obligation_ids") or ["PO001"])
 
 
+def _key_value_rows(candidate: dict[str, Any]) -> dict[str, dict[str, str]]:
+    rows = candidate.get("text_key_value_state") or []
+    if not rows and candidate.get("content"):
+        for line in str(candidate.get("content", "")).splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#") or "=" not in stripped:
+                continue
+            key, value = stripped.split("=", 1)
+            rows.append({"key": key.strip(), "value": value.strip(), "line": stripped})
+    return {str(row.get("key")): row for row in rows if row.get("key")}
+
+
+def _desired_changes(candidate: dict[str, Any], proof_obligations: dict[str, Any]) -> list[dict[str, Any]]:
+    planned = list(candidate.get("desired_key_value_changes") or [])
+    if planned:
+        return planned
+    by_id = {row.get("obligation_id"): row for row in proof_obligations.get("obligations", [])}
+    desired: list[dict[str, Any]] = []
+    for obligation_id in _obligation_ids(candidate):
+        obligation = by_id.get(obligation_id, {})
+        text = " ".join(str(obligation.get(key, "")) for key in ("claim", "description", "expected"))
+        for token in text.replace(",", " ").replace(";", " ").split():
+            if "=" not in token:
+                continue
+            key, value = token.strip("`.").split("=", 1)
+            if key and value:
+                desired.append(
+                    {
+                        "key": key,
+                        "new_value": value.rstrip("."),
+                        "proof_obligation_ids": [obligation_id],
+                        "goal_item_ids": list(obligation.get("goal_item_ids", [])),
+                    }
+                )
+                break
+    return desired
+
+
+def _slice_boundaries(candidate: dict[str, Any], proof_obligations: dict[str, Any]) -> list[dict[str, Any]]:
+    old_by_key = _key_value_rows(candidate)
+    desired = _desired_changes(candidate, proof_obligations)
+    future_by_key = {str(row.get("key")): row for row in desired if row.get("key")}
+    boundaries: list[dict[str, Any]] = []
+    for idx, row in enumerate(desired, start=1):
+        key = str(row.get("key", ""))
+        old = old_by_key.get(key)
+        new_value = str(row.get("new_value", ""))
+        if not key or not old or not new_value:
+            continue
+        old_value = str(old.get("value", ""))
+        old_line = str(old.get("line") or f"{key}={old_value}")
+        new_line = f"{key}={new_value}"
+        goal_ids = list(row.get("goal_item_ids") or [])
+        obligation_ids = list(row.get("proof_obligation_ids") or [])
+        forbidden = [item for fkey, item in future_by_key.items() if fkey != key]
+        boundaries.append(
+            {
+                "boundary_id": f"SCB{idx:03d}",
+                "boundary_type": "text_key_value_update",
+                "allowed_product_runtime_file": candidate["path"],
+                "goal_item_ids": goal_ids,
+                "proof_obligation_ids": obligation_ids,
+                "allowed_changes": [
+                    {
+                        "change_id": f"CH{idx:03d}",
+                        "operation": "replace_line",
+                        "key": key,
+                        "old_value": old_value,
+                        "new_value": new_value,
+                        "old_line": old_line,
+                        "new_line": new_line,
+                        "match_strategy": "exact_key_value_line",
+                    }
+                ],
+                "forbidden_future_goal_item_ids": sorted(
+                    {gid for item in forbidden for gid in item.get("goal_item_ids", [])}
+                ),
+                "forbidden_future_proof_obligation_ids": sorted(
+                    {oid for item in forbidden for oid in item.get("proof_obligation_ids", [])}
+                ),
+                "forbidden_changes": [
+                    {
+                        "key": str(item.get("key")),
+                        "reason": f"reserved for later patchlet",
+                    }
+                    for item in forbidden
+                    if item.get("key")
+                ],
+                "allow_unrelated_whitespace_only": False,
+                "allow_context_reordering": False,
+            }
+        )
+    return boundaries
+
+
 def _slice_title(path: str, slice_type: str) -> str:
     labels = {
         "entrypoint_wiring": "Update entrypoint wiring for requested behavior",
@@ -83,11 +178,17 @@ def plan_work_slices(
     for path in order:
         candidate = candidates_by_path[path]
         slice_types = _desired_slice_types(candidate, single_simple_file=single_simple_file)
+        boundaries = _slice_boundaries(candidate, proof_obligations)
+        if boundaries and len(slice_types) < len(boundaries):
+            slice_types = slice_types + [slice_types[-1] if slice_types else "runtime_behavior_change"] * (len(boundaries) - len(slice_types))
         if max_slices_per_file is not None:
             slice_types = slice_types[:max_slices_per_file]
         previous_for_same_file: str | None = None
-        for slice_type in slice_types:
+        for slice_index, slice_type in enumerate(slice_types):
             work_slice_id = f"WS{len(slices) + 1:03d}"
+            boundary = boundaries[slice_index] if slice_index < len(boundaries) else None
+            goal_item_ids = list(boundary.get("goal_item_ids", [])) if boundary else _goal_ids(candidate)
+            proof_obligation_ids = list(boundary.get("proof_obligation_ids", [])) if boundary else _obligation_ids(candidate)
             depends = []
             for dependency_file in candidate.get("dependency_inputs", []):
                 dep_slice = last_slice_by_path.get(dependency_file)
@@ -104,8 +205,8 @@ def plan_work_slices(
                     "allowed_product_runtime_file": path,
                     "slice_type": slice_type,
                     "scope_statement": f"Only update {slice_type.replace('_', ' ')} in {path}; do not edit any other product/runtime file.",
-                    "goal_item_ids": _goal_ids(candidate),
-                    "proof_obligation_ids": _obligation_ids(candidate),
+                    "goal_item_ids": goal_item_ids,
+                    "proof_obligation_ids": proof_obligation_ids,
                     "inventory_node_ids": list(candidate.get("inventory_node_ids", [])),
                     "depends_on_work_slice_ids": depends,
                     "risk_level": candidate.get("risk_level", "low"),
@@ -123,7 +224,7 @@ def plan_work_slices(
                         "allowed_edit_file": path,
                         "forbidden_edit_files": forbidden,
                         "must_include": [
-                            "proof obligation " + ", ".join(_obligation_ids(candidate)),
+                            "proof obligation " + ", ".join(proof_obligation_ids),
                             "local probe requirement",
                             "single-file edit boundary",
                         ],
@@ -135,6 +236,7 @@ def plan_work_slices(
                         "memory_compacting_required": False,
                     },
                     "acceptance_summary": f"{path} satisfies this bounded slice without editing other product/runtime files.",
+                    **({"slice_change_boundary": boundary} if boundary else {"boundary_enforcement_status": "BOUNDARY_UNENFORCEABLE"}),
                 }
             )
             previous_for_same_file = work_slice_id

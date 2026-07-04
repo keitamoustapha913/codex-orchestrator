@@ -86,6 +86,21 @@ class LiveProgressReporter:
             flush=True,
         )
 
+    def emit_status(self, message: str, elapsed_seconds: float, *, force: bool = False) -> None:
+        if not self.policy.enabled or self.policy.sink == "none":
+            return
+        signal = f"status:{message}"
+        if not force:
+            previous = self._last_signal_at.get(signal)
+            if previous is not None and elapsed_seconds - previous < self.policy.interval_seconds:
+                return
+        self._last_signal_at[signal] = elapsed_seconds
+        print(
+            f"[cxor:{self.attempt_id} +{int(elapsed_seconds):03d}s] {message}",
+            file=sys.stderr,
+            flush=True,
+        )
+
 
 def _positive_integer_seconds(env_var: str, value: str | None, default: int) -> int:
     if value is None or value == "":

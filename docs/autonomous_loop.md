@@ -248,3 +248,7 @@ cxor writes `goal_progress.json` and append-only `goal_progress.jsonl`; `cxor go
 ## General Work Decomposition
 
 The autonomous loop now plans work slices before compiling patchlets. This is not one file -> one patchlet; each patchlet has exactly one allowed product/runtime file, while multiple patchlets may target the same file. `CODEX_PATCHLET_TIMEOUT_SECONDS` defaults to 600 seconds and is propagated into the plan, prompt, worker memory, and run records. See `docs/general_work_decomposition.md`.
+
+## RC6 Loop Gates
+
+one allowed file per patchlet is necessary but not sufficient. Same-file patchlets require a slice-level allowed-change boundary, and future slice changes are rejected even when they are inside the same allowed product/runtime file. The autonomous loop uses patchlet-scoped proof for selected current obligations, leaves future obligations unproven, accepts PARTIAL progress for patchlet advancement, and blocks DONE until final workflow proof. Report ingestion accepts pass: / fail: / blocked: descriptive prefixes. Artifact directories are allowed only under approved roots.

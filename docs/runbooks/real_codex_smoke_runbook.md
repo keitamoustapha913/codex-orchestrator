@@ -283,3 +283,7 @@ cxor writes `goal_progress.json` and append-only `goal_progress.jsonl`; `cxor go
 ## General Work Decomposition Check
 
 Before optional real-Codex multi-patchlet smoke, deterministic mock tests should confirm `work_decomposition_plan.json`, `work_slices.json`, `patchlet_plan.json`, `dependency_graph.json`, and `transaction_group_plan.json`. Every patchlet must have exactly one allowed product/runtime file, and same-file patchlets must be ordered. See `docs/multi_patchlet_transaction_graph.md`.
+
+## RC6 Real-Codex Matrix Checks
+
+For real-Codex smoke and matrix runs, one allowed file per patchlet is necessary but not sufficient. Same-file patchlets require a slice-level allowed-change boundary, and future slice changes are rejected even when they are inside the same allowed product/runtime file. Confirm patchlet-scoped proof selects only current obligations, future obligations remain unproven, PARTIAL progress accepts patchlet progress but blocks DONE, report ingestion accepts pass: / fail: / blocked: descriptive prefixes, artifact directories are allowed only under approved roots, and the full matrix passes before rc6.

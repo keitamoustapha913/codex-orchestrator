@@ -13,3 +13,7 @@ In-progress unaccepted worker changes are never applied by default. `partial_app
 ## Multi-Patchlet Progress
 
 `goal_progress.json` includes decomposition counts, per-file patchlet counts, ready/waiting/accepted/blocked patchlets, and same-file multi-patchlet groups. In multi-patchlet workflows, stop and partial apply still use the latest accepted checkpoint only; pending, failed, blocked, or in-progress patchlets are not applied. See `docs/multi_patchlet_transaction_graph.md`.
+
+## RC6 Partial Coverage
+
+PARTIAL progress accepts patchlet progress but blocks DONE. A patchlet can be accepted when its selected current obligations pass; future obligations remain unproven, not failed. DONE is available only after workflow-level coverage proves every required obligation and master-prompt satisfaction passes. Same-file progress also requires a slice-level allowed-change boundary because one allowed file per patchlet is necessary but not sufficient, and future slice changes are rejected.

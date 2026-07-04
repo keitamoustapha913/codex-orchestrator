@@ -19,3 +19,7 @@ Unsupported or ambiguous goals are not marked proven. They stop early with `goal
 ## Decomposition Proof Mapping
 
 General work decomposition maps work slices and patchlets to proof obligations and goal items. The proof gate remains required for DONE: a patchlet contribution is not enough until the orchestrator-owned independent rerun and goal coverage gate prove the required obligation. See `docs/general_work_decomposition.md`.
+
+## RC6 Patchlet-Scoped Proof
+
+patchlet-scoped proof runs only selected current obligations for the active work slice. Future obligations remain unproven, not failed, until their patchlets run. PARTIAL progress accepts patchlet progress but blocks DONE; workflow-level DONE still requires all required proof obligations and master-prompt satisfaction. one allowed file per patchlet is necessary but not sufficient, so same-file proof must also respect the slice-level allowed-change boundary and reject future slice changes.

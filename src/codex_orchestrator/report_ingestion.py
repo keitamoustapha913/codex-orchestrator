@@ -12,6 +12,9 @@ from codex_orchestrator.target_repo import TargetRepoContext
 from codex_orchestrator.validators.report_validator import validate_patchlet_report_structured
 
 
+ALLOWED_ACCEPTANCE_STATUS_FORMS = ["pass", "pass: ...", "fail", "fail: ...", "blocked", "blocked: ..."]
+
+
 def _rel(ctx: TargetRepoContext, path: Path | None) -> str | None:
     if path is None:
         return None
@@ -19,6 +22,72 @@ def _rel(ctx: TargetRepoContext, path: Path | None) -> str | None:
         return path.relative_to(ctx.root).as_posix()
     except ValueError:
         return str(path)
+
+
+def normalize_acceptance_criteria_result(value: Any) -> dict[str, Any]:
+    raw = value
+    if not isinstance(value, str):
+        return {
+            "valid": False,
+            "error_code": "INVALID_ACCEPTANCE_CRITERIA_RESULT",
+            "raw_value": raw,
+            "allowed_forms": ALLOWED_ACCEPTANCE_STATUS_FORMS,
+        }
+    stripped = value.strip()
+    lowered = stripped.lower()
+    for status in ("pass", "fail", "blocked"):
+        if lowered == status:
+            return {"valid": True, "raw_value": raw, "normalized_status": status, "detail": ""}
+        prefix = status + ":"
+        if lowered.startswith(prefix):
+            detail = stripped[len(prefix):].strip()
+            return {"valid": True, "raw_value": raw, "normalized_status": status, "detail": detail}
+    return {
+        "valid": False,
+        "error_code": "INVALID_ACCEPTANCE_CRITERIA_RESULT",
+        "raw_value": raw,
+        "allowed_forms": ALLOWED_ACCEPTANCE_STATUS_FORMS,
+    }
+
+
+def _normalize_report_acceptance_criteria(report: dict[str, Any]) -> tuple[dict[str, Any], bool, dict[str, Any] | None]:
+    normalized = normalize_acceptance_criteria_result(report.get("acceptance_criteria_result"))
+    if not normalized.get("valid"):
+        return report, False, normalized
+    raw = normalized["raw_value"]
+    status = normalized["normalized_status"]
+    detail = normalized.get("detail", "")
+    if raw == status and not detail:
+        return report, False, normalized
+    canonical = dict(report)
+    canonical["acceptance_criteria_result_raw"] = raw
+    canonical["acceptance_criteria_result"] = status
+    canonical["acceptance_criteria_result_detail"] = detail
+    return canonical, True, normalized
+
+
+def _normalize_deterministic_run_counts(report: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+    counts = report.get("deterministic_run_counts")
+    if not isinstance(counts, dict):
+        return report, False
+    normalized_counts: dict[str, Any] = {}
+    changed = False
+    for key, value in counts.items():
+        if isinstance(value, str):
+            normalized_counts[key] = value
+            continue
+        if isinstance(value, dict) and isinstance(value.get("runs"), int):
+            runs = int(value["runs"])
+            normalized_counts[key] = f"{runs}/{runs}"
+            changed = True
+            continue
+        normalized_counts[key] = value
+    if not changed:
+        return report, False
+    canonical = dict(report)
+    canonical["deterministic_run_counts_raw"] = counts
+    canonical["deterministic_run_counts"] = normalized_counts
+    return canonical, True
 
 
 def ingest_patchlet_report(
@@ -60,11 +129,17 @@ def ingest_patchlet_report(
     if not validation_errors:
         canonical_report = dict(raw_report)
         canonical_report["probe_artifact_refs"] = normalization.normalized_refs
+        canonical_report, acceptance_normalized, acceptance_normalization = _normalize_report_acceptance_criteria(canonical_report)
+        canonical_report, run_counts_normalized = _normalize_deterministic_run_counts(canonical_report)
         write_json(canonical_report_path, canonical_report)
         validation_result = validate_patchlet_report_structured(canonical_report, patchlet, repo_root=ctx.root)
         validation_valid = validation_result["valid"]
         validation_errors = validation_result["errors"]
         accepted = validation_valid
+    else:
+        acceptance_normalized = False
+        acceptance_normalization = None
+        run_counts_normalized = False
     normalized_signature = validation_errors[0].get("normalized_signature") if validation_errors else None
     write_json(
         errors_path,
@@ -85,8 +160,13 @@ def ingest_patchlet_report(
         "patchlet_id": patchlet_id,
         "raw_report_path": _rel(ctx, raw_report_path),
         "canonical_report_path": _rel(ctx, canonical_report_path) if accepted else None,
-        "normalization_applied": normalization.normalization_applied,
-        "normalization_kinds": ["probe_artifact_refs_string_paths_to_objects"] if normalization.normalization_applied else [],
+        "normalization_applied": normalization.normalization_applied or acceptance_normalized,
+        "normalization_kinds": (
+            (["probe_artifact_refs_string_paths_to_objects"] if normalization.normalization_applied else [])
+            + (["acceptance_criteria_result_status_prefix"] if acceptance_normalized else [])
+            + (["deterministic_run_counts_objects_to_strings"] if run_counts_normalized else [])
+        ),
+        "acceptance_criteria_result_normalization": acceptance_normalization,
         "raw_probe_artifact_refs": normalization.raw_string_refs,
         "canonical_probe_artifact_refs": canonical_report.get("probe_artifact_refs", []) if canonical_report else [],
         "validation": {
@@ -114,6 +194,30 @@ def ingest_patchlet_report(
             patchlet_id=patchlet_id,
             attempt_id=attempt_id,
             details={"normalization_kinds": result["normalization_kinds"], "normalization_applied": True},
+        )
+    if acceptance_normalized:
+        append_operator_event(
+            ctx.root,
+            event_type="report_ingestion_normalized_status",
+            severity="info",
+            stage="PATCHLET_EXECUTION_IN_PROGRESS",
+            summary=f"report ingestion {patchlet_id} normalized acceptance_criteria_result prefix.",
+            artifact_paths=[_rel(ctx, ingestion_path) or "", _rel(ctx, raw_report_path) or "", _rel(ctx, canonical_report_path) or ""],
+            patchlet_id=patchlet_id,
+            attempt_id=attempt_id,
+            details={"normalization": acceptance_normalization},
+        )
+    if run_counts_normalized:
+        append_operator_event(
+            ctx.root,
+            event_type="report_ingestion_normalized_run_counts",
+            severity="info",
+            stage="PATCHLET_EXECUTION_IN_PROGRESS",
+            summary=f"report ingestion {patchlet_id} normalized deterministic_run_counts objects.",
+            artifact_paths=[_rel(ctx, ingestion_path) or "", _rel(ctx, raw_report_path) or "", _rel(ctx, canonical_report_path) or ""],
+            patchlet_id=patchlet_id,
+            attempt_id=attempt_id,
+            details={"normalization_kind": "deterministic_run_counts_objects_to_strings"},
         )
     append_operator_event(
         ctx.root,

@@ -293,3 +293,7 @@ cxor writes `goal_progress.json` and append-only `goal_progress.jsonl`; `cxor go
 ## General Work Decomposition Release Note
 
 This release adds deterministic general work decomposition: impact/dependency analysis, work slices, patchlet plans, dependency graphs, transaction group plans, `cxor decomposition`, status decomposition fields, and worker prompt scope controls. The architecture enforces one allowed product/runtime file per patchlet while allowing multiple patchlets for the same file. See `docs/general_work_decomposition.md`.
+
+## RC6 Release Gate
+
+Before rc6, the full real-Codex matrix must pass. The release gate requires proof that one allowed file per patchlet is necessary but not sufficient, same-file patchlets require a slice-level allowed-change boundary, future slice changes are rejected, patchlet-scoped proof leaves future obligations unproven rather than failed, PARTIAL progress accepts patchlet progress but blocks DONE, report ingestion accepts pass: / fail: / blocked: prefixes, and artifact directories are allowed only under approved roots.

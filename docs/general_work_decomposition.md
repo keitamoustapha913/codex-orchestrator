@@ -38,3 +38,7 @@ cxor decomposition --repo <repo> --dependencies
 
 Target complexity alone previously did not create multiple patchlets because patchlet compilation iterated the single global invariant `I001`.
 The corrected path compiles patchlets from `patchlet_plan.json`, which is generated from work slices rather than invariant count.
+
+## RC6 Slice Boundary Contract
+
+one allowed file per patchlet is necessary but not sufficient for same-file multi-patchlet workflows. Same-file patchlets require a slice-level allowed-change boundary, and future slice changes are rejected even when they are inside the same allowed product/runtime file. The boundary is propagated through `work_slices.json`, `patchlet_plan.json`, `patchlet_index.json`, worker prompts, worker memory, and the diff guard. patchlet-scoped proof runs only selected current obligations; future obligations remain unproven, not failed. PARTIAL progress accepts patchlet progress but blocks DONE. Report ingestion accepts pass: / fail: / blocked: descriptive prefixes. Artifact directories are allowed only under approved roots.

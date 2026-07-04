@@ -27,12 +27,31 @@ def update_goal_progress(
     obligations = proof_obligations or _read_if_exists(workflow_root / "proof_obligations.json") or {"obligations": []}
     patchlet_index = _read_if_exists(workflow_root / "patchlets" / "patchlet_index.json") or {"patchlets": []}
     decomposition_summary = _decomposition_summary(workflow_root, patchlet_index)
-    counts = summarize_obligation_coverage(obligations)
+    existing_by_id = {
+        row.get("obligation_id"): row
+        for row in existing.get("obligations", [])
+        if isinstance(row, dict) and row.get("obligation_id")
+    }
+    for obligation in obligations.get("obligations", []):
+        existing_row = existing_by_id.get(obligation.get("obligation_id"))
+        if not existing_row:
+            continue
+        existing_status = existing_row.get("status")
+        if existing_status in {"PROVEN_BY_ORCHESTRATOR", "FAILED", "BLOCKED"}:
+            obligation["status"] = existing_status
+            obligation["evidence_paths"] = existing_row.get("evidence_paths", obligation.get("evidence_paths", []))
+            obligation["last_patchlet_id"] = existing_row.get("last_patchlet_id")
+            obligation["last_attempt_id"] = existing_row.get("last_attempt_id")
     if latest_gate_result and latest_gate_result.get("accepted"):
+        proven_ids = set(latest_gate_result.get("covered_obligation_ids", [])) | set(
+            latest_gate_result.get("proven_current_obligation_ids", [])
+        )
         for obligation in obligations.get("obligations", []):
-            if obligation.get("obligation_id") in latest_gate_result.get("covered_obligation_ids", []):
+            if obligation.get("obligation_id") in proven_ids:
                 obligation["status"] = "PROVEN_BY_ORCHESTRATOR"
                 obligation["evidence_paths"] = latest_gate_result.get("evidence_paths", [])
+                obligation["last_patchlet_id"] = latest_gate_result.get("patchlet_id")
+                obligation["last_attempt_id"] = latest_gate_result.get("attempt_id")
     counts = summarize_obligation_coverage(obligations)
     overall = _overall_status(provability, counts, latest_gate_result)
     latest_checkpoint = latest_accepted_checkpoint or existing.get("latest_accepted_checkpoint")
@@ -152,8 +171,8 @@ def _progress_obligation(row: dict[str, Any], latest_gate_result: dict[str, Any]
     return {
         "obligation_id": row.get("obligation_id"),
         "status": row.get("status", "UNPROVEN"),
-        "last_patchlet_id": (latest_gate_result or {}).get("patchlet_id"),
-        "last_attempt_id": (latest_gate_result or {}).get("attempt_id"),
+        "last_patchlet_id": row.get("last_patchlet_id") or (latest_gate_result or {}).get("patchlet_id"),
+        "last_attempt_id": row.get("last_attempt_id") or (latest_gate_result or {}).get("attempt_id"),
         "evidence_paths": row.get("evidence_paths", []),
         "operator_summary": "Required behavior was independently proven." if row.get("status") == "PROVEN_BY_ORCHESTRATOR" else row.get("statement", ""),
     }

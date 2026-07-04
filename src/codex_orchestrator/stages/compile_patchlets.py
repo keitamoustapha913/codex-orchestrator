@@ -111,6 +111,31 @@ def _semantic_fields(patchlet: dict, semantic_criteria: list[dict]) -> None:
         )
 
 
+def _slice_boundary_prompt_section(patchlet: dict) -> str:
+    boundary = patchlet.get("slice_change_boundary") or {}
+    if not boundary:
+        return ""
+    allowed_changes = boundary.get("allowed_changes") or []
+    forbidden = boundary.get("forbidden_changes") or []
+    current_lines = []
+    for change in allowed_changes:
+        if change.get("operation") == "replace_line":
+            current_lines.append(f"- replace exactly `{change.get('old_line')}` with `{change.get('new_line')}`")
+        elif change.get("key"):
+            current_lines.append(f"- update `{change.get('key')}` only")
+    forbidden_lines = [f"- `{row.get('key')}`" for row in forbidden if row.get("key")]
+    return (
+        "## Allowed change boundary\n\n"
+        f"Boundary type: `{boundary.get('boundary_type')}`\n\n"
+        + ("\n".join(current_lines) if current_lines else "- no static allowed changes declared")
+        + "\n\nDo not change future-slice keys:\n"
+        + ("\n".join(forbidden_lines) if forbidden_lines else "- none")
+        + "\n\n"
+        "If you change future-slice keys in this patchlet, the orchestrator will reject the patchlet as over-scoped even though the file is allowed.\n\n"
+        "Your local proof for this patchlet should prove only the listed current allowed change.\n\n"
+    )
+
+
 def _write_patchlet_subprompt(
     ctx: TargetRepoContext,
     *,
@@ -130,6 +155,7 @@ def _write_patchlet_subprompt(
     forbidden_text = "\n".join(f"- `{path}`" for path in forbidden_files) or "- any product/runtime file other than the single allowed file"
     work_slice_id = patchlet.get("work_slice_id")
     dependency_ids = patchlet.get("dependency_patchlet_ids", [])
+    boundary_section = _slice_boundary_prompt_section(patchlet)
     subprompt.write_text(
         f"# Root-Cause Patchlet {patchlet_id}\n\n"
         "This patchlet is a small bounded work unit.\n\n"
@@ -141,9 +167,11 @@ def _write_patchlet_subprompt(
         f"Dependency patchlets: {', '.join(dependency_ids) or 'none'}\n\n"
         f"Proof obligations: {', '.join(patchlet.get('proof_obligation_ids', [])) or 'none'}\n\n"
         f"Goal items: {', '.join(patchlet.get('goal_item_ids', [])) or 'none'}\n\n"
+        f"{boundary_section}"
         f"Scope statement: {patchlet.get('scope_statement') or 'Only perform this bounded slice.'}\n\n"
         "Do not attempt to solve unrelated work slices.\n\n"
         "Do not edit any product/runtime file except the single allowed file.\n\n"
+        "Do not create root-level scratch/check files such as `.report_check.json`; use `/tmp` for scratch checks.\n\n"
         "Do not compact memory by summarizing broad unrelated context.\n\n"
         "Finish within the patchlet time budget.\n\n"
         "If blocked, write BLOCKED_WITH_EVIDENCE with the specific missing dependency or proof obstacle.\n\n"
@@ -241,6 +269,8 @@ def _compile_from_patchlet_plan(
                 "scope_statement": planned.get("scope_statement"),
                 **planned.get("prompt_scope", {}),
             },
+            "slice_change_boundary": planned.get("slice_change_boundary"),
+            "boundary_enforcement_status": planned.get("boundary_enforcement_status"),
             "status": existing.get("status", "PENDING"),
         }
         _semantic_fields(patchlet, semantic_criteria)

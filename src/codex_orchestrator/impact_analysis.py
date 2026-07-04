@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import re
 from pathlib import Path
 from typing import Any
 
@@ -42,7 +43,7 @@ def _is_product_runtime_file(path: str, goal_interpretation: dict[str, Any]) -> 
         return False
     if path.startswith("docs/") or name.lower().endswith((".md", ".rst")):
         return _docs_are_target(goal_interpretation)
-    return path.endswith((".py", ".toml", ".yaml", ".yml", ".json", ".ini", ".cfg"))
+    return True
 
 
 def _module_to_path(path: str) -> str:
@@ -83,6 +84,46 @@ def _proof_obligation_ids(proof_obligations: dict[str, Any]) -> list[str]:
     return ids or ["PO001"]
 
 
+def _goal_items(goal_interpretation: dict[str, Any]) -> list[dict[str, Any]]:
+    return [item for item in goal_interpretation.get("goal_items", []) if item.get("goal_item_id")]
+
+
+def _obligations(proof_obligations: dict[str, Any]) -> list[dict[str, Any]]:
+    return [item for item in proof_obligations.get("obligations", []) if item.get("obligation_id")]
+
+
+def _row_mentions_file(row: dict[str, Any], path: str) -> bool:
+    haystack: list[str] = []
+    for key in ("target_boundaries", "affected_runtime_boundaries", "entrypoints"):
+        value = row.get(key)
+        if isinstance(value, list):
+            haystack.extend(str(item) for item in value)
+        elif value:
+            haystack.append(str(value))
+    repo_context = row.get("repo_context")
+    if isinstance(repo_context, dict):
+        for key in ("target_boundaries", "affected_runtime_boundaries", "entrypoints"):
+            value = repo_context.get(key)
+            if isinstance(value, list):
+                haystack.extend(str(item) for item in value)
+            elif value:
+                haystack.append(str(value))
+    path_name = Path(path).name
+    return any(item == path or Path(item).name == path_name for item in haystack)
+
+
+def _ids_for_file(*, path: str, goal_interpretation: dict[str, Any], proof_obligations: dict[str, Any]) -> tuple[list[str], list[str]]:
+    all_goal_ids = _goal_item_ids(goal_interpretation)
+    all_obligation_ids = _proof_obligation_ids(proof_obligations)
+    goal_ids = [item["goal_item_id"] for item in _goal_items(goal_interpretation) if _row_mentions_file(item, path)]
+    obligation_ids = [item["obligation_id"] for item in _obligations(proof_obligations) if _row_mentions_file(item, path)]
+    if not goal_ids and len(all_goal_ids) == 1:
+        goal_ids = all_goal_ids
+    if not obligation_ids and len(all_obligation_ids) == 1:
+        obligation_ids = all_obligation_ids
+    return goal_ids or all_goal_ids, obligation_ids or all_obligation_ids
+
+
 def _suggested_slice_types(path: str, *, inbound: bool, outbound: bool, content: str) -> list[str]:
     name = Path(path).name
     lowered = content.lower()
@@ -104,6 +145,65 @@ def _suggested_slice_types(path: str, *, inbound: bool, outbound: bool, content:
     return suggested or ["runtime_behavior_change"]
 
 
+def _expand_slice_types(types: list[str], minimum_count: int) -> list[str]:
+    if minimum_count <= len(types):
+        return types
+    ordered = [
+        "configuration_adjustment",
+        "validation_adjustment",
+        "formatting_adjustment",
+        "runtime_behavior_change",
+        "final_integration_adjustment",
+        "business_logic_change",
+        "dependency_bridge",
+        "entrypoint_wiring",
+    ]
+    expanded = list(types)
+    for item in ordered:
+        if item not in expanded:
+            expanded.append(item)
+        if len(expanded) >= minimum_count:
+            return expanded
+    while len(expanded) < minimum_count:
+        expanded.append(f"runtime_behavior_change_{len(expanded) + 1}")
+    return expanded
+
+
+_KEY_VALUE_RE = re.compile(r"(?<![A-Za-z0-9_.-])([A-Za-z0-9_.-]+)=([^\s,;`]+)")
+
+
+def _key_value_state(content: str) -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
+    for line in content.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, value = stripped.split("=", 1)
+        key = key.strip()
+        value = value.strip()
+        if key:
+            rows.append({"key": key, "value": value, "line": stripped})
+    return rows
+
+
+def _desired_key_values_for_file(*, path: str, proof_obligations: dict[str, Any]) -> list[dict[str, Any]]:
+    desired: list[dict[str, Any]] = []
+    for obligation in _obligations(proof_obligations):
+        if not _row_mentions_file(obligation, path):
+            continue
+        text = " ".join(str(obligation.get(key, "")) for key in ("claim", "description", "expected"))
+        for match in _KEY_VALUE_RE.finditer(text):
+            desired.append(
+                {
+                    "key": match.group(1),
+                    "new_value": match.group(2).rstrip("."),
+                    "proof_obligation_ids": [obligation["obligation_id"]],
+                    "goal_item_ids": list(obligation.get("goal_item_ids", [])),
+                }
+            )
+    return desired
+
+
 def build_impact_dependency_analysis(
     *,
     repo_root: Path,
@@ -117,8 +217,6 @@ def build_impact_dependency_analysis(
         if node.get("file") and _is_product_runtime_file(str(node["file"]), goal_interpretation)
     ]
     module_paths = {_module_to_path(str(node["file"])): str(node["file"]) for node in product_nodes}
-    goal_ids = _goal_item_ids(goal_interpretation)
-    obligation_ids = _proof_obligation_ids(proof_obligations)
     imports_by_file: dict[str, list[str]] = {}
     dependency_edges: list[dict[str, Any]] = []
     for node in product_nodes:
@@ -152,21 +250,36 @@ def build_impact_dependency_analysis(
         dependency_inputs = imports_by_file.get(path, [])
         dependency_outputs = sorted(edge["to_file"] for edge in dependency_edges if edge["from_file"] == path)
         risk = "medium" if dependency_inputs or dependency_outputs else "low"
+        file_goal_ids, file_obligation_ids = _ids_for_file(
+            path=path,
+            goal_interpretation=goal_interpretation,
+            proof_obligations=proof_obligations,
+        )
+        suggested_slice_types = _expand_slice_types(
+            _suggested_slice_types(
+                path,
+                inbound=bool(dependency_inputs),
+                outbound=bool(dependency_outputs),
+                content=content,
+            ),
+            max(len(file_goal_ids), len(file_obligation_ids), 1),
+        )
         candidate_files.append(
             {
                 "path": path,
                 "inventory_node_ids": [str(node.get("id"))],
                 "relevance": "candidate product/runtime file connected to goal evidence and inventory graph",
-                "goal_item_ids": goal_ids,
-                "proof_obligation_ids": obligation_ids,
+                "goal_item_ids": file_goal_ids,
+                "proof_obligation_ids": file_obligation_ids,
                 "dependency_inputs": dependency_inputs,
                 "dependency_outputs": dependency_outputs,
                 "risk_level": risk,
-                "suggested_slice_types": _suggested_slice_types(
-                    path,
-                    inbound=bool(dependency_inputs),
-                    outbound=bool(dependency_outputs),
-                    content=content,
+                "suggested_slice_types": suggested_slice_types,
+                "content": content,
+                "text_key_value_state": _key_value_state(content),
+                "desired_key_value_changes": _desired_key_values_for_file(
+                    path=path,
+                    proof_obligations=proof_obligations,
                 ),
             }
         )

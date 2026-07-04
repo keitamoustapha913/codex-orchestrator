@@ -9,6 +9,45 @@ from codex_orchestrator.jsonio import write_json
 from codex_orchestrator.paths import relative_to_repo
 
 
+def _required_obligation_ids(proof_obligations: dict[str, Any]) -> list[str]:
+    return [
+        row["obligation_id"]
+        for row in proof_obligations.get("obligations", [])
+        if row.get("required") is True and row.get("obligation_id")
+    ]
+
+
+def select_patchlet_probe_scope(
+    *,
+    proof_obligations: dict[str, Any],
+    probe_plan: dict[str, Any],
+    patchlet: dict[str, Any],
+    scope: str = "patchlet",
+) -> dict[str, Any]:
+    required = _required_obligation_ids(proof_obligations)
+    if scope == "workflow":
+        selected_obligations = required
+    else:
+        selected_obligations = [oid for oid in patchlet.get("proof_obligation_ids", []) if oid in required]
+        if not selected_obligations:
+            selected_obligations = required
+    selected_set = set(selected_obligations)
+    selected_probes = [
+        probe
+        for probe in probe_plan.get("probes", [])
+        if selected_set & set(probe.get("obligation_ids", []))
+    ]
+    future = [oid for oid in required if oid not in selected_set]
+    return {
+        "scope": scope,
+        "patchlet_id": patchlet.get("patchlet_id"),
+        "work_slice_id": patchlet.get("work_slice_id"),
+        "selected_obligation_ids": selected_obligations,
+        "not_selected_future_obligation_ids": future,
+        "selected_probes": selected_probes,
+    }
+
+
 def run_independent_probe_rerun_gate(
     *,
     repo_root: Path,
@@ -19,6 +58,8 @@ def run_independent_probe_rerun_gate(
     probe_plan: dict[str, Any],
     integration_ref: str | None,
     execution_root: Path | None,
+    patchlet: dict[str, Any] | None = None,
+    scope: str = "patchlet",
 ) -> dict[str, Any]:
     gate_dir = workflow_root / "runs" / attempt_id / "gates"
     out_dir = gate_dir / "independent_probe_rerun"
@@ -27,7 +68,13 @@ def run_independent_probe_rerun_gate(
     proven: list[str] = []
     failed_obligations: list[str] = []
     blocked: list[str] = []
-    for probe in probe_plan.get("probes", []):
+    probe_scope = select_patchlet_probe_scope(
+        proof_obligations=proof_obligations,
+        probe_plan=probe_plan,
+        patchlet=patchlet or {"patchlet_id": patchlet_id, "proof_obligation_ids": _required_obligation_ids(proof_obligations)},
+        scope=scope,
+    )
+    for probe in probe_scope["selected_probes"]:
         if probe.get("rerunnable_by_orchestrator") is not True:
             blocked.append(probe["probe_id"])
             failed_obligations.extend(probe.get("obligation_ids", []))
@@ -68,7 +115,11 @@ def run_independent_probe_rerun_gate(
         "workflow_id": proof_obligations.get("workflow_id"),
         "run_id": proof_obligations.get("run_id"),
         "patchlet_id": patchlet_id,
+        "work_slice_id": probe_scope.get("work_slice_id"),
         "attempt_id": attempt_id,
+        "scope": scope,
+        "selected_obligation_ids": probe_scope["selected_obligation_ids"],
+        "not_selected_future_obligation_ids": probe_scope["not_selected_future_obligation_ids"],
         "master_prompt_sha256": proof_obligations.get("master_prompt_sha256"),
         "accepted": bool(probe_results) and not failed_obligations and not blocked,
         "probe_results": probe_results,
@@ -76,6 +127,7 @@ def run_independent_probe_rerun_gate(
         "failed_probe_ids": [row["probe_id"] for row in probe_results if row.get("passed") is not True],
         "blocked_probe_ids": blocked,
         "failed_obligation_ids": sorted(set(failed_obligations)),
+        "unproven_future_obligation_ids": probe_scope["not_selected_future_obligation_ids"],
         "failure_signature": None if not failed_obligations and not blocked else ("probe_not_rerunnable" if blocked else "independent_probe_rerun_failed"),
     }
     write_json(gate_dir / "independent_probe_rerun_result.json", result)
