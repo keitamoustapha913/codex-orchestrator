@@ -191,6 +191,26 @@ accepted the report with `normalization_applied=false`, `errors: []`, wrapper
 gate accepted, target hygiene passed, integration validation passed, and the
 workflow reached `DONE`. No `unknown_repeated_failure` occurred.
 
+## v0.1.0-rc4 Semantic Goal Satisfaction Evidence
+
+The direct real-Codex semantic-goal smoke for the v0.1.0 release candidate 4
+checkpoint is preserved at:
+
+```text
+/tmp/cxor-target-semantic-goal-smoke-20260704T070533Z
+```
+
+This fresh tiny target used the prompt `Make app return me and prove it.` and
+reached `DONE` only after independent semantic proof. The semantic criterion
+SGC001 expected `"me"`, the semantic runner observed actual value `"me"`, the
+goal satisfaction gate accepted the patchlet, and final verification recorded
+`semantic_goal_status=PASSED`. The accepted integration ref contains `app.py`
+returning `"me"` and the final diff changes `ok -> me`.
+
+This release candidate is materially stronger than rc3: it includes rerun/reset
+workflow identity, invocation-scoped progress, report-ingestion hardening, and
+semantic goal satisfaction for the `app.main()` return-value task family.
+
 ## Direct Auto Visibility Release Guidance
 
 Manual direct auto smoke for operator visibility should use a fresh tiny target

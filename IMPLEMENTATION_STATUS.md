@@ -359,6 +359,21 @@ This direct `cxor auto --worker-mode real_codex --use-worktree
 validation, transaction group verification, and global verification all passed.
 No `unknown_repeated_failure` occurred.
 
+Release evidence preserved for v0.1.0-rc4 semantic-goal smoke:
+
+```text
+/tmp/cxor-target-semantic-goal-smoke-20260704T070533Z
+```
+
+This direct `cxor auto --worker-mode real_codex --use-worktree
+--live-progress` smoke used the prompt `Make app return me and prove it.`.
+The workflow reached `DONE` only after the independent semantic goal check
+passed for SGC001 with expected value `"me"` and actual value `"me"`.
+`goal_satisfaction_gate_result.json` recorded `accepted=true`,
+`final_verification.json` recorded `semantic_goal_status=PASSED`, the accepted
+integration ref `refs/cxor/runs/R0001/integration` contains `app.py` returning
+`"me"`, and the final diff changes `ok -> me`.
+
 Implemented: direct auto operator visibility and long-run control. Direct
 `cxor auto` now supports `--live-progress`, `--no-live-progress`,
 `--progress-interval-seconds`, and `--progress-format compact|jsonl`. Compact
