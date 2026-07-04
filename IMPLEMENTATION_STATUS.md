@@ -40,6 +40,12 @@ Implemented capabilities:
 - read-only capsule inspection, validation, and real-Codex diagnosis commands;
 - matrix-backed transaction-group and global verification artifacts;
 - `cxor auto` mock-mode autonomous loop that initializes, discovers, compiles, runs, verifies, and reaches `DONE`.
+- workflow identity and deterministic goal fingerprint persisted in `workflow_identity.json`;
+- rerun preflight persisted in `rerun_preflight_result.json`, with changed prompt and dirty-target refusal by default;
+- explicit rerun controls: `--resume`, `--new-run`, `--force-new-run`, `--allow-dirty-target`, and `--archive-existing`;
+- safe lifecycle commands: `cxor archive`, `cxor reset --archive`, and `cxor workflows`;
+- invocation-scoped live progress with `.codex-orchestrator/invocations/INV*.json` cursor artifacts so old operator events are not replayed;
+- apply-results rerun guidance in `.codex-orchestrator/apply_results/latest_apply_result.json` and status output.
 
 ## TDD status
 

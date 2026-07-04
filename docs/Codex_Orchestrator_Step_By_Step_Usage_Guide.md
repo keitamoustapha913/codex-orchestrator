@@ -38,6 +38,35 @@ The latest live smoke target preserved in release docs is:
 /tmp/cxor-target-report-contract-smoke-20260703T203745Z
 ```
 
+## 0.1 Rerun, Reset, And New Workflow Identity
+
+Every new `cxor auto` workflow writes
+`.codex-orchestrator/workflow_identity.json` and computes a goal fingerprint
+from target HEAD/tree, dirty status, master prompt path and SHA-256, worker
+mode, worktree mode, and `--until`.
+
+Rerunning `cxor auto` on a target with an existing workflow is intentional:
+
+- same goal fingerprint and existing `DONE`: returns existing DONE with an
+  explicit message;
+- changed prompt path or changed prompt content: refuses unless `--new-run` or
+  `--force-new-run` is used;
+- dirty product/runtime target: refuses unless `--allow-dirty-target` is used;
+- old evidence is preserved by `cxor archive` and `cxor reset --archive`.
+
+Use:
+
+```bash
+cxor workflows --repo /path/to/target
+cxor auto --repo /path/to/target --master /path/to/new_prompt.md --new-run
+cxor archive --repo /path/to/target
+cxor reset --repo /path/to/target --archive
+```
+
+`cxor auto --live-progress` creates an invocation cursor under
+`.codex-orchestrator/invocations/` so stale operator events are not replayed as
+current progress.
+
 The latest live smoke confirmed:
 
 ```text

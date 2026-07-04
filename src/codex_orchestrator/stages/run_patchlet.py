@@ -5,6 +5,7 @@ import os
 import subprocess
 import shutil
 from dataclasses import dataclass
+from pathlib import Path
 
 from codex_orchestrator.codex_adapter import worker_for_mode
 from codex_orchestrator.errors import WorkerExecutionError, WorkerPreconditionError
@@ -35,6 +36,7 @@ from codex_orchestrator.worker_capsule import (
 from codex_orchestrator.validators.diff_validator import validate_changed_paths
 from codex_orchestrator.validators.integration_artifact_validator import validate_integration_artifacts
 from codex_orchestrator.validators.report_validator import ReportValidationError, validate_patchlet_report_file
+from codex_orchestrator.workflow_identity import read_workflow_identity
 from codex_orchestrator.worktree import cleanup_patchlet_worktree, create_patchlet_worktree
 
 
@@ -449,6 +451,7 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
         patchlet_id=pid,
         attempt_id=run_id,
         allowed_product_runtime_file=patchlet.get("allowed_product_runtime_file"),
+        allowed_dirty_paths=_allowed_prompt_dirty_paths(ctx),
     )
     if not pre_hygiene["accepted"]:
         raise WorkerPreconditionError("target hygiene gate failed: " + "; ".join(pre_hygiene.get("reasons", [])))
@@ -958,6 +961,7 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
             patchlet_id=pid,
             attempt_id=run_id,
             allowed_product_runtime_file=patchlet.get("allowed_product_runtime_file"),
+            allowed_dirty_paths=_allowed_prompt_dirty_paths(ctx),
         )
         target_hygiene_result = _merge_hygiene_cache_evidence(target_hygiene_result, pre_hygiene)
         append_worker_event(
@@ -1256,3 +1260,22 @@ def run_all_patchlets(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
         if result.status in {"FAILED_WITH_EVIDENCE", "BLOCKED_WITH_EVIDENCE"}:
             break
     return results
+
+
+def _allowed_prompt_dirty_paths(ctx: TargetRepoContext) -> list[str]:
+    identity = read_workflow_identity(ctx.root)
+    if not identity:
+        return []
+    allowed: list[str] = []
+    prompt_path = identity.get("master_prompt_path")
+    if isinstance(prompt_path, str):
+        try:
+            allowed.append(Path(prompt_path).resolve().relative_to(ctx.root.resolve()).as_posix())
+        except ValueError:
+            pass
+    command_args = identity.get("command_args") if isinstance(identity.get("command_args"), dict) else {}
+    if command_args.get("allow_dirty_target"):
+        for line in identity.get("target_dirty_status_at_start", []):
+            if isinstance(line, str) and len(line) > 3:
+                allowed.append(line[3:])
+    return sorted(set(allowed))

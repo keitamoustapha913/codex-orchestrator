@@ -14,7 +14,8 @@
     "final_diff_path",
     "mutated_working_tree",
     "created_branch",
-    "created_at"
+    "created_at",
+    "rerun_guidance"
   ],
   "properties": {
     "schema_version": {
@@ -59,6 +60,18 @@
     "created_at": {
       "type": "string",
       "minLength": 1
+    },
+    "rerun_guidance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["working_tree_mutated", "recommended_next_steps"],
+      "properties": {
+        "working_tree_mutated": {"type": "boolean"},
+        "recommended_next_steps": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1}
+        }
+      }
     }
   },
   "oneOf": [

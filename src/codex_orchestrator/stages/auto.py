@@ -6,6 +6,8 @@ from codex_orchestrator.errors import StagePreconditionError
 from codex_orchestrator.locks import workflow_lock
 from codex_orchestrator.state import WorkflowState, load_state
 from codex_orchestrator.target_repo import TargetRepoContext
+from codex_orchestrator.workflow_identity import build_workflow_identity, read_workflow_identity, write_workflow_identity
+from codex_orchestrator.workflow_lifecycle import next_run_id, record_active_workflow
 
 from .apply_repair import apply_repair
 from .build_inventory import build_inventory
@@ -40,6 +42,7 @@ def run_auto(
     use_worktree: bool = False,
     max_iterations: int = 100,
     use_lock: bool = False,
+    allow_dirty_target: bool = False,
 ) -> WorkflowState:
     def _run() -> WorkflowState:
         state = _state_or_none(ctx)
@@ -54,8 +57,38 @@ def run_auto(
             if resume:
                 raise FileNotFoundError(f"Cannot resume; missing state file: {ctx.paths.state}")
             state = init_workflow(ctx, master=master, invocation_argv=["cxor", "auto"], mode="auto", until=until)
+            if read_workflow_identity(ctx.root) is None:
+                identity = write_workflow_identity(
+                    ctx,
+                    build_workflow_identity(
+                        ctx,
+                        master=master or ctx.paths.master_prompt,
+                        worker_mode=worker_mode,
+                        use_worktree=use_worktree,
+                        until=until,
+                        workflow_id=state.workflow_id,
+                        run_id=next_run_id(ctx.root),
+                        allow_dirty_target=allow_dirty_target,
+                    ),
+                )
+                record_active_workflow(ctx, identity)
         elif master is not None and not ctx.paths.master_prompt.exists():
             state = init_workflow(ctx, master=master, invocation_argv=["cxor", "auto"], mode="auto", until=until)
+            if read_workflow_identity(ctx.root) is None:
+                identity = write_workflow_identity(
+                    ctx,
+                    build_workflow_identity(
+                        ctx,
+                        master=master,
+                        worker_mode=worker_mode,
+                        use_worktree=use_worktree,
+                        until=until,
+                        workflow_id=state.workflow_id,
+                        run_id=next_run_id(ctx.root),
+                        allow_dirty_target=allow_dirty_target,
+                    ),
+                )
+                record_active_workflow(ctx, identity)
 
         state = load_state(ctx)
         if state.stage == until:

@@ -27,6 +27,30 @@ cd /path/to/target-repo
 cxor auto --master ./master_prompt.md --until DONE --worker-mode mock
 ```
 
+## Reruns And Workflow Lifecycle
+
+`cxor auto` writes `.codex-orchestrator/workflow_identity.json` with a
+deterministic goal fingerprint from the target HEAD/tree, dirty status,
+master prompt path and SHA-256, worker mode, worktree mode, and `--until`.
+Rerun preflight writes `.codex-orchestrator/rerun_preflight_result.json`.
+
+Same-goal terminal reruns return existing `DONE` explicitly. Changed prompts
+or changed target state do not silently reuse old results. Use `--new-run`,
+`--force-new-run`, `--resume`, and `--allow-dirty-target` to state intent.
+
+Safe lifecycle commands:
+
+```bash
+cxor workflows --repo /path/to/target-repo
+cxor archive --repo /path/to/target-repo
+cxor reset --repo /path/to/target-repo --archive
+```
+
+`cxor auto --live-progress` is invocation-scoped and does not replay old
+operator events. After `cxor apply-results --mode working-tree`, review and
+commit the working-tree diff before starting a new goal. See
+`docs/workflow_lifecycle.md`.
+
 ## Repair loop
 
 Local development baseline: `uv + Python 3.10`.

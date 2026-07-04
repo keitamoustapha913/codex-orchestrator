@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://codex-orchestrator.local/schemas/rerun_preflight_result.schema.json",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "schema_version",
+    "kind",
+    "created_at",
+    "requested_goal_fingerprint",
+    "decision",
+    "reasons",
+    "changed_fields",
+    "recommended_commands"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "kind": {"const": "rerun_preflight_result"},
+    "created_at": {"type": "string"},
+    "requested_goal_fingerprint": {"type": "string"},
+    "existing_goal_fingerprint": {"type": ["string", "null"]},
+    "existing_workflow_id": {"type": ["string", "null"]},
+    "existing_run_id": {"type": ["string", "null"]},
+    "existing_stage": {"type": ["string", "null"]},
+    "decision": {
+      "enum": [
+        "START_NEW_WORKFLOW",
+        "RESUME_ACTIVE_WORKFLOW",
+        "RETURN_EXISTING_DONE",
+        "REFUSE_REQUIRES_RESUME",
+        "REFUSE_REQUIRES_NEW_RUN",
+        "REFUSE_DIRTY_TARGET",
+        "REFUSE_AMBIGUOUS_TERMINAL_WORKFLOW"
+      ]
+    },
+    "reasons": {"type": "array", "items": {"type": "string"}},
+    "changed_fields": {"type": "array", "items": {"type": "string"}},
+    "recommended_commands": {"type": "array", "items": {"type": "string"}}
+  }
+}

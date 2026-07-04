@@ -134,7 +134,7 @@ def test_cxor_auto_live_progress_prints_repair_plan_next_action(git_repo: Path):
     assert "Repair plan RP0001 created" in result.stderr
 
 
-def test_cxor_auto_live_progress_prints_loop_warning_when_present(git_repo: Path):
+def test_cxor_auto_live_progress_does_not_replay_stale_loop_warning(git_repo: Path):
     ctx = resolve_target_repo(repo=git_repo)
     append_operator_event(
         ctx.root,
@@ -149,7 +149,8 @@ def test_cxor_auto_live_progress_prints_loop_warning_when_present(git_repo: Path
         cwd=git_repo,
     )
 
-    assert "probe_artifact_refs_not_objects" in result.stderr
+    assert "probe_artifact_refs_not_objects" not in result.stderr
+    assert "workflow started" in result.stderr
 
 
 def test_cxor_auto_no_live_progress_suppresses_terminal_output_but_writes_events(git_repo: Path):

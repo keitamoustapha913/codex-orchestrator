@@ -1,5 +1,13 @@
 # Real Codex Smoke Runbook
 
+For repeat runs on the same target, do not manually delete
+`.codex-orchestrator/`. `cxor auto` records `workflow_identity.json` and
+refuses changed prompts or dirty product/runtime targets unless the operator
+uses `--new-run`, `--force-new-run`, or `--allow-dirty-target`. Use
+`cxor workflows`, `cxor archive`, and `cxor reset --archive` to preserve
+evidence and start a fresh workflow. `--live-progress` is invocation-scoped and
+does not replay old operator events.
+
 Default pytest does not run real Codex. The `real-codex-smoke-runbook`
 command is an operator-controlled evidence capture for manual installed-Codex
 smoke runs, and it is not part of the default test suite.

@@ -7,6 +7,7 @@ from typing import Any
 from codex_orchestrator.jsonio import read_json, write_json
 from codex_orchestrator.operator_events import append_operator_event
 from codex_orchestrator.state import now_iso
+from codex_orchestrator.workflow_identity import read_workflow_identity
 
 
 def prompt_index_path(repo_root: Path | str) -> Path:
@@ -78,6 +79,9 @@ def upsert_prompt_index_entry(repo_root: Path | str, entry: dict[str, Any]) -> d
     entry.setdefault("transaction_group_id", None)
     entry.setdefault("verifier_id", None)
     entry.setdefault("repair_plan_id", None)
+    identity = read_workflow_identity(root)
+    entry.setdefault("workflow_id", identity.get("workflow_id") if identity else None)
+    entry.setdefault("run_id", identity.get("run_id") if identity else None)
 
     existing = next(
         (
@@ -115,6 +119,8 @@ def upsert_prompt_index_entry(repo_root: Path | str, entry: dict[str, Any]) -> d
         attempt_id=result.get("attempt_id"),
         prompt_id=result.get("prompt_id"),
         prompt_path=result.get("path"),
+        workflow_id=result.get("workflow_id"),
+        run_id=result.get("run_id"),
     )
     return result
 

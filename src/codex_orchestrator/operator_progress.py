@@ -9,7 +9,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator, TextIO
 
-from codex_orchestrator.operator_events import read_operator_events
+from codex_orchestrator.operator_events import read_operator_events, summarize_latest_operator_event
 
 
 def should_enable_live_progress(
@@ -70,6 +70,8 @@ class OperatorProgressStreamer:
     def start(self) -> None:
         if not self.enabled:
             return
+        latest = summarize_latest_operator_event(self.repo_root)
+        self._last_event_id = latest.get("event_id") if latest else None
         self._thread = threading.Thread(target=self._run, name="cxor-operator-progress", daemon=True)
         self._thread.start()
 

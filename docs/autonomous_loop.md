@@ -9,6 +9,15 @@ cxor auto --repo /path/to/target-repo --master /path/to/master_prompt.md --until
 cxor auto --repo /path/to/target-repo --master /path/to/master_prompt.md --until DONE --worker-mode mock --use-worktree
 ```
 
+Before running stages, `cxor auto` performs rerun preflight. It compares the
+requested workflow identity and goal fingerprint with any existing terminal or
+active workflow. Same-goal DONE returns explicitly; changed prompt path,
+changed prompt content, and dirty product/runtime target state are refused by
+default. Use `--resume`, `--new-run`, `--force-new-run`, or
+`--allow-dirty-target` to state intent. Use `cxor archive`,
+`cxor reset --archive`, and `cxor workflows` instead of manually deleting
+`.codex-orchestrator/`.
+
 The autonomous loop is probe-gated and evidence-bound:
 
 `normalize -> census -> classify-evidence -> build-inventory -> extract-invariants -> compile-patchlets -> run patchlets -> transaction groups -> verify-global -> DONE`

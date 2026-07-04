@@ -23,6 +23,7 @@ def run_target_hygiene_gate(
     patchlet_id: str,
     attempt_id: str,
     allowed_product_runtime_file: str | None,
+    allowed_dirty_paths: list[str] | None = None,
     cache_cleanup_enabled: bool = True,
 ) -> dict[str, Any]:
     target_repo_root = Path(target_repo_root).resolve()
@@ -32,7 +33,7 @@ def run_target_hygiene_gate(
 
     before_lines = _git_status_lines(target_repo_root)
     before_paths = _parse_status_paths(before_lines)
-    classification = _classify_paths(target_repo_root, before_paths, allowed_product_runtime_file)
+    classification = _classify_paths(target_repo_root, before_paths, allowed_product_runtime_file, allowed_dirty_paths or [])
 
     removed: list[dict[str, Any]] = []
     if cache_cleanup_enabled:
@@ -41,7 +42,7 @@ def run_target_hygiene_gate(
 
     after_lines = _git_status_lines(target_repo_root)
     after_paths = _parse_status_paths(after_lines)
-    after_classification = _classify_paths(target_repo_root, after_paths, allowed_product_runtime_file)
+    after_classification = _classify_paths(target_repo_root, after_paths, allowed_product_runtime_file, allowed_dirty_paths or [])
 
     reasons: list[str] = []
     for path in after_classification["product_runtime_dirty_paths"]:
@@ -104,7 +105,7 @@ def _parse_status_paths(lines: list[str]) -> list[str]:
     return paths
 
 
-def _classify_paths(repo_root: Path, paths: list[str], allowed_product_runtime_file: str | None) -> dict[str, Any]:
+def _classify_paths(repo_root: Path, paths: list[str], allowed_product_runtime_file: str | None, allowed_dirty_paths: list[str]) -> dict[str, Any]:
     product_runtime_dirty_paths: list[str] = []
     unknown_dirty_paths: list[str] = []
     cache_artifacts_detected: list[str] = []
@@ -113,6 +114,8 @@ def _classify_paths(repo_root: Path, paths: list[str], allowed_product_runtime_f
     for path in sorted(set(paths)):
         normalized = path.rstrip("/")
         if _is_artifact_path(path):
+            continue
+        if path in allowed_dirty_paths:
             continue
         if _is_python_cache_path(path):
             cache_artifacts_detected.append(path)

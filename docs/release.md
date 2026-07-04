@@ -48,6 +48,13 @@ Patch mode writes a final diff without mutating product files. Branch mode
 creates a result branch without checkout. Working-tree mode requires a clean
 target and mutates only after explicit operator request.
 
+After working-tree apply, commit the product/runtime diff before starting a
+new goal. `latest_apply_result.json` includes rerun guidance, and `cxor status
+--json` reports it. Release checks should verify `workflow_identity.json`,
+`rerun_preflight_result.json`, `cxor workflows`, archive/reset behavior, and
+invocation-scoped live progress so old `operator_events.jsonl` lines are not
+replayed.
+
 Operator-run real-Codex evidence flow:
 
 ```bash

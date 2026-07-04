@@ -54,10 +54,21 @@ def apply_results(ctx: TargetRepoContext, *, mode: str = "patch") -> dict:
         "mutated_working_tree": mutated_working_tree,
         "created_branch": created_branch,
         "created_at": now_iso(),
+        "rerun_guidance": {
+            "working_tree_mutated": mutated_working_tree,
+            "recommended_next_steps": [
+                "review git diff",
+                "commit applied results before starting a new workflow",
+                "run cxor auto --new-run for a new goal after committing or use --allow-dirty-target",
+            ],
+        },
     }
     result_dir = ctx.paths.integration_dir / "apply_results"
     result_dir.mkdir(parents=True, exist_ok=True)
     write_json(result_dir / f"{mode}_result.json", result)
+    latest_dir = ctx.paths.workflow_dir / "apply_results"
+    latest_dir.mkdir(parents=True, exist_ok=True)
+    write_json(latest_dir / "latest_apply_result.json", result)
     validation = validate_integration_artifacts(ctx.root)
     write_json(result_dir / f"{mode}_validation_result.json", validation)
     if not validation["valid"]:

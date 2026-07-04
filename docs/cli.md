@@ -6,6 +6,24 @@ Primary MVP command:
 cxor auto --repo /path/to/target-repo --master /path/to/master_prompt.md --until DONE --worker-mode mock
 ```
 
+Rerun controls:
+
+```bash
+cxor auto --repo /path/to/target-repo --master /path/to/master_prompt.md --resume
+cxor auto --repo /path/to/target-repo --master /path/to/new_prompt.md --new-run
+cxor auto --repo /path/to/target-repo --master /path/to/new_prompt.md --force-new-run
+cxor auto --repo /path/to/target-repo --master /path/to/master_prompt.md --allow-dirty-target
+cxor archive --repo /path/to/target-repo
+cxor reset --repo /path/to/target-repo --archive
+cxor workflows --repo /path/to/target-repo --json
+```
+
+`workflow_identity.json` stores the goal fingerprint. Changed prompt path,
+changed prompt content, or dirty product/runtime state is refused by default
+instead of silently reusing old `DONE` state. `rerun_preflight_result.json`
+records the decision and recommended command. `--live-progress` creates an
+invocation cursor so old operator events are not replayed.
+
 Stage commands implemented:
 
 ```bash
@@ -37,6 +55,9 @@ cxor rediscover
 cxor rebuild-inventory
 cxor regenerate-patchlets
 cxor auto
+cxor archive
+cxor reset
+cxor workflows
 ```
 
 Repair loop:

@@ -25,6 +25,13 @@ That smoke exercises:
 cxor auto --repo /path/to/target-repo --master /path/to/master_prompt.md --until DONE --worker-mode real_codex --use-worktree
 ```
 
+When repeating a real-Codex smoke on the same target, check
+`cxor workflows --repo <target>` first. Existing terminal workflows have a
+`workflow_identity.json` and goal fingerprint. A changed prompt requires
+`--new-run` or `--force-new-run`; dirty product/runtime files are refused
+unless `--allow-dirty-target` is used and recorded. `--live-progress` uses an
+invocation cursor so old `operator_events.jsonl` entries are not replayed.
+
 The generated smoke prompt injects the operator contract from:
 
 - `src/codex_orchestrator/prompt_templates/real_codex_patchlet_contract.md`

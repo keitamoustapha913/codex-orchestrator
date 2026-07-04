@@ -69,6 +69,8 @@ def cmd_status(args: argparse.Namespace) -> int:
     iterations = 0
     while True:
         result = status(ctx)
+        if getattr(args, "workflow", None) and result.get("active_workflow_id") != args.workflow and result.get("workflow_id") != args.workflow:
+            result = {**result, "workflow_filter": args.workflow, "filter_match": False}
         if args.json:
             print(json.dumps(result, indent=2, sort_keys=True))
         else:
@@ -318,6 +320,64 @@ def cmd_apply_results(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_archive(args: argparse.Namespace) -> int:
+    from codex_orchestrator.workflow_lifecycle import archive_current_workflow
+
+    ctx = _ctx(args)
+    result = archive_current_workflow(ctx)
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0
+
+
+def cmd_reset(args: argparse.Namespace) -> int:
+    import subprocess
+
+    from codex_orchestrator.workflow_lifecycle import reset_current_workflow
+
+    ctx = _ctx(args)
+    if not args.archive and not args.hard_delete_artifacts:
+        print("error: reset requires --archive or --hard-delete-artifacts", file=sys.stderr)
+        return 2
+    if args.hard_delete_artifacts:
+        status = subprocess.run(["git", "-C", str(ctx.root), "status", "--porcelain=v1"], text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+        dirty = [line for line in status.stdout.splitlines() if line and not line[3:].startswith((".codex-orchestrator/", ".artifacts/"))]
+        if dirty:
+            print("error: reset --hard-delete-artifacts refuses dirty product/runtime files", file=sys.stderr)
+            return 2
+    result = reset_current_workflow(ctx, archive=args.archive, hard_delete_artifacts=args.hard_delete_artifacts)
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0
+
+
+def cmd_workflows(args: argparse.Namespace) -> int:
+    from codex_orchestrator.workflow_lifecycle import read_workflow_registry
+
+    ctx = _ctx(args)
+    registry = read_workflow_registry(ctx.root)
+    if args.json:
+        print(json.dumps(registry, indent=2, sort_keys=True))
+        return 0
+    workflows = registry.get("workflows", [])
+    if not workflows:
+        print(f"No cxor workflows found for repo: {ctx.root}")
+        return 0
+    active = registry.get("active_workflow_id")
+    for workflow in workflows:
+        marker = "*" if workflow.get("workflow_id") == active else "-"
+        print(
+            " ".join(
+                [
+                    marker,
+                    workflow.get("workflow_id", "-"),
+                    workflow.get("run_id") or "-",
+                    workflow.get("status") or "-",
+                    workflow.get("goal_fingerprint") or "-",
+                ]
+            )
+        )
+    return 0
+
+
 def cmd_validate_integration_artifacts(args: argparse.Namespace) -> int:
     from codex_orchestrator.validators.integration_artifact_validator import validate_integration_artifacts
 
@@ -476,6 +536,7 @@ def cmd_prompts(args: argparse.Namespace) -> int:
         "attempt_id": args.attempt,
         "patchlet_id": args.patchlet,
         "kind": args.kind,
+        "workflow_id": getattr(args, "workflow", None),
     }
     prompts = list_prompt_entries(ctx.root, filters)
     if args.latest and prompts:
@@ -551,6 +612,8 @@ def cmd_monitor(args: argparse.Namespace) -> int:
         "attempt_id": args.attempt,
         "patchlet_id": args.patchlet,
         "event_type": args.event_type,
+        "workflow_id": getattr(args, "workflow", None),
+        "invocation_id": getattr(args, "invocation", None),
     }
     if not args.follow:
         _emit(read_operator_events(ctx.root, **filters))
@@ -566,6 +629,8 @@ def cmd_monitor(args: argparse.Namespace) -> int:
             attempt_id=args.attempt,
             patchlet_id=args.patchlet,
             event_type=args.event_type,
+            workflow_id=getattr(args, "workflow", None),
+            invocation_id=getattr(args, "invocation", None),
         )
         if events:
             if args.json:
@@ -583,11 +648,37 @@ def cmd_monitor(args: argparse.Namespace) -> int:
 
 
 def cmd_auto(args: argparse.Namespace) -> int:
+    from codex_orchestrator.invocations import create_invocation
     from codex_orchestrator.operator_events import append_operator_event
     from codex_orchestrator.operator_progress import operator_progress_streamer, should_enable_live_progress
+    from codex_orchestrator.rerun_preflight import RerunPreflightError, run_rerun_preflight
+    from codex_orchestrator.state import load_state
     from codex_orchestrator.stages.auto import run_auto
+    from codex_orchestrator.workflow_lifecycle import reset_current_workflow
 
     ctx = _ctx(args)
+    preflight = run_rerun_preflight(
+        ctx,
+        master=args.master,
+        worker_mode=args.worker_mode,
+        use_worktree=args.use_worktree,
+        until=args.until,
+        resume=args.resume,
+        new_run=getattr(args, "new_run", False),
+        force_new_run=getattr(args, "force_new_run", False),
+        allow_dirty_target=getattr(args, "allow_dirty_target", False),
+    )
+    if preflight["decision"].startswith("REFUSE"):
+        raise RerunPreflightError(preflight)
+    if preflight["decision"] == "RETURN_EXISTING_DONE":
+        state = load_state(ctx)
+        print("Existing workflow is already DONE for the same goal fingerprint.", file=sys.stderr)
+        print("Use --new-run to start another workflow.", file=sys.stderr)
+        print(f"{state.stage} {ctx.root}")
+        return 0 if state.stage == args.until else 1
+    if preflight["decision"] == "START_NEW_WORKFLOW" and (args.new_run or args.force_new_run or args.archive_existing) and ctx.paths.state.exists():
+        reset_current_workflow(ctx, archive=True)
+
     live_progress = should_enable_live_progress(
         worker_mode=args.worker_mode,
         explicit=args.live_progress,
@@ -600,22 +691,14 @@ def cmd_auto(args: argparse.Namespace) -> int:
         os.environ["CXOR_LIVE_CODEX_PROGRESS_INTERVAL_SECONDS"] = str(int(args.progress_interval_seconds))
     os.environ["CXOR_LOOP_GOVERNOR_MODE"] = args.loop_governor_mode
     os.environ["CXOR_MAX_REPEATED_FAILURE_SIGNATURE"] = str(args.max_repeated_failure_signature)
-
-    append_operator_event(
+    invocation = create_invocation(
         ctx.root,
-        event_type="workflow_started",
-        severity="info",
-        stage="AUTO",
-        summary=f"workflow started repo={ctx.root} until={args.until} worker={args.worker_mode}",
-        artifact_paths=[],
-        next_action="Running autonomous workflow.",
-        details={
-            "worker_mode": args.worker_mode,
-            "until": args.until,
-            "use_worktree": args.use_worktree,
-            "max_iterations": args.max_iterations,
-        },
+        command="auto",
+        live_progress=live_progress,
+        progress_format=args.progress_format,
     )
+    os.environ["CXOR_INVOCATION_ID"] = invocation["invocation_id"]
+
     with operator_progress_streamer(
         ctx.root,
         enabled=live_progress,
@@ -623,6 +706,21 @@ def cmd_auto(args: argparse.Namespace) -> int:
         interval_seconds=args.progress_interval_seconds,
         stream=sys.stderr,
     ):
+        append_operator_event(
+            ctx.root,
+            event_type="workflow_started",
+            severity="info",
+            stage="AUTO",
+            summary=f"workflow started repo={ctx.root} until={args.until} worker={args.worker_mode}",
+            artifact_paths=[],
+            next_action="Running autonomous workflow.",
+            details={
+                "worker_mode": args.worker_mode,
+                "until": args.until,
+                "use_worktree": args.use_worktree,
+                "max_iterations": args.max_iterations,
+            },
+        )
         state = run_auto(
             ctx,
             master=args.master,
@@ -632,6 +730,7 @@ def cmd_auto(args: argparse.Namespace) -> int:
             use_worktree=args.use_worktree,
             max_iterations=args.max_iterations,
             use_lock=True,
+            allow_dirty_target=getattr(args, "allow_dirty_target", False),
         )
     print(f"{state.stage} {ctx.root}")
     return 0 if state.stage == args.until else 1
@@ -655,6 +754,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_repo_flags(status)
     status.add_argument("--json", action="store_true")
     status.add_argument("--watch", action="store_true")
+    status.add_argument("--workflow", default=None)
     status.add_argument("--interval", type=float, default=5.0)
     status.add_argument("--max-iterations", type=int, default=None)
     status.set_defaults(func=cmd_status)
@@ -721,6 +821,7 @@ def build_parser() -> argparse.ArgumentParser:
     prompts.add_argument("--attempt", default=None)
     prompts.add_argument("--patchlet", default=None)
     prompts.add_argument("--kind", default=None)
+    prompts.add_argument("--workflow", default=None)
     prompts.add_argument("--show", default=None)
     prompts.add_argument("--show-path", default=None)
     prompts.add_argument("--lines", type=int, default=120)
@@ -734,6 +835,8 @@ def build_parser() -> argparse.ArgumentParser:
     monitor.add_argument("--attempt", default=None)
     monitor.add_argument("--patchlet", default=None)
     monitor.add_argument("--event-type", default=None)
+    monitor.add_argument("--workflow", default=None)
+    monitor.add_argument("--invocation", default=None)
     monitor.add_argument("--limit", type=int, default=None)
     monitor.add_argument("--interval", type=float, default=2.0)
     monitor.add_argument("--max-events", type=int, default=None, help=argparse.SUPPRESS)
@@ -743,6 +846,10 @@ def build_parser() -> argparse.ArgumentParser:
     _add_repo_flags(auto)
     auto.add_argument("--master", type=Path, default=None)
     auto.add_argument("--resume", action="store_true")
+    auto.add_argument("--new-run", action="store_true")
+    auto.add_argument("--force-new-run", action="store_true")
+    auto.add_argument("--allow-dirty-target", action="store_true")
+    auto.add_argument("--archive-existing", action="store_true")
     auto.add_argument("--until", default="DONE")
     auto.add_argument("--worker-mode", default="mock", choices=["mock", "real_codex", "manual", "ci_only"])
     auto.add_argument("--use-worktree", action="store_true")
@@ -775,6 +882,21 @@ def build_parser() -> argparse.ArgumentParser:
     _add_repo_flags(apply_results)
     apply_results.add_argument("--mode", default="patch", choices=["patch", "branch", "working-tree"])
     apply_results.set_defaults(func=cmd_apply_results)
+
+    archive = sub.add_parser("archive")
+    _add_repo_flags(archive)
+    archive.set_defaults(func=cmd_archive)
+
+    reset = sub.add_parser("reset")
+    _add_repo_flags(reset)
+    reset.add_argument("--archive", action="store_true")
+    reset.add_argument("--hard-delete-artifacts", action="store_true")
+    reset.set_defaults(func=cmd_reset)
+
+    workflows = sub.add_parser("workflows")
+    _add_repo_flags(workflows)
+    workflows.add_argument("--json", action="store_true")
+    workflows.set_defaults(func=cmd_workflows)
 
     validate_integration = sub.add_parser("validate-integration-artifacts")
     _add_repo_flags(validate_integration)
