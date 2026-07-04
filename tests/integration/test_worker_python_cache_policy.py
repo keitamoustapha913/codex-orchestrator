@@ -116,47 +116,54 @@ def test_fake_codex_worker_env_sets_python_dont_write_bytecode(git_repo: Path, t
     assert env_capture["PYTHONDONTWRITEBYTECODE"] == "1"
 
 
-def test_worker_capsule_writes_python_runtime_side_effect_contract(git_repo: Path, tmp_path: Path, monkeypatch):
+def test_worker_capsule_writes_runtime_side_effect_contract(git_repo: Path, tmp_path: Path, monkeypatch):
     ctx = _run_fake_real_codex(git_repo, tmp_path, monkeypatch)
 
-    contract = ctx.paths.runs_dir / "P0001_attempt1" / "worker_memory" / "PYTHON_RUNTIME_SIDE_EFFECT_CONTRACT.md"
+    contract = ctx.paths.runs_dir / "P0001_attempt1" / "worker_memory" / "RUNTIME_SIDE_EFFECT_CONTRACT.md"
     assert contract.exists()
-    assert "PYTHONDONTWRITEBYTECODE=1" in contract.read_text(encoding="utf-8")
+    text = contract.read_text(encoding="utf-8")
+    assert "language-runtime cache or build byproduct files" in text
+    assert "target-root product/runtime files" in text
 
 
-def test_task_contract_references_python_runtime_side_effect_contract(git_repo: Path, tmp_path: Path, monkeypatch):
+def test_task_contract_references_runtime_side_effect_contract(git_repo: Path, tmp_path: Path, monkeypatch):
     ctx = _run_fake_real_codex(git_repo, tmp_path, monkeypatch)
 
     text = (ctx.paths.runs_dir / "P0001_attempt1" / "worker_memory" / "TASK_CONTRACT.md").read_text(encoding="utf-8")
-    assert "PYTHON_RUNTIME_SIDE_EFFECT_CONTRACT.md" in text
+    assert "RUNTIME_SIDE_EFFECT_CONTRACT.md" in text
+    assert "PYTHON_RUNTIME_SIDE_EFFECT_CONTRACT.md" not in text
 
 
-def test_write_these_files_references_python_runtime_side_effect_contract(git_repo: Path, tmp_path: Path, monkeypatch):
+def test_write_these_files_references_runtime_side_effect_contract(git_repo: Path, tmp_path: Path, monkeypatch):
     ctx = _run_fake_real_codex(git_repo, tmp_path, monkeypatch)
 
     text = (ctx.paths.runs_dir / "P0001_attempt1" / "worker_memory" / "WRITE_THESE_FILES.md").read_text(encoding="utf-8")
-    assert "PYTHON_RUNTIME_SIDE_EFFECT_CONTRACT.md" in text
+    assert "RUNTIME_SIDE_EFFECT_CONTRACT.md" in text
+    assert "PYTHON_RUNTIME_SIDE_EFFECT_CONTRACT.md" not in text
 
 
-def test_generated_prompt_mentions_python_dont_write_bytecode(git_repo: Path, tmp_path: Path, monkeypatch):
+def test_generated_prompt_mentions_runtime_byproduct_policy(git_repo: Path, tmp_path: Path, monkeypatch):
     ctx = _run_fake_real_codex(git_repo, tmp_path, monkeypatch)
 
     text = (ctx.paths.runs_dir / "P0001_attempt1" / "codex_task_prompt.md").read_text(encoding="utf-8")
-    assert "PYTHONDONTWRITEBYTECODE=1" in text
+    assert "language-runtime caches or build byproducts" in text
+    assert "PYTHONDONTWRITEBYTECODE=1" not in text
 
 
-def test_generated_prompt_requires_python_dash_b_for_target_root_imports(git_repo: Path, tmp_path: Path, monkeypatch):
+def test_generated_prompt_forbids_target_root_runtime_mutation(git_repo: Path, tmp_path: Path, monkeypatch):
     ctx = _run_fake_real_codex(git_repo, tmp_path, monkeypatch)
 
     text = (ctx.paths.runs_dir / "P0001_attempt1" / "codex_task_prompt.md").read_text(encoding="utf-8")
-    assert "python -B" in text
+    assert "Do not load target-root product/runtime files in a way that mutates target-root state." in text
+    assert "python -B" not in text
 
 
-def test_generated_prompt_warns_not_to_leave_target_root_pycache(git_repo: Path, tmp_path: Path, monkeypatch):
+def test_generated_prompt_warns_not_to_leave_target_root_runtime_byproducts(git_repo: Path, tmp_path: Path, monkeypatch):
     ctx = _run_fake_real_codex(git_repo, tmp_path, monkeypatch)
 
     text = (ctx.paths.runs_dir / "P0001_attempt1" / "codex_task_prompt.md").read_text(encoding="utf-8")
-    assert "Do not leave __pycache__/ anywhere under target root" in text
+    assert "runtime byproduct leaks" in text
+    assert "Do not leave __pycache__/ anywhere under target root" not in text
 
 
 def test_fake_worker_import_with_env_does_not_create_target_pycache(git_repo: Path):
@@ -177,7 +184,7 @@ def test_fake_worker_import_with_env_does_not_create_target_pycache(git_repo: Pa
     assert not (git_repo / "__pycache__").exists()
 
 
-def test_python_side_effect_contract_is_present_for_repair_patchlets(git_repo: Path, tmp_path: Path, monkeypatch):
+def test_runtime_side_effect_contract_is_present_for_repair_patchlets(git_repo: Path, tmp_path: Path, monkeypatch):
     ctx = _run_fake_real_codex(git_repo, tmp_path, monkeypatch)
 
-    assert (ctx.paths.runs_dir / "P0001_attempt1" / "worker_memory" / "PYTHON_RUNTIME_SIDE_EFFECT_CONTRACT.md").exists()
+    assert (ctx.paths.runs_dir / "P0001_attempt1" / "worker_memory" / "RUNTIME_SIDE_EFFECT_CONTRACT.md").exists()

@@ -372,6 +372,26 @@ as the general path. Current validation must use model-mediated goal
 interpretation, proof planning, probe planning, mandatory decomposition,
 independent proof, goal coverage, and master-prompt satisfaction.
 
+Release evidence preserved for v0.1.0-rc5 no-compatibility repo-agnostic smoke:
+
+```text
+/tmp/cxor-no-compat-real-codex-smoke-clean-20260704T132039Z
+```
+
+This fresh non-app target used `service.cfg`, not `app.py`, and reached `DONE`
+through the no-compatibility general path: model-mediated goal interpretation,
+model-mediated proof planning, model/repo-aware probe planning, mandatory
+decomposition with `decomposition/patchlet_plan.json`, real-Codex patchlet
+execution, orchestrator-owned independent proof rerun, goal coverage,
+master-prompt concordance, and master-prompt satisfaction. The accepted
+integration ref changed `service.cfg` to `status=ready-no-compat`.
+
+Generated artifacts did not use `app.py`, `app.main`, parser pattern names,
+`SEMANTIC_GOAL_CONTRACT`, Python runtime contracts, compatibility adapters, or
+invariant-only fallback markers. The planning requests included
+`do_not_assume_app_py`, `do_not_assume_app_main`, `do_not_assume_python`,
+`repo_agnostic`, and `language_agnostic`.
+
 Implemented: direct auto operator visibility and long-run control. Direct
 `cxor auto` now supports `--live-progress`, `--no-live-progress`,
 `--progress-interval-seconds`, and `--progress-format compact|jsonl`. Compact

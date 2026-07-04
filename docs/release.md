@@ -207,6 +207,34 @@ as the general path. Current release validation must show model-mediated goal
 interpretation, proof planning, probe planning, mandatory decomposition,
 independent proof, goal coverage, and master-prompt satisfaction.
 
+## v0.1.0-rc5 No-Compatibility Repo-Agnostic Evidence
+
+The clean direct real-Codex no-compatibility smoke for the v0.1.0 release
+candidate 5 checkpoint is preserved at:
+
+```text
+/tmp/cxor-no-compat-real-codex-smoke-clean-20260704T132039Z
+```
+
+This fresh target used `service.cfg`, not `app.py`, and reached `DONE` through
+the general repo-agnostic path. The proof chain was model-mediated goal
+interpretation, model-mediated proof planning, model/repo-aware probe planning,
+mandatory decomposition with `decomposition/patchlet_plan.json`, real-Codex
+patchlet execution, independent proof rerun, goal coverage, master-prompt
+concordance, and master-prompt satisfaction.
+
+The accepted integration result was:
+
+```text
+status=ready-no-compat
+```
+
+Generated artifacts did not use `app.py`, `app.main`, parser pattern names,
+`SEMANTIC_GOAL_CONTRACT`, Python runtime contracts, compatibility adapters, or
+invariant-only fallback markers. Model requests included
+`do_not_assume_app_py`, `do_not_assume_app_main`, `do_not_assume_python`,
+`repo_agnostic`, and `language_agnostic`.
+
 ## Direct Auto Visibility Release Guidance
 
 Manual direct auto smoke for operator visibility should use a fresh tiny target
