@@ -29,6 +29,7 @@ class WorkerCapsule:
 
 REQUIRED_MEMORY_FILES = (
     "TASK_CONTRACT.md",
+    "WORK_SLICE_CONTRACT.md",
     "SEMANTIC_GOAL_CONTRACT.md",
     "REPORT_SCHEMA_CONTRACT.md",
     "FINAL_REPORT_CONTRACT.md",
@@ -424,15 +425,23 @@ def _task_contract_text(
     final_report_contract_path = run_context.run_dir / "worker_memory" / "FINAL_REPORT_CONTRACT.md"
     python_contract_path = run_context.run_dir / "worker_memory" / "PYTHON_RUNTIME_SIDE_EFFECT_CONTRACT.md"
     semantic_contract_path = run_context.run_dir / "worker_memory" / "SEMANTIC_GOAL_CONTRACT.md"
+    work_slice_contract_path = run_context.run_dir / "worker_memory" / "WORK_SLICE_CONTRACT.md"
+    work_slice_id = patchlet.get("work_slice_id")
+    dependency_patchlets = patchlet.get("dependency_patchlet_ids") or patchlet.get("depends_on", [])
     return (
         "# TASK CONTRACT\n\n"
         f"- patchlet id: `{patchlet_id}`\n"
+        f"- work slice id: `{work_slice_id or 'legacy-invariant-slice'}`\n"
         f"- attempt id: `{attempt_id}`\n"
         f"- worker mode: `{worker_mode}`\n"
         f"- target root: `{run_context.target_root}`\n"
         f"- execution root: `{run_context.execution_root}`\n"
         f"- artifact root: `{run_context.artifact_root}`\n"
         f"- allowed product/runtime file: `{allowed_file}`\n"
+        f"- dependency patchlets: `{', '.join(dependency_patchlets) or 'none'}`\n"
+        f"- proof obligations: `{', '.join(patchlet.get('proof_obligation_ids', [])) or 'none'}`\n"
+        f"- goal items: `{', '.join(patchlet.get('goal_item_ids', [])) or 'none'}`\n"
+        f"- work slice contract: `{work_slice_contract_path}`\n"
         f"- required report path: `.codex-orchestrator/reports/{patchlet_id}.json`\n"
         f"- report schema contract: `{report_contract_path}`\n"
         f"- final report contract: `{final_report_contract_path}`\n"
@@ -449,6 +458,11 @@ def _task_contract_text(
         "- if blocked near the budget, write `$CXOR_FINAL_REPORT_PATH` with explicit BLOCKED or FAILED status and preserve what you learned\n"
         "- Do not create target-root worker_stage/; all Worker Capsule stage files must stay under `$CXOR_WORKER_STAGE_DIR`\n"
         "- forbidden edit paths: any product/runtime file other than the allowed file; do not edit orchestrator source paths\n\n"
+        "This patchlet is a small bounded work unit.\n\n"
+        "Do not attempt to solve unrelated work slices.\n\n"
+        "Do not edit any product/runtime file except the single allowed file.\n\n"
+        "Do not compact memory by summarizing broad unrelated context.\n\n"
+        "Finish within the patchlet time budget.\n\n"
         "## Execution-root edit contract\n\n"
         f"{_execution_root_contract_text(run_context, allowed_file)}\n"
         "- root-cause/probe contract reminder: direct probe first, then minimal fix, then deterministic proof and negative controls\n"
@@ -506,6 +520,12 @@ def _live_memory_json(run_context: PatchletRunContext, patchlet: dict) -> dict:
         "patchlet_id": patchlet_id,
         "attempt_id": run_context.run_dir.name,
         "allowed_product_runtime_file": patchlet.get("allowed_product_runtime_file"),
+        "work_slice_id": patchlet.get("work_slice_id"),
+        "time_budget_seconds": patchlet.get("time_budget_seconds"),
+        "dependency_patchlet_ids": patchlet.get("dependency_patchlet_ids", patchlet.get("depends_on", [])),
+        "proof_obligation_ids": patchlet.get("proof_obligation_ids", []),
+        "goal_item_ids": patchlet.get("goal_item_ids", []),
+        "memory_compacting_required": patchlet.get("prompt_scope", {}).get("memory_compacting_required", False),
         "goal_ids": patchlet.get("master_goal_ids", []),
         "invariant_ids": patchlet.get("invariant_ids", []),
         "evidence_ids": patchlet.get("evidence_ids", []),
@@ -559,6 +579,7 @@ def ensure_worker_memory(
     final_report_contract_path = capsule.worker_memory_dir / "FINAL_REPORT_CONTRACT.md"
     python_contract_path = capsule.worker_memory_dir / "PYTHON_RUNTIME_SIDE_EFFECT_CONTRACT.md"
     semantic_contract_path = capsule.worker_memory_dir / "SEMANTIC_GOAL_CONTRACT.md"
+    work_slice_contract_path = capsule.worker_memory_dir / "WORK_SLICE_CONTRACT.md"
     report_path = f".codex-orchestrator/reports/{patchlet['patchlet_id']}.json"
     final_report_path = f"{capsule.worker_stage_dir / '05_final_report.md'}"
     probe_root = f".artifacts/probes/{patchlet['patchlet_id']}"
@@ -582,6 +603,21 @@ def ensure_worker_memory(
     )
     python_contract_path.write_text(python_runtime_side_effect_contract_text(), encoding="utf-8")
     semantic_contract_path.write_text(_semantic_goal_contract_text(patchlet), encoding="utf-8")
+    work_slice_contract_path.write_text(
+        "# WORK SLICE CONTRACT\n\n"
+        f"- Work slice ID: {patchlet.get('work_slice_id') or 'legacy-invariant-slice'}\n"
+        f"- Patchlet ID: {patchlet['patchlet_id']}\n"
+        f"- Allowed product/runtime file: {patchlet.get('allowed_product_runtime_file')}\n"
+        f"- Time budget seconds: {patchlet.get('time_budget_seconds') or timeout_seconds}\n"
+        f"- Dependency patchlets: {', '.join(patchlet.get('dependency_patchlet_ids', patchlet.get('depends_on', []))) or 'none'}\n"
+        f"- Proof obligations: {', '.join(patchlet.get('proof_obligation_ids', [])) or 'none'}\n"
+        f"- Goal items: {', '.join(patchlet.get('goal_item_ids', [])) or 'none'}\n"
+        f"- Scope statement: {patchlet.get('prompt_scope', {}).get('scope_statement') or patchlet.get('scope_statement') or 'bounded patchlet scope'}\n"
+        "- Do not edit other product/runtime files.\n"
+        "- Do not solve unrelated slices.\n"
+        "- Do not require memory compacting.\n",
+        encoding="utf-8",
+    )
     write_json(capsule.worker_memory_dir / "LIVE_MEMORY.json", live_memory)
     (capsule.worker_memory_dir / "LIVE_MEMORY.md").write_text(
         "# LIVE MEMORY\n\n"
@@ -593,6 +629,7 @@ def ensure_worker_memory(
         f"- final report contract: `{final_report_contract_path}`\n"
         f"- Python runtime side-effect contract: `{python_contract_path}`\n"
         f"- semantic goal contract: `{semantic_contract_path}`\n"
+        f"- work slice contract: `{work_slice_contract_path}`\n"
         f"- probe root: `{live_memory['required_probe_root']}`\n",
         encoding="utf-8",
     )
@@ -623,6 +660,7 @@ def ensure_worker_memory(
         f"- Read and obey `{final_report_contract_path}` before writing the final Markdown report.\n"
         f"- Read and obey `{python_contract_path}` before running Python probes.\n"
         f"- Read and obey `{semantic_contract_path}` before claiming semantic success.\n"
+        f"- Read and obey `{work_slice_contract_path}` before editing product/runtime code.\n"
         f"- `.artifacts/probes/{patchlet['patchlet_id']}/...`\n"
         + "\n"
         "Product/runtime edits must happen only under `$CXOR_EXECUTION_ROOT`. "

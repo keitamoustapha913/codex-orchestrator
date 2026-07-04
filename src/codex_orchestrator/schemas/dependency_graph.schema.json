@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Decomposition Dependency Graph",
+  "type": "object",
+  "required": ["schema_version", "kind", "nodes", "edges", "has_cycles", "topological_order"],
+  "if": {
+    "properties": {"has_cycles": {"const": false}},
+    "required": ["has_cycles"]
+  },
+  "then": {
+    "properties": {"topological_order": {"type": "array"}}
+  },
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "kind": {"const": "decomposition_dependency_graph"},
+    "workflow_id": {"type": ["string", "null"]},
+    "run_id": {"type": ["string", "null"]},
+    "nodes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["node_id", "node_type", "work_slice_id", "allowed_product_runtime_file"],
+        "properties": {
+          "node_id": {"type": "string"},
+          "node_type": {"const": "patchlet"},
+          "work_slice_id": {"type": "string"},
+          "allowed_product_runtime_file": {"type": "string"}
+        },
+        "additionalProperties": true
+      }
+    },
+    "edges": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["from", "to", "edge_type", "reason"],
+        "properties": {
+          "from": {"type": "string"},
+          "to": {"type": "string"},
+          "edge_type": {"type": "string"},
+          "reason": {"type": "string"}
+        },
+        "additionalProperties": true
+      }
+    },
+    "has_cycles": {"type": "boolean"},
+    "topological_order": {"type": "array", "items": {"type": "string"}}
+  },
+  "additionalProperties": true
+}

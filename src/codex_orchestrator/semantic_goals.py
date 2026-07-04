@@ -13,6 +13,8 @@ PATTERNS = [
     re.compile(r"^\s*make\s+app\.py\s+return\s+(?P<value>.+?)\s+and\s+prove\s+it\.?\s*$", re.IGNORECASE),
     re.compile(r"^\s*make\s+app\s+main\s+return\s+(?P<value>.+?)\s+and\s+prove\s+it\.?\s*$", re.IGNORECASE),
     re.compile(r"^\s*make\s+app\.main(?:\(\))?\s+return\s+(?P<value>.+?)\s+and\s+prove\s+it\.?\s*$", re.IGNORECASE),
+    re.compile(r"^\s*make\s+the\s+app\s+pipeline\s+return\s+(?P<value>.+?)\s+through\s+the\s+entrypoint\s+and\s+prove\s+it\.?\s*$", re.IGNORECASE),
+    re.compile(r"^\s*make\s+app\s+process\s+the\s+input\s+through\s+validation,\s+transformation,\s+and\s+formatting\s+so\s+main\s+returns\s+(?P<value>.+?)\s+and\s+prove\s+it\.?\s*$", re.IGNORECASE),
 ]
 
 

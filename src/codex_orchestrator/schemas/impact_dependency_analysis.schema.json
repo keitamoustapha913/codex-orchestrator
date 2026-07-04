@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Impact Dependency Analysis",
+  "type": "object",
+  "required": ["schema_version", "kind", "candidate_files", "dependency_edges"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "kind": {"const": "impact_dependency_analysis"},
+    "workflow_id": {"type": ["string", "null"]},
+    "run_id": {"type": ["string", "null"]},
+    "master_prompt_sha256": {"type": ["string", "null"]},
+    "candidate_files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "inventory_node_ids", "relevance", "goal_item_ids", "proof_obligation_ids", "dependency_inputs", "dependency_outputs", "risk_level", "suggested_slice_types"],
+        "properties": {
+          "path": {"type": "string", "minLength": 1},
+          "inventory_node_ids": {"type": "array", "items": {"type": "string"}},
+          "relevance": {"type": "string", "minLength": 1},
+          "goal_item_ids": {"type": "array", "items": {"type": "string"}},
+          "proof_obligation_ids": {"type": "array", "items": {"type": "string"}},
+          "dependency_inputs": {"type": "array", "items": {"type": "string"}},
+          "dependency_outputs": {"type": "array", "items": {"type": "string"}},
+          "risk_level": {"enum": ["low", "medium", "high"]},
+          "suggested_slice_types": {"type": "array", "minItems": 1, "items": {"type": "string"}}
+        },
+        "additionalProperties": true
+      }
+    },
+    "dependency_edges": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["from_file", "to_file", "edge_type", "confidence"],
+        "properties": {
+          "from_file": {"type": "string"},
+          "to_file": {"type": "string"},
+          "edge_type": {"type": "string"},
+          "confidence": {"enum": ["low", "medium", "high"]}
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}

@@ -1,0 +1,40 @@
+# General Work Decomposition
+
+The orchestrator decomposition architecture is not one file -> one patchlet.
+The rule is one patchlet -> exactly one allowed product/runtime file.
+Multiple patchlets may target the same product/runtime file when the work is sequential, proof-heavy, risky, or too large for one bounded worker task.
+
+Patchlets are small bounded work units derived from work slices.
+Work slices are not merely files. A work slice may be a subtask within a file, and a single file may contain many work slices.
+The planner derives slices from the frozen master prompt, goal interpretation, proof obligations, the inventory graph, impact/dependency analysis, risk, dependency boundaries, and task size.
+
+The generated decomposition artifacts live under `.codex-orchestrator/decomposition/`:
+
+- `impact_dependency_analysis.json`
+- `work_decomposition_plan.json`
+- `work_slices.json`
+- `patchlet_plan.json`
+- `dependency_graph.json`
+- `transaction_group_plan.json`
+
+Each patchlet plan row records one `allowed_product_runtime_file` and an `allowed_product_runtime_files` list with exactly one item.
+Context files may include dependencies for reading, but the allowed edit file remains exactly one product/runtime file.
+Manual artifact tampering is invalid because `patchlet_index.json`, transaction groups, prompts, worker memory, dependency metadata, and proof coverage must be generated from the same decomposition plan.
+
+Patchlet prompts include the work slice ID, allowed edit path, forbidden product/runtime edit paths, proof obligations, goal items, dependency patchlets, local probe requirements, and independent proof expectations.
+The default patchlet budget is `CODEX_PATCHLET_TIMEOUT_SECONDS`, or 600 seconds when the environment variable is unset.
+Prompts are intentionally narrow and self-contained so they avoid memory compacting and do not ask a worker to solve unrelated slices.
+
+Operators can inspect the plan with:
+
+```bash
+cxor decomposition --repo <repo>
+cxor decomposition --repo <repo> --json
+cxor decomposition --repo <repo> --patchlets
+cxor decomposition --repo <repo> --dependencies
+```
+
+`cxor status --json`, `cxor monitor`, live progress, and `goal_progress.json` expose decomposition counts, per-file patchlet counts, same-file multi-patchlet groups, ready/waiting/accepted/blocked patchlets, and the decomposition plan path.
+
+Target complexity alone previously did not create multiple patchlets because patchlet compilation iterated the single global invariant `I001`.
+The corrected path compiles patchlets from `patchlet_plan.json`, which is generated from work slices rather than invariant count.

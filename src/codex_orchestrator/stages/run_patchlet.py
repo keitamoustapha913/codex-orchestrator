@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from codex_orchestrator.codex_adapter import worker_for_mode
+from codex_orchestrator.codex_execution_policy import soft_deadline_seconds
 from codex_orchestrator.errors import WorkerExecutionError, WorkerPreconditionError
 from codex_orchestrator.git_guard import changed_between, git_diff, snapshot_status
 from codex_orchestrator.integration_state import (
@@ -208,9 +209,69 @@ def _next_pending_patchlet(index: dict) -> dict | None:
     for patchlet in index.get("patchlets", []):
         if patchlet.get("status") != "PENDING":
             continue
-        if all(dep in completed for dep in patchlet.get("depends_on", [])):
+        deps = patchlet.get("dependency_patchlet_ids", patchlet.get("depends_on", []))
+        if all(dep in completed for dep in deps):
             return patchlet
     return None
+
+
+def _refresh_dependency_states(ctx: TargetRepoContext, index: dict) -> None:
+    patchlets = index.get("patchlets", [])
+    by_id = {patchlet["patchlet_id"]: patchlet for patchlet in patchlets}
+    accepted = {
+        pid
+        for pid, patchlet in by_id.items()
+        if patchlet.get("status") in {"COMPLETE", "VERIFIED_NO_CHANGE_NEEDED"}
+    }
+    blocking = {
+        pid
+        for pid, patchlet in by_id.items()
+        if patchlet.get("status") in {"FAILED_WITH_EVIDENCE", "BLOCKED_WITH_EVIDENCE"}
+    }
+    changed = False
+    for patchlet in patchlets:
+        if patchlet.get("status") != "PENDING":
+            continue
+        deps = list(patchlet.get("dependency_patchlet_ids", patchlet.get("depends_on", [])))
+        failed_deps = [dep for dep in deps if dep in blocking]
+        if failed_deps:
+            patchlet["status"] = "BLOCKED_WITH_EVIDENCE"
+            changed = True
+            append_operator_event(
+                ctx.root,
+                event_type="patchlet_waiting_on_dependencies",
+                severity="error",
+                stage="PATCHLETS_READY",
+                summary=f"Patchlet {patchlet['patchlet_id']} blocked by failed dependency {', '.join(failed_deps)}.",
+                artifact_paths=[".codex-orchestrator/patchlets/patchlet_index.json"],
+                patchlet_id=patchlet["patchlet_id"],
+                details={"blocked_dependency_patchlet_ids": failed_deps},
+            )
+            continue
+        waiting = [dep for dep in deps if dep not in accepted]
+        if waiting:
+            append_operator_event(
+                ctx.root,
+                event_type="patchlet_waiting_on_dependencies",
+                severity="info",
+                stage="PATCHLETS_READY",
+                summary=f"Patchlet {patchlet['patchlet_id']} waiting on {', '.join(waiting)}.",
+                artifact_paths=[".codex-orchestrator/patchlets/patchlet_index.json"],
+                patchlet_id=patchlet["patchlet_id"],
+                details={"waiting_dependency_patchlet_ids": waiting},
+            )
+        else:
+            append_operator_event(
+                ctx.root,
+                event_type="patchlet_ready",
+                severity="info",
+                stage="PATCHLETS_READY",
+                summary=f"Patchlet {patchlet['patchlet_id']} is ready.",
+                artifact_paths=[".codex-orchestrator/patchlets/patchlet_index.json"],
+                patchlet_id=patchlet["patchlet_id"],
+            )
+    if changed:
+        _save_patchlet_index(ctx, index)
 
 
 def _record_failure(
@@ -550,6 +611,7 @@ def _write_goal_satisfaction_gate(
 
 def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_worktree: bool = False) -> PatchletExecutionResult:
     index = _load_patchlet_index(ctx)
+    _refresh_dependency_states(ctx, index)
     patchlet = _next_pending_patchlet(index)
     if patchlet is None:
         return PatchletExecutionResult("", "NO_PENDING_PATCHLETS", [], True, "no pending patchlets")
@@ -622,9 +684,30 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
     if not attempt_prompt_path.exists():
         report_contract = worker_capsule.worker_memory_dir / "REPORT_SCHEMA_CONTRACT.md"
         final_contract = worker_capsule.worker_memory_dir / "FINAL_REPORT_CONTRACT.md"
+        work_slice_contract = worker_capsule.worker_memory_dir / "WORK_SLICE_CONTRACT.md"
+        forbidden_files = patchlet.get("prompt_scope", {}).get("forbidden_edit_files", [])
+        forbidden_text = "\n".join(f"- `{path}`" for path in forbidden_files) or "- any product/runtime file other than the single allowed file"
         attempt_prompt_path.write_text(
             f"# Worker Prompt Pending\n\nPatchlet: {pid}\nAttempt: {run_id}\nSubprompt: {patchlet['subprompt_path']}\n\n"
+            "This patchlet is a small bounded work unit.\n\n"
+            f"Work slice ID: `{patchlet.get('work_slice_id') or 'legacy-invariant-slice'}`\n\n"
+            f"Allowed product/runtime file: `{patchlet.get('allowed_product_runtime_file')}`\n\n"
+            f"Allowed edit path: `$CXOR_EXECUTION_ROOT/{patchlet.get('allowed_product_runtime_file')}`\n\n"
+            "Forbidden product/runtime edit paths:\n"
+            f"{forbidden_text}\n\n"
+            f"Time budget seconds: `{patchlet.get('time_budget_seconds')}`\n\n"
+            f"Soft deadline seconds: `{soft_deadline_seconds(int(patchlet.get('time_budget_seconds') or 1))}`\n\n"
+            f"Proof obligations: `{', '.join(patchlet.get('proof_obligation_ids', [])) or 'none'}`\n\n"
+            f"Goal items: `{', '.join(patchlet.get('goal_item_ids', [])) or 'none'}`\n\n"
+            f"Dependency patchlets: `{', '.join(patchlet.get('dependency_patchlet_ids', patchlet.get('depends_on', []))) or 'none'}`\n\n"
+            "Do not attempt to solve unrelated work slices.\n\n"
+            "Do not edit any product/runtime file except the single allowed file.\n\n"
+            "Do not compact memory by summarizing broad unrelated context.\n\n"
+            "Finish within the patchlet time budget.\n\n"
+            "If blocked, write BLOCKED_WITH_EVIDENCE with the specific missing dependency or proof obstacle.\n\n"
             f"{_semantic_worker_prompt_section(patchlet)}"
+            "## Work slice contract\n\n"
+            f"{work_slice_contract.read_text(encoding='utf-8') if work_slice_contract.exists() else ''}\n\n"
             "## Report schema contract\n\n"
             f"{report_contract.read_text(encoding='utf-8') if report_contract.exists() else ''}\n\n"
             "## Final report contract\n\n"
@@ -646,6 +729,7 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
         "reasoning": None,
         "contracts": [
             "TASK_CONTRACT.md",
+            "WORK_SLICE_CONTRACT.md",
             "SEMANTIC_GOAL_CONTRACT.md",
             "REPORT_SCHEMA_CONTRACT.md",
             "FINAL_REPORT_CONTRACT.md",
@@ -653,6 +737,7 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
         ],
         "artifact_paths": [
             prompt_path,
+            _record_path_for_manifest(ctx, worker_capsule.worker_memory_dir / "WORK_SLICE_CONTRACT.md"),
             _record_path_for_manifest(ctx, worker_capsule.worker_memory_dir / "SEMANTIC_GOAL_CONTRACT.md"),
         ],
     })
@@ -1455,7 +1540,7 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
         "report_valid": report_valid,
         "report_error": report_error,
         "timed_out": _read_command_from_run_dir(run_dir).get("timed_out"),
-        "timeout_seconds": _read_command_from_run_dir(run_dir).get("timeout_seconds"),
+        "timeout_seconds": _read_command_from_run_dir(run_dir).get("timeout_seconds") or patchlet.get("time_budget_seconds"),
         "selected_model": _read_command_from_run_dir(run_dir).get("selected_model"),
         "selected_reasoning": _read_command_from_run_dir(run_dir).get("selected_reasoning"),
         "progress_path": _record_path_for_manifest(ctx, run_dir / "progress.jsonl"),

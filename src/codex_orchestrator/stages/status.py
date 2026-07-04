@@ -23,6 +23,7 @@ def status(ctx: TargetRepoContext) -> dict:
     latest_apply_result_path = ctx.paths.workflow_dir / "apply_results" / "latest_apply_result.json"
     latest_apply_result = read_json(latest_apply_result_path) if latest_apply_result_path.exists() else None
     goal_progress = _goal_progress_status(ctx)
+    decomposition = _decomposition_status(ctx)
     master_prompt_proof = _master_prompt_proof_status(ctx)
     applyable_progress = _applyable_progress_status(ctx, goal_progress)
     last_report_ingestion = None
@@ -84,6 +85,7 @@ def status(ctx: TargetRepoContext) -> dict:
         "semantic_goal": semantic_goal,
         "master_prompt_proof": master_prompt_proof,
         "goal_progress": goal_progress,
+        "decomposition": decomposition,
         "applyable_progress": applyable_progress,
     }
 
@@ -140,6 +142,47 @@ def _goal_progress_status(ctx: TargetRepoContext) -> dict:
         "blocked": counts.get("blocked", 0),
         "unproven": counts.get("unproven", 0),
         "goal_progress_path": ".codex-orchestrator/goal_progress.json",
+        "decomposition": progress.get("decomposition", {}),
+    }
+
+
+def _decomposition_status(ctx: TargetRepoContext) -> dict:
+    decomp_dir = ctx.paths.workflow_dir / "decomposition"
+    plan = read_json(decomp_dir / "work_decomposition_plan.json") if (decomp_dir / "work_decomposition_plan.json").exists() else {}
+    patchlet_index = read_json(ctx.paths.patchlet_index) if ctx.paths.patchlet_index.exists() else {"patchlets": []}
+    patchlets = patchlet_index.get("patchlets", [])
+    accepted_statuses = {"COMPLETE", "VERIFIED_NO_CHANGE_NEEDED"}
+    accepted = [p["patchlet_id"] for p in patchlets if p.get("status") in accepted_statuses]
+    blocked = [p["patchlet_id"] for p in patchlets if p.get("status") in {"FAILED_WITH_EVIDENCE", "BLOCKED_WITH_EVIDENCE"}]
+    accepted_set = set(accepted)
+    ready = []
+    waiting = []
+    same_file: dict[str, list[str]] = {}
+    for patchlet in patchlets:
+        path = patchlet.get("allowed_product_runtime_file")
+        if path:
+            same_file.setdefault(path, []).append(patchlet["patchlet_id"])
+        if patchlet.get("status") != "PENDING":
+            continue
+        deps = patchlet.get("dependency_patchlet_ids", patchlet.get("depends_on", []))
+        if all(dep in accepted_set for dep in deps):
+            ready.append(patchlet["patchlet_id"])
+        else:
+            waiting.append(patchlet["patchlet_id"])
+    return {
+        "work_slice_count": plan.get("work_slice_count", 0),
+        "patchlet_count": len(patchlets) if patchlets else plan.get("patchlet_count", 0),
+        "transaction_group_count": plan.get("transaction_group_count", 0),
+        "same_file_multi_patchlet_groups": [
+            {"file": path, "patchlet_ids": ids}
+            for path, ids in sorted(same_file.items())
+            if len(ids) > 1
+        ],
+        "ready_patchlets": ready,
+        "waiting_patchlets": waiting,
+        "accepted_patchlets": accepted,
+        "blocked_patchlets": blocked,
+        "decomposition_plan_path": ".codex-orchestrator/decomposition/work_decomposition_plan.json" if plan else None,
     }
 
 

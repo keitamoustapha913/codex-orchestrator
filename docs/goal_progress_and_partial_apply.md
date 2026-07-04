@@ -9,3 +9,7 @@ Use `cxor stop --repo <repo>` to write `control/stop_requested.json`. The orches
 Partial apply is explicit. For a stopped non-DONE workflow, `cxor apply-results --repo <repo> --mode patch --scope accepted --allow-partial` applies only the accepted integration state. Without `--allow-partial`, stopped workflows are refused. If no accepted checkpoint exists, partial apply is refused even with `--allow-partial`.
 
 In-progress unaccepted worker changes are never applied by default. `partial_apply_result.json` records the accepted checkpoint, mode, scope, warning that the full master prompt may not be satisfied, and whether the working tree was mutated.
+
+## Multi-Patchlet Progress
+
+`goal_progress.json` includes decomposition counts, per-file patchlet counts, ready/waiting/accepted/blocked patchlets, and same-file multi-patchlet groups. In multi-patchlet workflows, stop and partial apply still use the latest accepted checkpoint only; pending, failed, blocked, or in-progress patchlets are not applied. See `docs/multi_patchlet_transaction_graph.md`.

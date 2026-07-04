@@ -244,3 +244,7 @@ Final DONE requires `master_prompt_concordance_result.json` and `master_prompt_s
 cxor writes `goal_progress.json` and append-only `goal_progress.jsonl`; `cxor goal-progress`, `cxor status --json`, `cxor monitor`, and `cxor auto --live-progress` expose the latest obligation counts, proof state, accepted checkpoint, and next action.
 
 `cxor stop` writes `control/stop_requested.json`; the orchestrator stops at a safe point and writes `control/stop_result.json`. `apply-results --scope accepted --allow-partial` is required for stopped non-DONE workflows and applies only latest accepted progress. In-progress unaccepted worker changes are not applied by default. `partial_apply_result.json` records the warning that the full master prompt may not be satisfied. See `docs/goal_progress_and_partial_apply.md`.
+
+## General Work Decomposition
+
+The autonomous loop now plans work slices before compiling patchlets. This is not one file -> one patchlet; each patchlet has exactly one allowed product/runtime file, while multiple patchlets may target the same file. `CODEX_PATCHLET_TIMEOUT_SECONDS` defaults to 600 seconds and is propagated into the plan, prompt, worker memory, and run records. See `docs/general_work_decomposition.md`.

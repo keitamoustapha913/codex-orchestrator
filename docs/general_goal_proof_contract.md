@@ -15,3 +15,7 @@ Before product patchlets start, cxor writes `provability/provability_result.json
 Global verification writes `master_prompt_concordance_result.json` and `master_prompt_satisfaction_result.json`. DONE requires master prompt concordance, master prompt satisfaction, proven required obligations, transaction groups, integration artifact validation, target hygiene, and no unresolved failures.
 
 Unsupported or ambiguous goals are not marked proven. They stop early with `goal_not_provable`, `goal_ambiguous`, `goal_blocked_by_missing_capability`, `goal_coverage_failed`, `independent_probe_rerun_failed`, `proof_obligation_failed`, `master_prompt_concordance_failed`, or `master_prompt_not_satisfied` diagnostics instead of collapsing to unknown.
+
+## Decomposition Proof Mapping
+
+General work decomposition maps work slices and patchlets to proof obligations and goal items. The proof gate remains required for DONE: a patchlet contribution is not enough until the orchestrator-owned independent rerun and goal coverage gate prove the required obligation. See `docs/general_work_decomposition.md`.

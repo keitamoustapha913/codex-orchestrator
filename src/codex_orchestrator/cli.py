@@ -137,6 +137,69 @@ def cmd_goal_progress(args: argparse.Namespace) -> int:
         time.sleep(args.interval)
 
 
+def cmd_decomposition(args: argparse.Namespace) -> int:
+    from codex_orchestrator.jsonio import read_json
+    from codex_orchestrator.stages.status import status
+
+    ctx = _ctx(args)
+    decomp_dir = ctx.paths.workflow_dir / "decomposition"
+    plan_path = decomp_dir / "work_decomposition_plan.json"
+    patchlet_plan_path = decomp_dir / "patchlet_plan.json"
+    graph_path = decomp_dir / "dependency_graph.json"
+    group_path = decomp_dir / "transaction_group_plan.json"
+    plan = read_json(plan_path) if plan_path.exists() else {}
+    patchlet_plan = read_json(patchlet_plan_path) if patchlet_plan_path.exists() else {"patchlets": []}
+    graph = read_json(graph_path) if graph_path.exists() else {"topological_order": [], "edges": []}
+    group_plan = read_json(group_path) if group_path.exists() else {"transaction_groups": []}
+    status_summary = status(ctx).get("decomposition", {})
+    payload = {
+        "schema_version": "1.0",
+        "kind": "decomposition_status",
+        "workflow_id": plan.get("workflow_id"),
+        "run_id": plan.get("run_id"),
+        "decomposition_strategy": plan.get("decomposition_strategy"),
+        "work_slice_count": plan.get("work_slice_count", 0),
+        "patchlet_count": plan.get("patchlet_count", len(patchlet_plan.get("patchlets", []))),
+        "transaction_group_count": plan.get("transaction_group_count", len(group_plan.get("transaction_groups", []))),
+        "per_file_patchlet_counts": plan.get("per_file_patchlet_counts", {}),
+        "same_file_multi_patchlet_groups": status_summary.get("same_file_multi_patchlet_groups", []),
+        "topological_order": graph.get("topological_order", []),
+        "ready_patchlets": status_summary.get("ready_patchlets", []),
+        "waiting_patchlets": status_summary.get("waiting_patchlets", []),
+        "accepted_patchlets": status_summary.get("accepted_patchlets", []),
+        "blocked_patchlets": status_summary.get("blocked_patchlets", []),
+        "patchlets": patchlet_plan.get("patchlets", []),
+        "dependency_edges": graph.get("edges", []),
+        "transaction_groups": group_plan.get("transaction_groups", []),
+        "decomposition_plan_path": ".codex-orchestrator/decomposition/work_decomposition_plan.json" if plan else None,
+    }
+    if args.json:
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return 0
+    print(f"workflow_id: {payload.get('workflow_id') or '-'}")
+    print(f"run_id: {payload.get('run_id') or '-'}")
+    print(f"decomposition strategy: {payload.get('decomposition_strategy') or '-'}")
+    print(f"work slices: {payload['work_slice_count']}")
+    print(f"patchlets: {payload['patchlet_count']}")
+    print(f"transaction groups: {payload['transaction_group_count']}")
+    print(f"memory compacting required: false")
+    for path, count in sorted(payload.get("per_file_patchlet_counts", {}).items()):
+        print(f"{path}: {count} patchlet(s)")
+    for group in payload.get("same_file_multi_patchlet_groups", []):
+        print(f"same-file sequence: {group['file']} has {' -> '.join(group['patchlet_ids'])}")
+    if args.patchlets:
+        for patchlet in payload["patchlets"]:
+            print(
+                f"{patchlet['patchlet_id']} -> {patchlet.get('allowed_product_runtime_file')} "
+                f"slice={patchlet.get('work_slice_id')} budget={patchlet.get('time_budget_seconds')}"
+            )
+    if args.dependencies:
+        print("topological order: " + (" -> ".join(payload["topological_order"]) or "-"))
+        for edge in payload["dependency_edges"]:
+            print(f"{edge.get('from')} -> {edge.get('to')}: {edge.get('reason')}")
+    return 0
+
+
 def cmd_validate_state(args: argparse.Namespace) -> int:
     from codex_orchestrator.validators.state_validator import validate_state_file
 
@@ -819,6 +882,13 @@ def build_parser() -> argparse.ArgumentParser:
     goal_progress.add_argument("--interval", type=float, default=2.0)
     goal_progress.add_argument("--max-iterations", type=int, default=None, help=argparse.SUPPRESS)
     goal_progress.set_defaults(func=cmd_goal_progress)
+
+    decomposition = sub.add_parser("decomposition")
+    _add_repo_flags(decomposition)
+    decomposition.add_argument("--json", action="store_true")
+    decomposition.add_argument("--patchlets", action="store_true")
+    decomposition.add_argument("--dependencies", action="store_true")
+    decomposition.set_defaults(func=cmd_decomposition)
 
     validate_state = sub.add_parser("validate-state")
     _add_repo_flags(validate_state)

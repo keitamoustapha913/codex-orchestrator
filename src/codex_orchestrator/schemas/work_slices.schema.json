@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Work Slices",
+  "type": "object",
+  "required": ["schema_version", "kind", "slices"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "kind": {"const": "work_slices"},
+    "workflow_id": {"type": ["string", "null"]},
+    "run_id": {"type": ["string", "null"]},
+    "slices": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["work_slice_id", "title", "allowed_product_runtime_file", "slice_type", "goal_item_ids", "proof_obligation_ids", "inventory_node_ids", "depends_on_work_slice_ids", "risk_level", "estimated_complexity", "time_budget_seconds", "prompt_scope"],
+        "properties": {
+          "work_slice_id": {"type": "string", "pattern": "^WS[0-9]{3}$"},
+          "title": {"type": "string", "minLength": 1},
+          "allowed_product_runtime_file": {"type": "string", "minLength": 1},
+          "slice_type": {"type": "string", "minLength": 1},
+          "goal_item_ids": {"type": "array", "items": {"type": "string"}},
+          "proof_obligation_ids": {"type": "array", "items": {"type": "string"}},
+          "inventory_node_ids": {"type": "array", "items": {"type": "string"}},
+          "depends_on_work_slice_ids": {"type": "array", "items": {"type": "string"}},
+          "risk_level": {"enum": ["low", "medium", "high"]},
+          "estimated_complexity": {"enum": ["small", "medium", "large"]},
+          "time_budget_seconds": {"type": "integer", "minimum": 1},
+          "prompt_scope": {
+            "type": "object",
+            "required": ["allowed_edit_file", "memory_compacting_required"],
+            "properties": {
+              "allowed_context_files": {"type": "array", "items": {"type": "string"}},
+              "allowed_edit_file": {"type": "string", "minLength": 1},
+              "forbidden_edit_files": {"type": "array", "items": {"type": "string"}},
+              "memory_compacting_required": {"const": false}
+            },
+            "additionalProperties": true
+          }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}

@@ -84,3 +84,7 @@ Final DONE requires `master_prompt_concordance_result.json` and `master_prompt_s
 cxor writes `goal_progress.json` and append-only `goal_progress.jsonl`; `cxor goal-progress`, `cxor status --json`, `cxor monitor`, and `cxor auto --live-progress` expose the latest obligation counts, proof state, accepted checkpoint, and next action.
 
 `cxor stop` writes `control/stop_requested.json`; the orchestrator stops at a safe point and writes `control/stop_result.json`. `apply-results --scope accepted --allow-partial` is required for stopped non-DONE workflows and applies only latest accepted progress. In-progress unaccepted worker changes are not applied by default. `partial_apply_result.json` records the warning that the full master prompt may not be satisfied. See `docs/goal_progress_and_partial_apply.md`.
+
+## Decomposition Lifecycle
+
+After inventory and proof analysis, cxor writes decomposition artifacts under `.codex-orchestrator/decomposition/`. Patchlet compilation reads `patchlet_plan.json` when present and preserves legacy invariant fields for verification compatibility. Transaction groups derive from dependency layers and proof-obligation coverage. See `docs/multi_patchlet_transaction_graph.md`.

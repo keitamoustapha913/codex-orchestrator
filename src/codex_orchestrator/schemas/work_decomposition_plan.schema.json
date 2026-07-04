@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Work Decomposition Plan",
+  "type": "object",
+  "required": ["schema_version", "kind", "workflow_id", "run_id", "default_patchlet_timeout_seconds", "decomposition_strategy", "one_allowed_file_per_patchlet", "multiple_patchlets_per_file_allowed", "avoid_memory_compacting", "work_slice_count", "patchlet_count", "transaction_group_count", "operator_summary", "risk_summary"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "kind": {"const": "work_decomposition_plan"},
+    "workflow_id": {"type": ["string", "null"]},
+    "run_id": {"type": ["string", "null"]},
+    "master_prompt_sha256": {"type": ["string", "null"]},
+    "default_patchlet_timeout_seconds": {"type": "integer", "minimum": 1},
+    "decomposition_strategy": {"const": "small_bounded_work_slices"},
+    "one_allowed_file_per_patchlet": {"const": true},
+    "multiple_patchlets_per_file_allowed": {"const": true},
+    "avoid_memory_compacting": {"const": true},
+    "work_slice_count": {"type": "integer", "minimum": 0},
+    "patchlet_count": {"type": "integer", "minimum": 0},
+    "transaction_group_count": {"type": "integer", "minimum": 0},
+    "operator_summary": {"type": "string"},
+    "risk_summary": {
+      "type": "object",
+      "required": ["large_patchlet_risk", "multi_file_patchlet_risk", "dependency_cycle_risk"],
+      "properties": {
+        "large_patchlet_risk": {"type": "boolean"},
+        "multi_file_patchlet_risk": {"type": "boolean"},
+        "dependency_cycle_risk": {"type": "boolean"}
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

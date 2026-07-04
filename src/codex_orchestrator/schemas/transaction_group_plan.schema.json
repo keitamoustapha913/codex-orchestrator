@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Transaction Group Plan",
+  "type": "object",
+  "required": ["schema_version", "kind", "transaction_groups"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "kind": {"const": "transaction_group_plan"},
+    "workflow_id": {"type": ["string", "null"]},
+    "run_id": {"type": ["string", "null"]},
+    "transaction_groups": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["transaction_group_id", "patchlet_ids", "goal_item_ids", "proof_obligation_ids", "dependency_patchlet_ids", "group_type", "operator_summary"],
+        "properties": {
+          "transaction_group_id": {"type": "string", "pattern": "^TG[0-9]{3}$"},
+          "patchlet_ids": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+          "goal_item_ids": {"type": "array", "items": {"type": "string"}},
+          "proof_obligation_ids": {"type": "array", "items": {"type": "string"}},
+          "dependency_patchlet_ids": {"type": "array", "items": {"type": "string"}},
+          "group_type": {"const": "dependency_layer"},
+          "operator_summary": {"type": "string"}
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}
