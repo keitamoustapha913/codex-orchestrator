@@ -31,6 +31,14 @@ sweep quarantines role-based scratch under the run directory, records
 Random root .txt and .out files are not automatically allowed, and product/runtime
 files are still rejected before any checkpoint can be accepted.
 
+Patchlet-prefixed report formatting scratch does not affect goal progress and is
+quarantined only after safety checks: untracked, non-executable,
+text/JSON-like, patchlet-prefixed, report-role shaped, and
+formatting/check/output-role shaped. Not all JSON files are allowed. Not all
+pretty files are allowed. Product/runtime files remain rejected, changed peer
+product files remain rejected, quarantine preserves content and hash metadata,
+and the diff is recomputed after quarantine.
+
 Scratch quarantine does not let file presence masquerade as a product diff. The
 guard uses actual changed/untracked paths, not file presence. Unchanged peer
 product files are ignored because presence is not a change; changed peer product

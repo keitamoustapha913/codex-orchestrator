@@ -162,6 +162,14 @@ hashes. Random root .txt and .out files are not automatically allowed,
 product/runtime files are still rejected, and the diff is recomputed after
 quarantine.
 
+RC6H extends that role-based quarantine narrowly for patchlet-prefixed report
+formatting scratch. A file is eligible only when it is untracked,
+non-executable, text/JSON-like, patchlet-prefixed, report-role shaped, and
+formatting/check/output-role shaped. Not all JSON files are allowed. Not all
+pretty files are allowed. Product/runtime files remain rejected, changed peer
+product files remain rejected, quarantine preserves content and hash metadata,
+and the diff is recomputed after quarantine.
+
 RC6E tightens the sweep to actual changed/untracked paths, not file presence.
 Unchanged peer product files are ignored because presence is not a change;
 changed peer product files are rejected. Validation scratch role tokens include

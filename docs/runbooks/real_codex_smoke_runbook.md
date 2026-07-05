@@ -175,6 +175,13 @@ and uses role-based quarantine for report/probe validation outputs. Random root
 .txt/.out files are not automatically allowed, product/runtime files are still
 rejected, and the diff is recomputed after quarantine.
 
+Patchlet-prefixed report formatting scratch is quarantined only when it is safe:
+untracked, non-executable, text/JSON-like, patchlet-prefixed, report-role
+shaped, and formatting/check/output-role shaped. Not all JSON files are allowed.
+Not all pretty files are allowed. Product/runtime files remain rejected, changed
+peer product files remain rejected, quarantine preserves content and hash
+metadata, and the diff is recomputed after quarantine.
+
 When inspecting Scenario 2-style multi-file targets, remember that the guard
 uses actual changed/untracked paths, not file presence. Unchanged peer product
 files are ignored because presence is not a change. Changed peer product files

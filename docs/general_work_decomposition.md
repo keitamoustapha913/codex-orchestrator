@@ -64,6 +64,13 @@ hash metadata, and writes `root_scratch_sweep_result.json`. Random root .txt and
 .out files are not automatically allowed, product/runtime files are still
 rejected, and the diff is recomputed after quarantine.
 
+Patchlet-prefixed report formatting scratch is allowed only as safe worker
+scratch: untracked, non-executable, text/JSON-like, patchlet-prefixed,
+report-role shaped, and formatting/check/output-role shaped. Not all JSON files
+are allowed. Not all pretty files are allowed. Product/runtime files remain
+rejected, changed peer product files remain rejected, quarantine preserves
+content and hash metadata, and the diff is recomputed after quarantine.
+
 Execution-root peer files are classified by actual changed/untracked paths, not
 file presence. Unchanged peer product files are ignored because presence is not a
 change. Changed peer product files are rejected unless they are the current

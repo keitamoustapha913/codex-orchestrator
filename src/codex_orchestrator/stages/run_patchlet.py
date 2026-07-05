@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import shutil
 import hashlib
@@ -121,6 +122,19 @@ SCRATCH_ROLE_PREFIXES = (
 MAX_SCRATCH_ARTIFACT_BYTES = 1024 * 1024
 SCRATCH_ROLE_SUBJECTS = {"report", "probe", "artifact", "result"}
 SCRATCH_ROLE_ACTIONS = {"check", "valid", "validate", "validated", "validation", "verify", "verified", "verification"}
+PATCHLET_REPORT_FORMATTING_ROLE_ACTIONS = {
+    "pretty",
+    "formatted",
+    "format",
+    "check",
+    "validated",
+    "validation",
+    "valid",
+    "verify",
+    "verification",
+    "output",
+    "rendered",
+}
 
 
 def _declared_scratch_artifacts(report_path: Path | None) -> set[str]:
@@ -145,8 +159,33 @@ def _is_quarantinable_declared_scratch(path: Path, *, declared: set[str], allowe
     return path.suffix.lower() in SCRATCH_TEXT_EXTENSIONS
 
 
+def _scratch_name_tokens(path: Path) -> list[str]:
+    normalized = path.stem.replace("-", "_").replace(".", "_").lstrip(".").lower()
+    return [token for token in normalized.split("_") if token]
+
+
+def _has_patchlet_id_token(tokens: list[str]) -> bool:
+    if any(re.fullmatch(r"p\d{4,}", token) for token in tokens):
+        return True
+    return any(
+        token == "p" and index + 1 < len(tokens) and re.fullmatch(r"\d{4,}", tokens[index + 1])
+        for index, token in enumerate(tokens)
+    )
+
+
+def _is_patchlet_prefixed_report_formatting_scratch(path: Path) -> bool:
+    tokens = _scratch_name_tokens(path)
+    if not _has_patchlet_id_token(tokens):
+        return False
+    if "report" not in tokens:
+        return False
+    return bool(PATCHLET_REPORT_FORMATTING_ROLE_ACTIONS.intersection(tokens))
+
+
 def _scratch_role_reason(path: Path) -> str | None:
     stem = path.stem.lower().replace("-", "_").lstrip(".")
+    if _is_patchlet_prefixed_report_formatting_scratch(path):
+        return "patchlet_prefixed_report_formatting_scratch"
     prefix_reasons = {
         "validation_report": "role_shaped_report_validation_output",
     }

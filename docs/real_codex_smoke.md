@@ -107,6 +107,14 @@ role-based quarantine for report/probe validation-shaped files and writing
 automatically allowed, product/runtime files are still rejected, and the diff is
 recomputed after quarantine.
 
+Patchlet-prefixed report formatting scratch is a narrow worker-scratch shape,
+not a broad filename exception. The root file must be untracked,
+non-executable, text/JSON-like, patchlet-prefixed, report-role shaped, and
+formatting/check/output-role shaped before quarantine. Not all JSON files are
+allowed. Not all pretty files are allowed. Product/runtime files remain
+rejected, changed peer product files remain rejected, quarantine preserves
+content and hash metadata, and the diff is recomputed after quarantine.
+
 The sweep and diff guard use actual changed/untracked paths, not file presence.
 Unchanged peer product files are ignored because presence is not a change.
 Changed peer product files are rejected, and role-shaped validation scratch such

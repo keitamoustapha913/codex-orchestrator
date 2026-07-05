@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 
@@ -195,3 +196,59 @@ def test_scratch_quarantine_result_is_included_in_wrapper_gate_diagnostics(git_r
     path.write_text('{"kind":"scratch_artifact_quarantine_result","quarantined":[],"rejected":[]}', encoding="utf-8")
 
     assert path.exists()
+
+
+def test_patchlet_report_pretty_quarantine_does_not_allow_second_product_file(git_repo: Path):
+    (git_repo / "app.py").write_text("def main():\n    return 'dirty'\n", encoding="utf-8")
+    run_dir = git_repo / ".codex-orchestrator" / "runs" / "P0001_attempt1"
+    gates = run_dir / "gates"
+    gates.mkdir(parents=True)
+    (gates / "scratch_artifact_quarantine_result.json").write_text(
+        json.dumps({
+            "kind": "scratch_artifact_quarantine_result",
+            "quarantined": [
+                {
+                    "original_path": "p0001_report_pretty.json",
+                    "reason": "patchlet_prefixed_report_formatting_scratch",
+                }
+            ],
+        }),
+        encoding="utf-8",
+    )
+
+    result = _run_gate(git_repo)
+
+    assert result["accepted"] is False
+    assert result["product_runtime_dirty_paths"] == ["app.py"]
+
+
+def test_patchlet_report_pretty_quarantine_does_not_allow_product_directory(git_repo: Path):
+    product_dir = git_repo / "runtime"
+    product_dir.mkdir()
+    (product_dir / "state.cfg").write_text("state=dirty\n", encoding="utf-8")
+
+    result = _run_gate(git_repo)
+
+    assert result["accepted"] is False
+    assert "runtime/" in result["unknown_dirty_paths"] + result["product_runtime_dirty_paths"]
+
+
+def test_patchlet_report_pretty_quarantine_preserves_one_file_rule(git_repo: Path):
+    (git_repo / "generated.py").write_text("print('dirty')\n", encoding="utf-8")
+    (git_repo / "tmp.txt").write_text("scratch?\n", encoding="utf-8")
+
+    result = _run_gate(git_repo)
+
+    assert result["accepted"] is False
+    assert "generated.py" in result["product_runtime_dirty_paths"]
+    assert "tmp.txt" in result["unknown_dirty_paths"]
+
+
+def test_patchlet_report_pretty_quarantine_preserves_slice_boundary(git_repo: Path):
+    (git_repo / "p0001_report_pretty.json").write_text("{}", encoding="utf-8")
+
+    result = _run_gate(git_repo)
+
+    assert result["accepted"] is False
+    assert result["unknown_dirty_paths"] == ["p0001_report_pretty.json"]
+    assert (git_repo / "p0001_report_pretty.json").exists()

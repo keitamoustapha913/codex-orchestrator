@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import json
 import os
+import hashlib
+import subprocess
 from pathlib import Path
 
+from codex_orchestrator.git_guard import changed_between, snapshot_status
 from codex_orchestrator.patchlet_run_context import PatchletRunContext
 from codex_orchestrator.stages.build_inventory import build_inventory
 from codex_orchestrator.stages.census import run_census
@@ -15,6 +18,7 @@ from codex_orchestrator.stages.normalize import normalize_master_prompt
 from codex_orchestrator.stages.run_patchlet import run_next_patchlet
 from codex_orchestrator.stages.run_patchlet import _quarantine_execution_root_scratch_files
 from codex_orchestrator.target_repo import resolve_target_repo
+from codex_orchestrator.validators.diff_validator import validate_changed_paths
 
 
 def _run_ctx(tmp_path: Path) -> PatchletRunContext:
@@ -37,6 +41,37 @@ def _run_ctx(tmp_path: Path) -> PatchletRunContext:
         is_worktree=True,
         worktree_path=execution,
     )
+
+
+def _git(*args: str, cwd: Path) -> str:
+    return subprocess.run(
+        ["git", *args],
+        cwd=cwd,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    ).stdout
+
+
+def _git_run_ctx(tmp_path: Path) -> PatchletRunContext:
+    run_ctx = _run_ctx(tmp_path)
+    (run_ctx.execution_root / "policy.bundle").write_text("profile=legacy\nmode=permissive\n", encoding="utf-8")
+    (run_ctx.execution_root / "peer.record").write_text("owner=platform\n", encoding="utf-8")
+    _git("init", cwd=run_ctx.execution_root)
+    _git("config", "user.email", "test@example.invalid", cwd=run_ctx.execution_root)
+    _git("config", "user.name", "Test User", cwd=run_ctx.execution_root)
+    _git("add", ".", cwd=run_ctx.execution_root)
+    _git("commit", "-m", "baseline", cwd=run_ctx.execution_root)
+    return run_ctx
+
+
+def _policy_patchlet() -> dict:
+    return {
+        "patchlet_id": "P0001",
+        "allowed_product_runtime_file": "policy.bundle",
+        "allowed_artifact_dirs": [".artifacts/probes/", ".codex-orchestrator/runs/"],
+    }
 
 
 def _report(path: Path, changed_artifact_files: list[str]) -> Path:
@@ -104,6 +139,140 @@ def test_report_role_root_scratch_file_quarantined_without_declaration(tmp_path:
     result = _quarantine_execution_root_scratch_files(run_ctx, report_path=None, allowed_product_runtime_file="service.cfg")
     assert result[0]["original_path"] == "report_validated.json"
     assert result[0]["reason"] == "role_shaped_report_validated_output"
+
+
+def test_patchlet_prefixed_report_pretty_json_is_quarantined(tmp_path: Path):
+    run_ctx = _run_ctx(tmp_path)
+    (run_ctx.execution_root / "p0001_report_pretty.json").write_text("{}", encoding="utf-8")
+
+    result = _quarantine_execution_root_scratch_files(run_ctx, report_path=None, allowed_product_runtime_file="policy.bundle")
+
+    assert result[0]["original_path"] == "p0001_report_pretty.json"
+    assert result[0]["reason"] == "patchlet_prefixed_report_formatting_scratch"
+    assert not (run_ctx.execution_root / "p0001_report_pretty.json").exists()
+
+
+def test_patchlet_prefixed_report_formatted_json_is_quarantined(tmp_path: Path):
+    run_ctx = _run_ctx(tmp_path)
+    (run_ctx.execution_root / "P0001-report-formatted.json").write_text("{}", encoding="utf-8")
+
+    result = _quarantine_execution_root_scratch_files(run_ctx, report_path=None, allowed_product_runtime_file="policy.bundle")
+
+    assert result[0]["original_path"] == "P0001-report-formatted.json"
+    assert result[0]["reason"] == "patchlet_prefixed_report_formatting_scratch"
+
+
+def test_patchlet_prefixed_report_output_txt_is_quarantined(tmp_path: Path):
+    run_ctx = _run_ctx(tmp_path)
+    (run_ctx.execution_root / "patchlet_P0001_report_output.txt").write_text("ok\n", encoding="utf-8")
+
+    result = _quarantine_execution_root_scratch_files(run_ctx, report_path=None, allowed_product_runtime_file="policy.bundle")
+
+    assert result[0]["original_path"] == "patchlet_P0001_report_output.txt"
+    assert result[0]["reason"] == "patchlet_prefixed_report_formatting_scratch"
+
+
+def test_patchlet_prefixed_report_check_json_is_quarantined(tmp_path: Path):
+    run_ctx = _run_ctx(tmp_path)
+    (run_ctx.execution_root / "p0001_report_check.json").write_text("{}", encoding="utf-8")
+
+    result = _quarantine_execution_root_scratch_files(run_ctx, report_path=None, allowed_product_runtime_file="policy.bundle")
+
+    assert result[0]["original_path"] == "p0001_report_check.json"
+    assert result[0]["reason"] in {"patchlet_prefixed_report_formatting_scratch", "role_shaped_report_check_output"}
+
+
+def test_patchlet_prefixed_report_pretty_preserves_content_and_hash(tmp_path: Path):
+    run_ctx = _run_ctx(tmp_path)
+    content = '{\n  "status": "PASS"\n}\n'
+    (run_ctx.execution_root / "p0001_report_pretty.json").write_text(content, encoding="utf-8")
+
+    result = _quarantine_execution_root_scratch_files(run_ctx, report_path=None, allowed_product_runtime_file="policy.bundle")
+
+    quarantined = run_ctx.target_root / result[0]["quarantine_path"]
+    assert quarantined.read_text(encoding="utf-8") == content
+    assert result[0]["sha256"] == hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
+def test_patchlet_prefixed_report_pretty_removed_before_diff_validation(tmp_path: Path):
+    run_ctx = _git_run_ctx(tmp_path)
+    (run_ctx.execution_root / "policy.bundle").write_text("profile=no-compat\nmode=permissive\n", encoding="utf-8")
+    (run_ctx.execution_root / "p0001_report_pretty.json").write_text("{}", encoding="utf-8")
+
+    _quarantine_execution_root_scratch_files(run_ctx, report_path=None, allowed_product_runtime_file="policy.bundle")
+
+    assert not (run_ctx.execution_root / "p0001_report_pretty.json").exists()
+
+
+def test_patchlet_prefixed_report_pretty_recomputes_changed_paths_to_allowed_file_only(tmp_path: Path):
+    run_ctx = _git_run_ctx(tmp_path)
+    before = snapshot_status(run_ctx.execution_root)
+    (run_ctx.execution_root / "policy.bundle").write_text("profile=no-compat\nmode=permissive\n", encoding="utf-8")
+    (run_ctx.execution_root / "p0001_report_pretty.json").write_text("{}", encoding="utf-8")
+
+    _quarantine_execution_root_scratch_files(run_ctx, report_path=None, allowed_product_runtime_file="policy.bundle")
+    after = snapshot_status(run_ctx.execution_root)
+    changed = changed_between(before, after)
+    diff_result = validate_changed_paths(changed, _policy_patchlet())
+
+    assert changed == ["policy.bundle"]
+    assert diff_result.allowed is True
+
+
+def test_random_pretty_json_is_rejected(tmp_path: Path):
+    run_ctx = _run_ctx(tmp_path)
+    (run_ctx.execution_root / "random_pretty.json").write_text("{}", encoding="utf-8")
+
+    result = _quarantine_execution_root_scratch_files(run_ctx, report_path=None, allowed_product_runtime_file="policy.bundle")
+
+    assert result == []
+    assert (run_ctx.execution_root / "random_pretty.json").exists()
+
+
+def test_patchlet_prefixed_pretty_without_report_role_is_rejected(tmp_path: Path):
+    run_ctx = _run_ctx(tmp_path)
+    (run_ctx.execution_root / "p0001_pretty.json").write_text("{}", encoding="utf-8")
+
+    result = _quarantine_execution_root_scratch_files(run_ctx, report_path=None, allowed_product_runtime_file="policy.bundle")
+
+    assert result == []
+    assert (run_ctx.execution_root / "p0001_pretty.json").exists()
+
+
+def test_patchlet_prefixed_runtime_pretty_is_rejected(tmp_path: Path):
+    run_ctx = _run_ctx(tmp_path)
+    (run_ctx.execution_root / "p0001_runtime_pretty.json").write_text("{}", encoding="utf-8")
+
+    result = _quarantine_execution_root_scratch_files(run_ctx, report_path=None, allowed_product_runtime_file="policy.bundle")
+
+    assert result == []
+    assert (run_ctx.execution_root / "p0001_runtime_pretty.json").exists()
+
+
+def test_executable_patchlet_report_pretty_is_rejected(tmp_path: Path):
+    run_ctx = _run_ctx(tmp_path)
+    path = run_ctx.execution_root / "p0001_report_pretty.json"
+    path.write_text("{}", encoding="utf-8")
+    path.chmod(0o755)
+
+    result = _quarantine_execution_root_scratch_files(run_ctx, report_path=None, allowed_product_runtime_file="policy.bundle")
+
+    assert result == []
+    assert path.exists()
+
+
+def test_changed_peer_product_file_still_rejected_with_report_pretty_present(tmp_path: Path):
+    run_ctx = _git_run_ctx(tmp_path)
+    before = snapshot_status(run_ctx.execution_root)
+    (run_ctx.execution_root / "policy.bundle").write_text("profile=no-compat\nmode=permissive\n", encoding="utf-8")
+    (run_ctx.execution_root / "peer.record").write_text("owner=security\n", encoding="utf-8")
+    (run_ctx.execution_root / "p0001_report_pretty.json").write_text("{}", encoding="utf-8")
+
+    _quarantine_execution_root_scratch_files(run_ctx, report_path=None, allowed_product_runtime_file="policy.bundle")
+    after = snapshot_status(run_ctx.execution_root)
+    diff_result = validate_changed_paths(changed_between(before, after), _policy_patchlet())
+
+    assert "peer.record" in diff_result.unauthorized_paths
 
 
 def test_unknown_root_scratch_file_rejected_when_not_declared(tmp_path: Path):
