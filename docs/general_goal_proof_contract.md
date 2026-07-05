@@ -14,6 +14,12 @@ Before product patchlets start, cxor writes `provability/provability_result.json
 
 Global verification writes `master_prompt_concordance_result.json` and `master_prompt_satisfaction_result.json`. DONE requires master prompt concordance, master prompt satisfaction, proven required obligations, transaction groups, integration artifact validation, target hygiene, and no unresolved failures.
 
+Durable object-shaped `probe_artifact_refs` are canonicalized from actual
+artifact files before report validation. Worker-provided hashes are not
+trusted, worker-provided sizes are not trusted, and raw worker metadata is
+preserved for audit. Unsafe paths, missing files, patchlet mismatches, and
+product files remain rejected before independent proof or goal coverage.
+
 Unsupported or ambiguous goals are not marked proven. They stop early with `goal_not_provable`, `goal_ambiguous`, `goal_blocked_by_missing_capability`, `goal_coverage_failed`, `independent_probe_rerun_failed`, `proof_obligation_failed`, `master_prompt_concordance_failed`, or `master_prompt_not_satisfied` diagnostics instead of collapsing to unknown.
 
 ## Decomposition Proof Mapping

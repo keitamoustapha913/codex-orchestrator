@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Probe Artifact Refs Normalization Result",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "kind",
+    "patchlet_id",
+    "attempt_id",
+    "accepted",
+    "canonical_refs",
+    "raw_string_refs",
+    "raw_object_refs",
+    "rejected_refs",
+    "warnings"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "kind": {"const": "probe_artifact_refs_normalization_result"},
+    "patchlet_id": {"type": "string"},
+    "attempt_id": {"type": "string"},
+    "accepted": {"type": "boolean"},
+    "canonical_refs": {"type": "array", "items": {"type": "object"}},
+    "raw_string_refs": {"type": "array", "items": {"type": "string"}},
+    "raw_object_refs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "raw_item_index",
+          "raw_file_index",
+          "raw_item",
+          "raw_file_item",
+          "path",
+          "canonical_sha256",
+          "canonical_size_bytes",
+          "worker_sha256_discarded",
+          "worker_size_bytes_discarded"
+        ],
+        "properties": {
+          "raw_item_index": {"type": "integer", "minimum": 0},
+          "raw_file_index": {"type": "integer", "minimum": 0},
+          "raw_item": {"type": "object"},
+          "raw_file_item": {"type": "object"},
+          "path": {"type": "string"},
+          "canonical_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "canonical_size_bytes": {"type": "integer", "minimum": 0},
+          "worker_sha256_discarded": {"type": "boolean"},
+          "worker_size_bytes_discarded": {"type": "boolean"}
+        },
+        "additionalProperties": true
+      }
+    },
+    "rejected_refs": {"type": "array", "items": {"type": "object"}},
+    "warnings": {"type": "array", "items": {"type": "string"}}
+  },
+  "additionalProperties": false
+}

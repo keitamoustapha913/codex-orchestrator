@@ -50,6 +50,12 @@ future boundary evidence combination, such as an exact line `event_logging=on`
 or matching future key and value. Same-file mention alone is not a future
 claim. Worker text is not proof; independent proof remains required.
 
+Probe evidence follows the same ownership rule: object-shaped
+`probe_artifact_refs` are canonicalized from actual artifact files.
+Worker-provided hashes are not trusted, worker-provided sizes are not trusted,
+and raw worker metadata is preserved for audit. Unsafe paths, missing files,
+patchlet mismatches, and product files remain rejected.
+
 Patchlet scheduling also stays strict after failures. Downstream patchlets do not run after failed dependencies, and scheduler readiness requires accepted dependencies rather than mere attempt existence.
 
 Required artifacts include:

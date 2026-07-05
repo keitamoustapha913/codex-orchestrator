@@ -271,6 +271,11 @@ Safe string refs are normalized only during report ingress when they point to
 existing files under `.artifacts/probes/` for the current patchlet and do not
 escape through symlinks. Unsafe refs fail with structured
 `report_ingestion_result.json` and `report_validation_errors.json` evidence.
+Object-shaped `probe_artifact_refs` are canonicalized from actual artifact
+files: worker-provided hashes are not trusted, worker-provided sizes are not
+trusted, and raw worker metadata is preserved for audit. Unsafe paths, missing
+files, patchlet mismatches, and product files remain rejected before
+independent proof or goal coverage.
 The repeated string-ref shape signature is `probe_artifact_refs_not_objects`,
 not `unknown_repeated_failure`. Report-only repair policy forbids
 product/runtime edits and probe evidence mutation; full patchlet repair remains

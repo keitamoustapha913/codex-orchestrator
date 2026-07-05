@@ -81,6 +81,11 @@ into canonical objects and unsafe refs fail with
 `report_ingestion_result.json` plus `report_validation_errors.json`. See
 `docs/report_contract.md` for the canonical object shape, valid and invalid
 examples, `probe_artifact_refs_not_objects`, and the report-only repair policy.
+Object-shaped `probe_artifact_refs` are canonicalized from actual artifact
+files. Worker-provided hashes are not trusted, worker-provided sizes are not
+trusted, and raw worker metadata is preserved for audit in
+`probe_artifact_refs_normalization_result.json`. unsafe paths, missing files,
+patchlet mismatches, and product files remain rejected.
 
 Real Codex shorthand `semantic_goal_results` are accepted only as raw worker
 semantic claims. They are linked to the current goal item, proof obligation,

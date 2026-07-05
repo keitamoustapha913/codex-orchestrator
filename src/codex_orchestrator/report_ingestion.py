@@ -186,6 +186,7 @@ def ingest_patchlet_report(
     canonical_report_path = ctx.paths.reports_dir / f"{patchlet_id}.json"
     ingestion_path = gates_dir / "report_ingestion_result.json"
     errors_path = gates_dir / "report_validation_errors.json"
+    probe_artifact_refs_normalization_path = gates_dir / "probe_artifact_refs_normalization_result.json"
     semantic_normalization_path = gates_dir / "semantic_goal_results_normalization_result.json"
     probe_commands_normalization_path = gates_dir / "probe_commands_normalization_result.json"
     append_operator_event(
@@ -206,6 +207,19 @@ def ingest_patchlet_report(
     raw_report = read_json(raw_report_path)
     raw_refs = raw_report.get("probe_artifact_refs") or []
     normalization = normalize_probe_artifact_refs(raw_refs, target_repo_root=ctx.root, patchlet_id=patchlet_id)
+    probe_artifact_refs_normalization_result = {
+        "schema_version": "1.0",
+        "kind": "probe_artifact_refs_normalization_result",
+        "patchlet_id": patchlet_id,
+        "attempt_id": attempt_id,
+        "accepted": not normalization.errors,
+        "canonical_refs": normalization.normalized_refs,
+        "raw_string_refs": normalization.raw_string_refs,
+        "raw_object_refs": normalization.raw_object_refs,
+        "rejected_refs": normalization.rejected_refs,
+        "warnings": normalization.warnings,
+    }
+    write_json(probe_artifact_refs_normalization_path, probe_artifact_refs_normalization_result)
     canonical_report: dict[str, Any] | None = None
     validation_errors: list[dict[str, Any]] = list(normalization.errors)
     accepted = False
@@ -331,7 +345,8 @@ def ingest_patchlet_report(
         "canonical_report_path": _rel(ctx, canonical_report_path) if accepted else None,
         "normalization_applied": normalization.normalization_applied or acceptance_normalized or bool(probe_commands_normalization_result),
         "normalization_kinds": (
-            (["probe_artifact_refs_string_paths_to_objects"] if normalization.normalization_applied else [])
+            (["probe_artifact_refs_string_paths_to_objects"] if normalization.raw_string_refs and normalization.normalization_applied else [])
+            + (["probe_artifact_refs_object_metadata_from_actual_files"] if normalization.raw_object_refs and normalization.normalization_applied else [])
             + (["acceptance_criteria_result_status_prefix"] if acceptance_normalized else [])
             + (["deterministic_run_counts_objects_to_strings"] if run_counts_normalized else [])
             + (["probe_commands_objects_to_strings"] if probe_commands_normalization_result and probe_commands_normalization_result.get("raw_probe_command_items") else [])
@@ -340,6 +355,7 @@ def ingest_patchlet_report(
         "acceptance_criteria_result_normalization": acceptance_normalization,
         "raw_probe_artifact_refs": normalization.raw_string_refs,
         "canonical_probe_artifact_refs": canonical_report.get("probe_artifact_refs", []) if canonical_report else [],
+        "probe_artifact_refs_normalization_result_path": _rel(ctx, probe_artifact_refs_normalization_path),
         "semantic_goal_results_normalization_result_path": _rel(ctx, semantic_normalization_path) if semantic_normalization_result else None,
         "probe_commands_normalization_result_path": _rel(ctx, probe_commands_normalization_path) if probe_commands_normalization_result else None,
         "worker_semantic_claim_count": len((semantic_normalization_result or {}).get("accepted_raw_claims", [])),
@@ -351,7 +367,7 @@ def ingest_patchlet_report(
         "normalized_failure_signature": normalized_signature,
         "repair_hint": validation_errors[0].get("repair_hint") if validation_errors else None,
         "operator_summary": (
-            f"Normalized {len(normalization.raw_string_refs)} probe artifact path refs for {patchlet_id}."
+            f"Normalized probe artifact refs for {patchlet_id}."
             if normalization.normalization_applied
             else (f"Rejected report for {patchlet_id}: {normalized_signature}." if not accepted else f"Report ingestion passed for {patchlet_id}.")
         ),
@@ -363,8 +379,8 @@ def ingest_patchlet_report(
             event_type="report_ingestion_normalized",
             severity="info",
             stage="PATCHLET_EXECUTION_IN_PROGRESS",
-            summary=f"report ingestion {patchlet_id} normalized {len(normalization.raw_string_refs)} probe artifact path refs.",
-            artifact_paths=[_rel(ctx, ingestion_path) or "", _rel(ctx, raw_report_path) or "", _rel(ctx, canonical_report_path) or ""],
+            summary=f"report ingestion {patchlet_id} normalized probe artifact refs.",
+            artifact_paths=[_rel(ctx, ingestion_path) or "", _rel(ctx, probe_artifact_refs_normalization_path) or "", _rel(ctx, raw_report_path) or "", _rel(ctx, canonical_report_path) or ""],
             patchlet_id=patchlet_id,
             attempt_id=attempt_id,
             details={"normalization_kinds": result["normalization_kinds"], "normalization_applied": True},

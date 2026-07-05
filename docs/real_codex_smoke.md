@@ -84,6 +84,11 @@ by report ingestion when they point to existing files under
 specific signatures such as `probe_artifact_refs_not_objects` or
 `probe_artifact_refs_unsafe_path`; this class must not be reduced to
 `unknown_repeated_failure`. See `docs/report_contract.md`.
+Object-shaped `probe_artifact_refs` are canonicalized from actual artifact
+files. Worker-provided hashes are not trusted, worker-provided sizes are not
+trusted, and raw worker metadata is preserved for audit in
+`probe_artifact_refs_normalization_result.json`. Unsafe paths, missing files,
+patchlet mismatches, and product files remain rejected.
 
 Workers edit product/runtime files only in `CXOR_EXECUTION_ROOT`.
 `CXOR_TARGET_ROOT` product/runtime files are read-only to the worker; target

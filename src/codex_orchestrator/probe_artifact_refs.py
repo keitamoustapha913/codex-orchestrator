@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +15,8 @@ class ProbeArtifactRefNormalizationResult:
     normalization_applied: bool
     errors: list[dict[str, Any]]
     warnings: list[str]
+    raw_object_refs: list[dict[str, Any]] = field(default_factory=list)
+    rejected_refs: list[dict[str, Any]] = field(default_factory=list)
 
 
 def _repo_relative(path: Path, root: Path) -> str | None:
@@ -106,22 +108,30 @@ def _resolve_string_ref(value: str, *, target_repo_root: Path, pointer: str) -> 
     return resolved, rel, None
 
 
-def _validate_object_ref(item: dict[str, Any], *, target_repo_root: Path, patchlet_id: str, pointer: str) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
+def _validate_object_ref(
+    item: dict[str, Any],
+    *,
+    target_repo_root: Path,
+    patchlet_id: str,
+    pointer: str,
+    raw_item_index: int,
+) -> tuple[dict[str, Any] | None, list[dict[str, Any]], list[dict[str, Any]]]:
     errors: list[dict[str, Any]] = []
     for field in ("patchlet_id", "probe_root", "run_id"):
         if not item.get(field):
             errors.append(_error("probe_artifact_refs_missing_required_field", f"probe artifact ref missing required field: {field}", value=item, pointer=pointer))
     if errors:
-        return None, errors
+        return None, errors, []
     if item["patchlet_id"] != patchlet_id:
-        return None, [_error("probe_artifact_refs_patchlet_mismatch", f"probe artifact ref patchlet_id {item['patchlet_id']} does not match report patchlet_id {patchlet_id}", value=item, pointer=pointer)]
+        return None, [_error("probe_artifact_refs_patchlet_mismatch", f"probe artifact ref patchlet_id {item['patchlet_id']} does not match report patchlet_id {patchlet_id}", value=item, pointer=pointer)], []
     root = target_repo_root.resolve()
     probe_root_path = (target_repo_root / item["probe_root"]).resolve()
     artifacts = root / ".artifacts" / "probes"
     if not _is_under(probe_root_path, artifacts):
-        return None, [_error("probe_artifact_refs_unsafe_path", f"probe_root must be under .artifacts/probes/: {item['probe_root']}", value=item, pointer=pointer)]
+        return None, [_error("probe_artifact_refs_unsafe_path", f"probe_root must be under .artifacts/probes/: {item['probe_root']}", value=item, pointer=pointer)], []
     copied = dict(item)
     safe_files: list[dict[str, Any]] = []
+    raw_audit_items: list[dict[str, Any]] = []
     for index, file_item in enumerate(item.get("files") or []):
         path_value = file_item.get("path") if isinstance(file_item, dict) else None
         if not isinstance(path_value, str):
@@ -139,14 +149,31 @@ def _validate_object_ref(item: dict[str, Any], *, target_repo_root: Path, patchl
         merged = dict(file_item)
         merged.setdefault("kind", metadata["kind"])
         merged["path"] = rel
-        merged.setdefault("sha256", metadata["sha256"])
-        merged.setdefault("size_bytes", metadata["size_bytes"])
+        worker_sha256 = merged.get("sha256")
+        worker_size_bytes = merged.get("size_bytes")
+        merged["sha256"] = metadata["sha256"]
+        merged["size_bytes"] = metadata["size_bytes"]
+        if "extension" in metadata:
+            merged.setdefault("extension", metadata["extension"])
         safe_files.append(merged)
+        raw_audit_items.append(
+            {
+                "raw_item_index": raw_item_index,
+                "raw_file_index": index,
+                "raw_item": item,
+                "raw_file_item": file_item,
+                "path": rel,
+                "canonical_sha256": metadata["sha256"],
+                "canonical_size_bytes": metadata["size_bytes"],
+                "worker_sha256_discarded": worker_sha256 is not None and worker_sha256 != metadata["sha256"],
+                "worker_size_bytes_discarded": worker_size_bytes is not None and worker_size_bytes != metadata["size_bytes"],
+            }
+        )
     if errors:
-        return None, errors
+        return None, errors, []
     if item.get("files") is not None:
         copied["files"] = sorted(safe_files, key=lambda entry: entry["path"])
-    return copied, []
+    return copied, [], raw_audit_items
 
 
 def normalize_probe_artifact_refs(
@@ -160,6 +187,8 @@ def normalize_probe_artifact_refs(
     target_repo_root = Path(target_repo_root)
     raw_string_refs: list[str] = []
     errors: list[dict[str, Any]] = []
+    rejected_refs: list[dict[str, Any]] = []
+    raw_object_refs: list[dict[str, Any]] = []
     groups: dict[tuple[str, str, str], dict[str, Any]] = {}
     preserved: list[dict[str, Any]] = []
     for index, item in enumerate(raw_refs or []):
@@ -169,23 +198,31 @@ def normalize_probe_artifact_refs(
             path, rel, error = _resolve_string_ref(item, target_repo_root=target_repo_root, pointer=pointer)
             if error:
                 errors.append(error)
+                rejected_refs.append({"raw_item_index": index, "raw_item": item, "errors": [error]})
                 continue
             assert path is not None and rel is not None
             ref, error = _derive_ref(path, rel=rel, target_repo_root=target_repo_root, patchlet_id=patchlet_id, pointer=pointer)
             if error:
                 errors.append(error)
+                rejected_refs.append({"raw_item_index": index, "raw_item": item, "errors": [error]})
                 continue
             assert ref is not None
             key = (ref["patchlet_id"], ref["probe_root"], ref["run_id"])
             group = groups.setdefault(key, {"patchlet_id": ref["patchlet_id"], "probe_root": ref["probe_root"], "run_id": ref["run_id"], "files": []})
             group["files"].extend(ref["files"])
         elif isinstance(item, dict):
-            ref, ref_errors = _validate_object_ref(item, target_repo_root=target_repo_root, patchlet_id=patchlet_id, pointer=pointer)
+            ref, ref_errors, raw_audit_items = _validate_object_ref(item, target_repo_root=target_repo_root, patchlet_id=patchlet_id, pointer=pointer, raw_item_index=index)
             errors.extend(ref_errors)
+            if ref_errors:
+                rejected_refs.append({"raw_item_index": index, "raw_item": item, "errors": ref_errors})
             if ref:
                 preserved.append(ref)
+                if raw_audit_items:
+                    raw_object_refs.extend(raw_audit_items)
         else:
-            errors.append(_error("patchlet_report_schema_violation", "probe_artifact_refs entries must be objects or raw string paths at ingress", value=item, pointer=pointer))
+            error = _error("patchlet_report_schema_violation", "probe_artifact_refs entries must be objects or raw string paths at ingress", value=item, pointer=pointer)
+            errors.append(error)
+            rejected_refs.append({"raw_item_index": index, "raw_item": item, "errors": [error]})
     normalized = preserved + list(groups.values())
     merged: dict[tuple[str, str, str], dict[str, Any]] = {}
     for ref in normalized:
@@ -205,7 +242,9 @@ def normalize_probe_artifact_refs(
     return ProbeArtifactRefNormalizationResult(
         normalized_refs=output,
         raw_string_refs=raw_string_refs,
-        normalization_applied=bool(raw_string_refs) and not errors,
+        normalization_applied=(bool(raw_string_refs) or bool(raw_object_refs)) and not errors,
         errors=errors,
-        warnings=[],
+        warnings=["object_probe_artifact_metadata_recomputed"] if raw_object_refs and not errors else [],
+        raw_object_refs=raw_object_refs,
+        rejected_refs=rejected_refs,
     )

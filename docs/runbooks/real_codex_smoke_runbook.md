@@ -158,6 +158,11 @@ normalization or rejection is recorded in `report_ingestion_result.json` and
 `report_validation_errors.json`. The specific string-ref shape failure is
 `probe_artifact_refs_not_objects`; runbook evidence should not reduce this
 class to `unknown_repeated_failure`. See `docs/report_contract.md`.
+Object-shaped `probe_artifact_refs` are canonicalized from actual artifact
+files. Worker-provided hashes are not trusted, worker-provided sizes are not
+trusted, and raw worker metadata is preserved for audit. Unsafe paths, missing
+files, patchlet mismatches, and product files remain rejected; do not treat a
+worker hash as proof.
 
 For scratch artifacts, inspect
 `.codex-orchestrator/runs/<attempt>/gates/scratch_artifact_quarantine_result.json`.
