@@ -12,6 +12,7 @@ from pathlib import Path
 
 from codex_orchestrator.codex_adapter import worker_for_mode
 from codex_orchestrator.codex_execution_policy import soft_deadline_seconds
+from codex_orchestrator.control import honor_stop_if_requested, stop_requested
 from codex_orchestrator.errors import (
     WorkerExecutionError,
     WorkerInterruptedError,
@@ -2338,6 +2339,30 @@ def run_all_patchlets(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
         if result.status == "NO_PENDING_PATCHLETS":
             break
         results.append(result)
+        request = stop_requested(ctx)
+        if request:
+            _append_patchlet_event(
+                ctx,
+                "stop_request_detected_between_patchlets",
+                patchlet_id=result.patchlet_id or None,
+                severity="warning",
+                summary="Stop request detected at the between-patchlet safe point.",
+                artifact_paths=[".codex-orchestrator/control/stop_requested.json"],
+                next_action="Honoring stop request before selecting another patchlet.",
+                details={"requested_mode": request.get("requested_mode")},
+            )
+            if honor_stop_if_requested(ctx, stop_stage=load_state(ctx).stage):
+                _append_patchlet_event(
+                    ctx,
+                    "stop_after_current_honored",
+                    patchlet_id=result.patchlet_id or None,
+                    severity="warning",
+                    summary="Stop-after-current honored before starting the next patchlet.",
+                    artifact_paths=[".codex-orchestrator/control/stop_result.json"],
+                    next_action="Review partial progress or apply accepted checkpoint with --allow-partial.",
+                    details={"suppressed_next_patchlet": True},
+                )
+                break
         if result.status in {"FAILED_WITH_EVIDENCE", "BLOCKED_WITH_EVIDENCE"}:
             break
     return results

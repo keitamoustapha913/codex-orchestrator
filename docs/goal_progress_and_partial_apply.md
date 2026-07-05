@@ -4,9 +4,21 @@ cxor writes `.codex-orchestrator/goal_progress.json` as the latest goal progress
 
 Use `cxor goal-progress --repo <repo>` for human output, `cxor goal-progress --repo <repo> --json` for machine output, and `cxor goal-progress --repo <repo> --watch` for repeated updates. `cxor status --json`, `cxor monitor`, and `cxor auto --live-progress` expose goal progress and proof events.
 
-Use `cxor stop --repo <repo>` to write `control/stop_requested.json`. The orchestrator stops at a safe point and writes `control/stop_result.json` with the latest accepted checkpoint, applyable progress, and preserved unaccepted attempts.
+Use `cxor stop --repo <repo>` to write `control/stop_requested.json`. For
+`--after-current-attempt`, the safe point is after the current patchlet attempt
+has reached a terminal accepted, failed, or blocked state and before the next
+patchlet is selected. At that point the orchestrator writes
+`control/stop_result.json`, records the latest accepted checkpoint, and the next
+patchlet does not start. A stop request is not treated as DONE or as a product
+failure.
 
-Partial apply is explicit. For a stopped non-DONE workflow, `cxor apply-results --repo <repo> --mode patch --scope accepted --allow-partial` applies only the accepted integration state. Without `--allow-partial`, stopped workflows are refused. If no accepted checkpoint exists, partial apply is refused even with `--allow-partial`.
+Partial apply is explicit. For a stopped non-DONE workflow,
+`cxor apply-results --repo <repo> --mode patch --scope accepted --allow-partial`
+applies only the accepted integration state. Pending and unaccepted patchlet
+work is not applied. Without `--allow-partial`, stopped workflows are refused.
+If no accepted checkpoint exists, `stop_result.json` records
+`applyable_progress=false` and partial apply is refused even with
+`--allow-partial`.
 
 In-progress unaccepted worker changes are never applied by default. `partial_apply_result.json` records the accepted checkpoint, mode, scope, warning that the full master prompt may not be satisfied, and whether the working tree was mutated.
 

@@ -205,7 +205,9 @@ def _master_prompt_proof_status(ctx: TargetRepoContext) -> dict:
 def _applyable_progress_status(ctx: TargetRepoContext, goal_progress: dict) -> dict:
     path = ctx.paths.workflow_dir / "goal_progress.json"
     progress = read_json(path) if path.exists() else {}
-    checkpoint = progress.get("latest_accepted_checkpoint")
+    stop_result_path = ctx.paths.workflow_dir / "control" / "stop_result.json"
+    stop_result = read_json(stop_result_path) if stop_result_path.exists() else {}
+    checkpoint = stop_result.get("latest_accepted_checkpoint") or progress.get("latest_accepted_checkpoint")
     return {
         "available": bool(checkpoint),
         "latest_accepted_checkpoint": checkpoint,

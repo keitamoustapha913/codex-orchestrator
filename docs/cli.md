@@ -60,6 +60,15 @@ cxor reset
 cxor workflows
 ```
 
+`cxor stop --after-current-attempt` records `control/stop_requested.json`.
+During patchlet execution, the request is honored at the between-patchlet safe
+point after the current attempt reaches a terminal state and before another
+patchlet is selected. The orchestrator writes `control/stop_result.json`, the
+next patchlet does not start, and `cxor apply-results --scope accepted
+--allow-partial` applies only the accepted checkpoint. Pending or unaccepted
+work is not applied. If no accepted checkpoint exists, `stop_result.json`
+records `applyable_progress=false`.
+
 Repair loop:
 `failure -> classification -> repair plan -> apply repair -> regenerate patchlets -> verify`
 
