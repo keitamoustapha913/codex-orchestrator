@@ -91,6 +91,70 @@ def _normalize_deterministic_run_counts(report: dict[str, Any]) -> tuple[dict[st
     return canonical, True
 
 
+def _normalize_probe_commands(
+    report: dict[str, Any],
+    *,
+    patchlet_id: str,
+    attempt_id: str,
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    commands = report.get("probe_commands")
+    if not isinstance(commands, list):
+        return report, None
+
+    canonical_commands: list[Any] = []
+    raw_items: list[dict[str, Any]] = []
+    rejected_items: list[dict[str, Any]] = []
+    changed = False
+
+    for index, item in enumerate(commands):
+        if isinstance(item, str):
+            canonical_commands.append(item)
+            continue
+        if isinstance(item, dict):
+            command = item.get("command")
+            if isinstance(command, str) and command.strip():
+                normalized_command = command.strip()
+                canonical_commands.append(normalized_command)
+                raw_items.append(
+                    {
+                        "raw_item_index": index,
+                        "raw_item": item,
+                        "normalized_command": normalized_command,
+                        "accepted": True,
+                    }
+                )
+                changed = True
+                continue
+            canonical_commands.append(item)
+            rejected_items.append(
+                {
+                    "raw_item_index": index,
+                    "raw_item": item,
+                    "accepted": False,
+                    "reason": "missing_or_empty_command",
+                }
+            )
+            continue
+        canonical_commands.append(item)
+
+    if not changed and not rejected_items:
+        return report, None
+
+    canonical = dict(report)
+    canonical["probe_commands"] = canonical_commands
+    result = {
+        "schema_version": "1.0",
+        "kind": "probe_commands_normalization_result",
+        "patchlet_id": patchlet_id,
+        "attempt_id": attempt_id,
+        "accepted": not rejected_items,
+        "canonical_probe_commands": [item for item in canonical_commands if isinstance(item, str)],
+        "raw_probe_command_items": raw_items,
+        "rejected_probe_command_items": rejected_items,
+    }
+    return canonical, result
+
+
 def _read_workflow_json(ctx: TargetRepoContext, *parts: str) -> dict[str, Any]:
     path = ctx.paths.workflow_dir.joinpath(*parts)
     return read_json(path) if path.exists() else {}
@@ -123,6 +187,7 @@ def ingest_patchlet_report(
     ingestion_path = gates_dir / "report_ingestion_result.json"
     errors_path = gates_dir / "report_validation_errors.json"
     semantic_normalization_path = gates_dir / "semantic_goal_results_normalization_result.json"
+    probe_commands_normalization_path = gates_dir / "probe_commands_normalization_result.json"
     append_operator_event(
         ctx.root,
         event_type="report_ingestion_started",
@@ -150,6 +215,13 @@ def ingest_patchlet_report(
         canonical_report["probe_artifact_refs"] = normalization.normalized_refs
         canonical_report, acceptance_normalized, acceptance_normalization = _normalize_report_acceptance_criteria(canonical_report)
         canonical_report, run_counts_normalized = _normalize_deterministic_run_counts(canonical_report)
+        canonical_report, probe_commands_normalization_result = _normalize_probe_commands(
+            canonical_report,
+            patchlet_id=patchlet_id,
+            attempt_id=attempt_id,
+        )
+        if probe_commands_normalization_result is not None:
+            write_json(probe_commands_normalization_path, probe_commands_normalization_result)
         semantic_normalization_result = None
         if isinstance(canonical_report.get("semantic_goal_results"), list):
             proof_obligations = _read_workflow_json(ctx, "proof_obligations.json")
@@ -163,8 +235,21 @@ def ingest_patchlet_report(
                 proof_obligations=proof_obligations,
                 probe_plan=probe_plan,
                 slice_change_boundary=patchlet.get("slice_change_boundary"),
+                allowed_product_runtime_file=patchlet.get("allowed_product_runtime_file"),
             )
             write_json(semantic_normalization_path, semantic_normalization_result)
+            boundary_evidence_path = gates_dir / "boundary_evidence_match_result.json"
+            write_json(
+                boundary_evidence_path,
+                {
+                    "schema_version": "1.0",
+                    "kind": "boundary_evidence_match_result",
+                    "patchlet_id": patchlet_id,
+                    "work_slice_id": patchlet.get("work_slice_id") or "",
+                    "accepted": semantic_normalization_result.get("accepted"),
+                    "matches": semantic_normalization_result.get("boundary_evidence_matches", []),
+                },
+            )
             canonical_report["semantic_goal_results_raw"] = raw_report.get("semantic_goal_results", [])
             canonical_report["semantic_goal_results"] = semantic_normalization_result.get("canonical_results_from_worker", [])
             canonical_report["worker_semantic_claims"] = semantic_normalization_result.get("accepted_raw_claims", [])
@@ -222,6 +307,7 @@ def ingest_patchlet_report(
         acceptance_normalized = False
         acceptance_normalization = None
         run_counts_normalized = False
+        probe_commands_normalization_result = None
         semantic_normalization_result = None
     normalized_signature = validation_errors[0].get("normalized_signature") if validation_errors else None
     write_json(
@@ -243,17 +329,19 @@ def ingest_patchlet_report(
         "patchlet_id": patchlet_id,
         "raw_report_path": _rel(ctx, raw_report_path),
         "canonical_report_path": _rel(ctx, canonical_report_path) if accepted else None,
-        "normalization_applied": normalization.normalization_applied or acceptance_normalized,
+        "normalization_applied": normalization.normalization_applied or acceptance_normalized or bool(probe_commands_normalization_result),
         "normalization_kinds": (
             (["probe_artifact_refs_string_paths_to_objects"] if normalization.normalization_applied else [])
             + (["acceptance_criteria_result_status_prefix"] if acceptance_normalized else [])
             + (["deterministic_run_counts_objects_to_strings"] if run_counts_normalized else [])
+            + (["probe_commands_objects_to_strings"] if probe_commands_normalization_result and probe_commands_normalization_result.get("raw_probe_command_items") else [])
             + (["semantic_goal_results_shorthand_to_worker_claims"] if semantic_normalization_result and semantic_normalization_result.get("accepted_raw_claims") else [])
         ),
         "acceptance_criteria_result_normalization": acceptance_normalization,
         "raw_probe_artifact_refs": normalization.raw_string_refs,
         "canonical_probe_artifact_refs": canonical_report.get("probe_artifact_refs", []) if canonical_report else [],
         "semantic_goal_results_normalization_result_path": _rel(ctx, semantic_normalization_path) if semantic_normalization_result else None,
+        "probe_commands_normalization_result_path": _rel(ctx, probe_commands_normalization_path) if probe_commands_normalization_result else None,
         "worker_semantic_claim_count": len((semantic_normalization_result or {}).get("accepted_raw_claims", [])),
         "validation": {
             "valid": validation_valid,
@@ -304,6 +392,33 @@ def ingest_patchlet_report(
             patchlet_id=patchlet_id,
             attempt_id=attempt_id,
             details={"normalization_kind": "deterministic_run_counts_objects_to_strings"},
+        )
+    if probe_commands_normalization_result and probe_commands_normalization_result.get("raw_probe_command_items"):
+        append_operator_event(
+            ctx.root,
+            event_type="probe_commands_normalized",
+            severity="info",
+            stage="PATCHLET_EXECUTION_IN_PROGRESS",
+            summary=f"report ingestion {patchlet_id} normalized object-shaped probe_commands.",
+            artifact_paths=[_rel(ctx, probe_commands_normalization_path) or ""],
+            patchlet_id=patchlet_id,
+            attempt_id=attempt_id,
+            details={
+                "normalization_kind": "probe_commands_objects_to_strings",
+                "normalized_count": len(probe_commands_normalization_result.get("raw_probe_command_items", [])),
+            },
+        )
+    if probe_commands_normalization_result and probe_commands_normalization_result.get("rejected_probe_command_items"):
+        append_operator_event(
+            ctx.root,
+            event_type="probe_commands_rejected",
+            severity="error",
+            stage="PATCHLET_EXECUTION_IN_PROGRESS",
+            summary=f"report ingestion {patchlet_id} rejected malformed object-shaped probe_commands.",
+            artifact_paths=[_rel(ctx, probe_commands_normalization_path) or ""],
+            patchlet_id=patchlet_id,
+            attempt_id=attempt_id,
+            details={"rejected_probe_command_items": probe_commands_normalization_result.get("rejected_probe_command_items", [])},
         )
     append_operator_event(
         ctx.root,

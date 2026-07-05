@@ -219,7 +219,7 @@ def verify_global(ctx: TargetRepoContext) -> GlobalVerificationResult:
                 if wrapper_gate.get("accepted") is not True:
                     failed.append(pid)
                     continue
-        if patchlet_status in {"FAILED_WITH_EVIDENCE", "BLOCKED_WITH_EVIDENCE"}:
+        if patchlet_status in {"FAILED_WITH_EVIDENCE", "BLOCKED_WITH_EVIDENCE", "BLOCKED_BY_FAILED_DEPENDENCY"}:
             failed.append(pid)
             continue
         report_path = ctx.paths.reports_dir / f"{pid}.json"
@@ -235,7 +235,7 @@ def verify_global(ctx: TargetRepoContext) -> GlobalVerificationResult:
             proven.append(pid)
             passed_probe_commands.extend(report.get("probe_commands", []))
             evidence.extend(report.get("probe_artifact_refs", []))
-        elif report["status"] in {"FAILED_WITH_EVIDENCE", "BLOCKED_WITH_EVIDENCE"}:
+        elif report["status"] in {"FAILED_WITH_EVIDENCE", "BLOCKED_WITH_EVIDENCE", "BLOCKED_BY_FAILED_DEPENDENCY"}:
             failed.append(pid)
             failed_probe_commands.extend(report.get("probe_commands", []))
         else:

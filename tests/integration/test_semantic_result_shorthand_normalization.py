@@ -49,6 +49,48 @@ def _normalize(raw_items):
     return normalize_semantic_goal_results(raw_items=raw_items, **_ctx())
 
 
+def _route_ctx():
+    return {
+        "patchlet_id": "P0001",
+        "work_slice_id": "WS001",
+        "selected_goal_item_ids": ["GI001"],
+        "selected_proof_obligation_ids": ["PO001"],
+        "allowed_product_runtime_file": "gateway.routes",
+        "proof_obligations": {
+            "obligations": [
+                {
+                    "obligation_id": "PO001",
+                    "goal_item_ids": ["GI001"],
+                    "required": True,
+                    "claim": "The accepted integration state has gateway.routes containing /health -> ready-health.",
+                    "target_boundaries": ["gateway.routes"],
+                },
+                {
+                    "obligation_id": "PO002",
+                    "goal_item_ids": ["GI002"],
+                    "required": True,
+                    "claim": "The accepted integration state has policy.rules containing default_action=deny.",
+                    "target_boundaries": ["policy.rules"],
+                },
+            ]
+        },
+        "probe_plan": {
+            "probes": [
+                {
+                    "probe_id": "GP001",
+                    "obligation_ids": ["PO001"],
+                    "expected_observation": {"type": "file_contains", "value": "/health -> ready-health"},
+                }
+            ]
+        },
+        "slice_change_boundary": None,
+    }
+
+
+def _normalize_route(raw_items):
+    return normalize_semantic_goal_results(raw_items=raw_items, **_route_ctx())
+
+
 def test_real_codex_goal_item_result_shorthand_is_accepted_as_raw_claim():
     result = _normalize([{"goal_item": "GI001", "result": "status updated from pending to ready-no-compat without changing reserved keys"}])
     assert result["accepted"] is True
@@ -123,4 +165,123 @@ def test_shorthand_result_accepts_text_that_mentions_current_slice_boundary():
 def test_shorthand_result_schema_validation_passes_after_normalization():
     result = _normalize([{"goal_item": "GI001", "result": "status=ready-no-compat"}])
     assert result["kind"] == "semantic_goal_results_normalization_result"
+    assert result["accepted"] is True
+
+
+def test_route_style_shorthand_mentions_current_boundary_by_file_route_and_target():
+    result = _normalize_route([
+        {"goal_item": "GI001", "result": "Updated gateway.routes only; /health now routes to ready-health."}
+    ])
+    assert result["accepted"] is True
+    match = result["accepted_raw_claims"][0]["boundary_evidence_match"]
+    assert {row["token"] for row in match["matched_evidence"]} >= {"gateway.routes", "/health", "ready-health"}
+
+
+def test_route_style_shorthand_mentions_current_boundary_by_route_and_target_without_exact_line():
+    result = _normalize_route([
+        {"goal_item": "GI001", "result": "/health now routes to ready-health without touching other files."}
+    ])
+    assert result["accepted"] is True
+
+
+def test_route_style_shorthand_preserves_raw_worker_output():
+    raw = {"goal_item": "GI001", "result": "Updated gateway.routes only; /health now routes to ready-health."}
+    result = _normalize_route([raw])
+    assert result["accepted_raw_claims"][0]["raw_item"] == raw
+
+
+def test_route_style_shorthand_rejects_vague_route_claim():
+    result = _normalize_route([{"goal_item": "GI001", "result": "fixed"}])
+    assert result["accepted"] is False
+    assert result["rejected_raw_claims"][0]["error_code"] == "VAGUE_RESULT_TEXT"
+
+
+def test_route_style_shorthand_rejects_future_file_claims():
+    result = _normalize_route([
+        {"goal_item": "GI001", "result": "gateway.routes is done and policy.rules default_action=deny is also complete."}
+    ])
+    assert result["accepted"] is False
+    assert result["rejected_raw_claims"][0]["error_code"] == "FUTURE_SLICE_CLAIM"
+
+
+def test_route_style_shorthand_rejects_future_route_claims():
+    ctx = _route_ctx()
+    ctx["proof_obligations"]["obligations"].append(
+        {
+            "obligation_id": "PO003",
+            "goal_item_ids": ["GI003"],
+            "required": True,
+            "claim": "The accepted state has gateway.routes containing /api -> ready-api.",
+            "target_boundaries": ["gateway.routes"],
+        }
+    )
+    ctx["slice_change_boundary"] = {"forbidden_future_proof_obligation_ids": ["PO003"]}
+    result = normalize_semantic_goal_results(
+        raw_items=[{"goal_item": "GI001", "result": "/health routes to ready-health and /api -> ready-api is complete."}],
+        **ctx,
+    )
+    assert result["accepted"] is False
+    assert result["rejected_raw_claims"][0]["error_code"] == "FUTURE_SLICE_CLAIM"
+
+
+def test_section_style_shorthand_mentions_current_boundary():
+    ctx = _ctx()
+    ctx["allowed_product_runtime_file"] = "policy.bundle"
+    ctx["slice_change_boundary"] = {
+        "boundary_type": "section_key_value_update",
+        "section": "[runtime]",
+        "allowed_changes": [{"section": "[runtime]", "key": "mode", "old_value": "permissive", "new_value": "strict"}],
+    }
+    ctx["proof_obligations"]["obligations"][0]["claim"] = "The accepted state has policy.bundle runtime mode strict."
+    ctx["probe_plan"]["probes"][0]["expected_observation"]["value"] = "mode=strict"
+    result = normalize_semantic_goal_results(
+        raw_items=[{"goal_item": "GI001", "result": "runtime mode is now strict in policy.bundle"}],
+        **ctx,
+    )
+    assert result["accepted"] is True
+
+
+def test_line_exact_shorthand_mentions_current_boundary():
+    ctx = _ctx()
+    ctx["allowed_product_runtime_file"] = "ownership.record"
+    ctx["slice_change_boundary"] = {
+        "boundary_type": "line_exact_change",
+        "allowed_changes": [{"old_line": "owner: unknown", "new_line": "owner: platform"}],
+    }
+    ctx["proof_obligations"]["obligations"][0]["claim"] = "The accepted state contains owner: platform."
+    ctx["probe_plan"]["probes"][0]["expected_observation"]["value"] = "owner: platform"
+    result = normalize_semantic_goal_results(
+        raw_items=[{"goal_item": "GI001", "result": "owner: platform is present in ownership.record"}],
+        **ctx,
+    )
+    assert result["accepted"] is True
+
+
+def test_boundary_matcher_uses_patchlet_plan_not_hardcoded_filename():
+    result = normalize_semantic_goal_results(
+        raw_items=[{"goal_item": "GI001", "result": "control.plan has lane=open now"}],
+        patchlet_id="P0101",
+        work_slice_id="WS101",
+        selected_goal_item_ids=["GI001"],
+        selected_proof_obligation_ids=["PO001"],
+        allowed_product_runtime_file="control.plan",
+        proof_obligations={"obligations": [{"obligation_id": "PO001", "goal_item_ids": ["GI001"], "claim": "control.plan contains lane=open"}]},
+        probe_plan={"probes": [{"probe_id": "GP001", "obligation_ids": ["PO001"], "expected_observation": {"value": "lane=open"}}]},
+        slice_change_boundary=None,
+    )
+    assert result["accepted"] is True
+
+
+def test_boundary_matcher_second_fixture_different_names_and_extensions():
+    result = normalize_semantic_goal_results(
+        raw_items=[{"goal_item": "GI001", "result": "rollout.table now contains ring alpha"}],
+        patchlet_id="P0101",
+        work_slice_id="WS101",
+        selected_goal_item_ids=["GI001"],
+        selected_proof_obligation_ids=["PO001"],
+        allowed_product_runtime_file="rollout.table",
+        proof_obligations={"obligations": [{"obligation_id": "PO001", "goal_item_ids": ["GI001"], "claim": "rollout.table contains ring alpha"}]},
+        probe_plan={"probes": [{"probe_id": "GP001", "obligation_ids": ["PO001"], "expected_observation": {"value": "ring alpha"}}]},
+        slice_change_boundary=None,
+    )
     assert result["accepted"] is True

@@ -72,3 +72,9 @@ patchlet's allowed product/runtime file. Role-shaped validation scratch such as
 The allowed file from the patchlet plan is authoritative, not filename
 convention, so the same rules apply to non-scenario names such as
 `control.plan`, `rollout.table`, and `verify_result.log`.
+
+Semantic shorthand matching is boundary-type aware. Route-style claims can
+match route/path and expected target evidence, key-value claims can match key
+and expected value, section claims can match section/key/value, and exact-line
+claims can match the planned new line. Worker claim is still not proof, and
+future-slice claims remain rejected until their own patchlets run. Downstream patchlets do not run after failed dependencies; scheduler readiness requires accepted dependencies, not only an earlier attempt directory.

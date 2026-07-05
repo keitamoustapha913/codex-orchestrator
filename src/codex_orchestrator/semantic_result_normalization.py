@@ -3,35 +3,15 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from codex_orchestrator.boundary_evidence import (
+    detect_future_boundary_claim,
+    is_vague_worker_claim,
+    match_worker_claim_to_current_boundary,
+)
+
 
 GOAL_ITEM_ALIASES = ("goal_item", "goal_item_id", "goal")
 WORKER_PROOF_FIELDS = {"criterion_id", "expected_value", "actual_value", "passed", "verification_source"}
-VAGUE_RESULT_TEXTS = {
-    "done",
-    "ok",
-    "okay",
-    "looks good",
-    "complete",
-    "completed",
-    "success",
-    "successful",
-    "passes",
-    "passed",
-    "fixed",
-    "implemented",
-    "seems fine",
-    "probably passes",
-    "all good",
-}
-FUTURE_CLAIM_PATTERNS = (
-    "all five",
-    "all settings",
-    "future work complete",
-    "future slices complete",
-    "master prompt satisfied",
-    "final goal complete",
-)
-COMPLETION_WORDS = {"updated", "changed", "complete", "completed", "set", "strict", "green", "enabled", "deny", "done"}
 
 
 def _norm_text(value: str) -> str:
@@ -67,56 +47,6 @@ def _probe_for_obligation(proof_obligation_id: str, probe_plan: dict[str, Any]) 
     return None
 
 
-def _boundary_tokens(slice_change_boundary: dict[str, Any] | None, probe_plan: dict[str, Any]) -> set[str]:
-    tokens: set[str] = set()
-    boundary = slice_change_boundary or {}
-    if boundary.get("section"):
-        tokens.add(str(boundary["section"]).strip("[]"))
-    for change in boundary.get("allowed_changes") or []:
-        for key in ("key", "old_value", "new_value", "old_line", "new_line", "section"):
-            value = change.get(key)
-            if isinstance(value, str) and value.strip():
-                tokens.add(value.strip())
-                if "=" in value:
-                    tokens.update(part.strip() for part in value.split("=") if part.strip())
-    for probe in probe_plan.get("probes", []):
-        expected = probe.get("expected_observation") or {}
-        for value in expected.values() if isinstance(expected, dict) else []:
-            if isinstance(value, str) and value.strip():
-                tokens.add(value.strip())
-                if "=" in value:
-                    tokens.update(part.strip() for part in value.split("=") if part.strip())
-    return {_norm_text(token) for token in tokens if _norm_text(token)}
-
-
-def _forbidden_keys(slice_change_boundary: dict[str, Any] | None) -> set[str]:
-    return {
-        _norm_text(str(row.get("key")))
-        for row in (slice_change_boundary or {}).get("forbidden_changes", [])
-        if row.get("key")
-    }
-
-
-def _is_vague(text: str) -> bool:
-    normalized = _norm_text(text).rstrip(".")
-    return normalized in VAGUE_RESULT_TEXTS
-
-
-def _claims_future_slice(text: str, *, forbidden_keys: set[str]) -> bool:
-    normalized = _norm_text(text)
-    if any(pattern in normalized for pattern in FUTURE_CLAIM_PATTERNS):
-        return True
-    words = set(normalized.split())
-    if "without" in words or "unchanged" in words or "reserved" in words:
-        return False
-    return bool(forbidden_keys & words and COMPLETION_WORDS & words)
-
-
-def _mentions_current_boundary(text: str, *, tokens: set[str]) -> bool:
-    normalized = _norm_text(text)
-    return any(token and token in normalized for token in tokens)
-
-
 def _reject(raw_item: Any, *, index: int, code: str, message: str, goal_item_id: str | None = None) -> dict[str, Any]:
     return {
         "raw_item": raw_item,
@@ -138,14 +68,22 @@ def normalize_semantic_goal_results(
     proof_obligations: dict[str, Any],
     probe_plan: dict[str, Any],
     slice_change_boundary: dict[str, Any] | None,
+    allowed_product_runtime_file: str | None = None,
+    actual_diff_text: str | None = None,
 ) -> dict[str, Any]:
     accepted: list[dict[str, Any]] = []
     rejected: list[dict[str, Any]] = []
     canonical_results: list[dict[str, Any]] = []
     selected_goals = set(selected_goal_item_ids)
     future_goals = set((slice_change_boundary or {}).get("forbidden_future_goal_item_ids", []))
-    boundary_tokens = _boundary_tokens(slice_change_boundary, probe_plan)
-    forbidden = _forbidden_keys(slice_change_boundary)
+    future_obligations = list((slice_change_boundary or {}).get("forbidden_future_proof_obligation_ids", []))
+    future_obligations.extend(
+        row.get("obligation_id")
+        for row in proof_obligations.get("obligations", [])
+        if isinstance(row, dict) and set(row.get("goal_item_ids", [])) - selected_goals
+    )
+    future_obligations = [item for item in dict.fromkeys(future_obligations) if isinstance(item, str)]
+    boundary_match_results: list[dict[str, Any]] = []
     for index, raw_item in enumerate(raw_items):
         if not isinstance(raw_item, dict):
             rejected.append(_reject(raw_item, index=index, code="INVALID_SEMANTIC_RESULT_SHAPE", message="semantic result must be an object"))
@@ -170,13 +108,33 @@ def normalize_semantic_goal_results(
         if not isinstance(result_text, str) or not result_text.strip():
             rejected.append(_reject(raw_item, index=index, code="MISSING_RESULT_TEXT", message="shorthand semantic result requires non-empty result text", goal_item_id=goal_item_id))
             continue
-        if _is_vague(result_text):
+        if is_vague_worker_claim(result_text):
             rejected.append(_reject(raw_item, index=index, code="VAGUE_RESULT_TEXT", message="shorthand semantic result is too vague to link safely", goal_item_id=goal_item_id))
             continue
-        if _claims_future_slice(result_text, forbidden_keys=forbidden):
+        boundary_match = match_worker_claim_to_current_boundary(
+            worker_text=result_text,
+            allowed_product_runtime_file=allowed_product_runtime_file,
+            slice_change_boundary=slice_change_boundary,
+            proof_obligations=proof_obligations,
+            probe_plan=probe_plan,
+            selected_proof_obligation_ids=selected_proof_obligation_ids,
+            future_proof_obligation_ids=future_obligations,
+            actual_diff_text=actual_diff_text,
+        )
+        boundary_match_results.append({
+            "raw_item_index": index,
+            "goal_item_id": goal_item_id,
+            **boundary_match,
+        })
+        if boundary_match.get("mentions_future_boundary") or detect_future_boundary_claim(
+            result_text,
+            proof_obligations=proof_obligations,
+            future_proof_obligation_ids=future_obligations,
+            slice_change_boundary=slice_change_boundary,
+        ):
             rejected.append(_reject(raw_item, index=index, code="FUTURE_SLICE_CLAIM", message="shorthand semantic result claims future-slice completion", goal_item_id=goal_item_id))
             continue
-        if not _mentions_current_boundary(result_text, tokens=boundary_tokens):
+        if not boundary_match.get("mentions_current_boundary"):
             rejected.append(_reject(raw_item, index=index, code="CURRENT_BOUNDARY_NOT_MENTIONED", message="shorthand semantic result does not mention the current slice boundary", goal_item_id=goal_item_id))
             continue
         matching_obligations = _proof_obligations_for_goal(
@@ -217,6 +175,7 @@ def normalize_semantic_goal_results(
                     "mentions_forbidden_future_boundary": False,
                     "claims_future_slice_completion": False,
                 },
+                "boundary_evidence_match": boundary_match,
                 "proof_not_claimed_here": True,
             }
         )
@@ -229,6 +188,7 @@ def normalize_semantic_goal_results(
         "accepted_raw_claims": accepted,
         "rejected_raw_claims": rejected,
         "canonical_results_from_worker": canonical_results,
+        "boundary_evidence_matches": boundary_match_results,
         "proof_not_claimed_here": True,
     }
 

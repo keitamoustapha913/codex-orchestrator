@@ -540,15 +540,51 @@ def _save_patchlet_index(ctx: TargetRepoContext, index: dict) -> None:
     write_json(ctx.paths.patchlet_index, index)
 
 
+def _is_repair_patchlet(patchlet: dict) -> bool:
+    return bool(patchlet.get("repair_plan_id") or patchlet.get("source_failure_ids"))
+
+
 def _next_pending_patchlet(index: dict) -> dict | None:
     completed = {p["patchlet_id"] for p in index.get("patchlets", []) if p.get("status") in {"COMPLETE", "VERIFIED_NO_CHANGE_NEEDED"}}
+    blocked = {
+        p["patchlet_id"]
+        for p in index.get("patchlets", [])
+        if p.get("status") in {"FAILED_WITH_EVIDENCE", "BLOCKED_WITH_EVIDENCE", "BLOCKED_BY_FAILED_DEPENDENCY"}
+    }
     for patchlet in index.get("patchlets", []):
         if patchlet.get("status") != "PENDING":
+            continue
+        if blocked and not _is_repair_patchlet(patchlet):
             continue
         deps = patchlet.get("dependency_patchlet_ids", patchlet.get("depends_on", []))
         if all(dep in completed for dep in deps):
             return patchlet
     return None
+
+
+def _write_dependency_block_result(
+    ctx: TargetRepoContext,
+    *,
+    patchlet_id: str,
+    blocked_dependency_patchlet_ids: list[str],
+    reason: str,
+) -> str:
+    run_dir = ctx.paths.runs_dir / f"{patchlet_id}_blocked_by_failed_dependency" / "gates"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    path = run_dir / "dependency_block_result.json"
+    write_json(
+        path,
+        {
+            "schema_version": "1.0",
+            "kind": "dependency_block_result",
+            "patchlet_id": patchlet_id,
+            "status": "BLOCKED_BY_FAILED_DEPENDENCY",
+            "blocked_dependency_patchlet_ids": blocked_dependency_patchlet_ids,
+            "reason": reason,
+            "worker_started": False,
+        },
+    )
+    return _record_path_for_manifest(ctx, path) or str(path)
 
 
 def _refresh_dependency_states(ctx: TargetRepoContext, index: dict) -> None:
@@ -562,24 +598,36 @@ def _refresh_dependency_states(ctx: TargetRepoContext, index: dict) -> None:
     blocking = {
         pid
         for pid, patchlet in by_id.items()
-        if patchlet.get("status") in {"FAILED_WITH_EVIDENCE", "BLOCKED_WITH_EVIDENCE"}
+        if patchlet.get("status") in {"FAILED_WITH_EVIDENCE", "BLOCKED_WITH_EVIDENCE", "BLOCKED_BY_FAILED_DEPENDENCY"}
     }
     changed = False
+    blocked_patchlet_ids: list[str] = []
     for patchlet in patchlets:
         if patchlet.get("status") != "PENDING":
             continue
         deps = list(patchlet.get("dependency_patchlet_ids", patchlet.get("depends_on", [])))
         failed_deps = [dep for dep in deps if dep in blocking]
+        if not failed_deps and blocking and not _is_repair_patchlet(patchlet):
+            failed_deps = sorted(blocking)
         if failed_deps:
-            patchlet["status"] = "BLOCKED_WITH_EVIDENCE"
+            patchlet["status"] = "BLOCKED_BY_FAILED_DEPENDENCY"
+            patchlet["blocked_dependency_patchlet_ids"] = failed_deps
+            patchlet["blocked_reason"] = "failed_dependency"
             changed = True
+            blocked_patchlet_ids.append(patchlet["patchlet_id"])
+            artifact_path = _write_dependency_block_result(
+                ctx,
+                patchlet_id=patchlet["patchlet_id"],
+                blocked_dependency_patchlet_ids=failed_deps,
+                reason="dependency patchlet failed before this patchlet was eligible to run",
+            )
             append_operator_event(
                 ctx.root,
-                event_type="patchlet_waiting_on_dependencies",
+                event_type="patchlet_blocked_by_failed_dependency",
                 severity="error",
                 stage="PATCHLETS_READY",
                 summary=f"Patchlet {patchlet['patchlet_id']} blocked by failed dependency {', '.join(failed_deps)}.",
-                artifact_paths=[".codex-orchestrator/patchlets/patchlet_index.json"],
+                artifact_paths=[".codex-orchestrator/patchlets/patchlet_index.json", artifact_path],
                 patchlet_id=patchlet["patchlet_id"],
                 details={"blocked_dependency_patchlet_ids": failed_deps},
             )
@@ -608,6 +656,31 @@ def _refresh_dependency_states(ctx: TargetRepoContext, index: dict) -> None:
             )
     if changed:
         _save_patchlet_index(ctx, index)
+        if ctx.paths.state.exists():
+            try:
+                state = load_state(ctx)
+                for patchlet_id in blocked_patchlet_ids:
+                    if patchlet_id in state.pending_patchlets:
+                        state.pending_patchlets.remove(patchlet_id)
+                    if patchlet_id not in state.blocked_patchlets:
+                        state.blocked_patchlets.append(patchlet_id)
+                if not state.pending_patchlets:
+                    transition(ctx, state, "FAILURE_CLASSIFICATION_REQUIRED", reason="failed dependency blocked downstream patchlets")
+                else:
+                    from codex_orchestrator.state import save_state
+
+                    save_state(ctx, state)
+            except Exception:
+                pass
+        append_operator_event(
+            ctx.root,
+            event_type="auto_loop_stopped_due_to_failed_dependency",
+            severity="error",
+            stage="PATCHLETS_READY",
+            summary="Pending patchlets were blocked because a required predecessor failed.",
+            artifact_paths=[".codex-orchestrator/patchlets/patchlet_index.json"],
+            details={"failed_or_blocking_patchlet_ids": sorted(blocking)},
+        )
 
 
 def _record_failure(

@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Probe Commands Normalization Result",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "kind",
+    "patchlet_id",
+    "attempt_id",
+    "accepted",
+    "canonical_probe_commands",
+    "raw_probe_command_items",
+    "rejected_probe_command_items"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "kind": {"const": "probe_commands_normalization_result"},
+    "patchlet_id": {"type": "string"},
+    "attempt_id": {"type": "string"},
+    "accepted": {"type": "boolean"},
+    "canonical_probe_commands": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "raw_probe_command_items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["raw_item_index", "raw_item", "normalized_command", "accepted"],
+        "properties": {
+          "raw_item_index": {"type": "integer", "minimum": 0},
+          "raw_item": {"type": "object"},
+          "normalized_command": {"type": "string", "minLength": 1},
+          "accepted": {"const": true}
+        },
+        "additionalProperties": true
+      }
+    },
+    "rejected_probe_command_items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["raw_item_index", "raw_item", "accepted", "reason"],
+        "properties": {
+          "raw_item_index": {"type": "integer", "minimum": 0},
+          "raw_item": {"type": "object"},
+          "accepted": {"const": false},
+          "reason": {"type": "string", "minLength": 1}
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}

@@ -153,7 +153,7 @@ def _decomposition_status(ctx: TargetRepoContext) -> dict:
     patchlets = patchlet_index.get("patchlets", [])
     accepted_statuses = {"COMPLETE", "VERIFIED_NO_CHANGE_NEEDED"}
     accepted = [p["patchlet_id"] for p in patchlets if p.get("status") in accepted_statuses]
-    blocked = [p["patchlet_id"] for p in patchlets if p.get("status") in {"FAILED_WITH_EVIDENCE", "BLOCKED_WITH_EVIDENCE"}]
+    blocked = [p["patchlet_id"] for p in patchlets if p.get("status") in {"FAILED_WITH_EVIDENCE", "BLOCKED_WITH_EVIDENCE", "BLOCKED_BY_FAILED_DEPENDENCY"}]
     accepted_set = set(accepted)
     ready = []
     waiting = []

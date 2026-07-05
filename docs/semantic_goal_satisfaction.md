@@ -36,6 +36,15 @@ The orchestrator rejects vague shorthand (`done`, `ok`, `looks good`,
 Canonical semantic results are generated only after independent probe rerun
 evidence supplies expected and actual values.
 
+RC6F shorthand matching is boundary-type aware. Route-style wording can match
+the current route/path and expected target, key-value wording can match key and
+expected value, section wording can match section/key/value, and exact-line
+wording can match the expected new line. Worker text is still not proof: it
+only links a claim to current boundary evidence before independent proof decides
+pass/fail. Future-slice claims remain rejected.
+
+Patchlet scheduling also stays strict after failures. Downstream patchlets do not run after failed dependencies, and scheduler readiness requires accepted dependencies rather than mere attempt existence.
+
 Required artifacts include:
 
 ```text

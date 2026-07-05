@@ -113,7 +113,7 @@ def _decomposition_summary(workflow_root: Path, patchlet_index: dict[str, Any]) 
     plan = _read_if_exists(workflow_root / "decomposition" / "work_decomposition_plan.json") or {}
     patchlets = patchlet_index.get("patchlets", [])
     accepted_statuses = {"COMPLETE", "VERIFIED_NO_CHANGE_NEEDED"}
-    failed_statuses = {"FAILED_WITH_EVIDENCE", "BLOCKED_WITH_EVIDENCE"}
+    failed_statuses = {"FAILED_WITH_EVIDENCE", "BLOCKED_WITH_EVIDENCE", "BLOCKED_BY_FAILED_DEPENDENCY"}
     accepted = [p["patchlet_id"] for p in patchlets if p.get("status") in accepted_statuses]
     blocked = [p["patchlet_id"] for p in patchlets if p.get("status") in failed_statuses]
     ready: list[str] = []
