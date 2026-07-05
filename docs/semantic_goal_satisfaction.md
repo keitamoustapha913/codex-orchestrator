@@ -43,6 +43,13 @@ wording can match the expected new line. Worker text is still not proof: it
 only links a claim to current boundary evidence before independent proof decides
 pass/fail. Future-slice claims remain rejected.
 
+Boundary evidence matching is role-aware. Short tokens such as `on`, `off`,
+`no`, or `yes` do not match as substrings inside unrelated words like
+`boundary`, `control`, or `now`. Future-slice rejection requires a role-aware
+future boundary evidence combination, such as an exact line `event_logging=on`
+or matching future key and value. Same-file mention alone is not a future
+claim. Worker text is not proof; independent proof remains required.
+
 Patchlet scheduling also stays strict after failures. Downstream patchlets do not run after failed dependencies, and scheduler readiness requires accepted dependencies rather than mere attempt existence.
 
 Required artifacts include:

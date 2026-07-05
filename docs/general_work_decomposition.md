@@ -78,3 +78,10 @@ match route/path and expected target evidence, key-value claims can match key
 and expected value, section claims can match section/key/value, and exact-line
 claims can match the planned new line. Worker claim is still not proof, and
 future-slice claims remain rejected until their own patchlets run. Downstream patchlets do not run after failed dependencies; scheduler readiness requires accepted dependencies, not only an earlier attempt directory.
+
+Boundary evidence matching is role-aware. Short tokens such as `on`, `off`,
+`no`, or `yes` do not match as substrings inside unrelated words like
+`boundary`, `control`, or `now`. Future-slice rejection requires a role-aware
+future boundary evidence combination, such as an exact line `event_logging=on`
+or matching future key and value. Same-file mention alone is not a future
+claim. Worker text is not proof; independent proof remains required.

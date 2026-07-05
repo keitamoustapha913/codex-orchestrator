@@ -55,6 +55,10 @@ def _word_norm(value: str) -> str:
     return re.sub(r"[^a-z0-9/_.:=+>-]+", " ", value.lower()).strip()
 
 
+def _token_phrase(value: str) -> str:
+    return re.sub(r"[^a-z0-9/_.:=+>-]+", " ", value.lower()).strip().strip(".,;:")
+
+
 def _add_token(tokens: list[dict[str, str]], *, source: str, token: Any, role: str) -> None:
     if not isinstance(token, str):
         return
@@ -95,6 +99,15 @@ def _tokens_from_text(source: str, text: str) -> list[dict[str, str]]:
     _add_token(tokens, source=source, token=text, role="exact_line")
     for part, role in _line_parts(text):
         _add_token(tokens, source=source, token=part, role=role)
+    for key, value in re.findall(r"([A-Za-z0-9_.:/-]+)\s*(?:=|->|=>|:)\s*([A-Za-z0-9_.:/+-]+)", text):
+        key = key.rstrip(".,;:")
+        value = value.rstrip(".,;:")
+        if key:
+            _add_token(tokens, source=source, token=key, role="route_path" if key.startswith("/") else "key")
+        if value:
+            _add_token(tokens, source=source, token=value, role="new_value")
+        if key and value:
+            _add_token(tokens, source=source, token=f"{key}={value}", role="exact_line")
     for match in re.findall(r"[A-Za-z0-9][A-Za-z0-9_.-]*", text):
         match = match.rstrip(".,;:")
         if len(match) >= 3:
@@ -182,17 +195,42 @@ def is_vague_worker_claim(text: str) -> bool:
 
 
 def _matched(tokens: list[dict[str, str]], text: str) -> list[dict[str, str]]:
-    normalized = _word_norm(text)
-    compact = _compact(text)
     matches: list[dict[str, str]] = []
     for row in tokens:
-        token_norm = _word_norm(row["token"])
-        token_compact = _compact(row["token"])
-        if not token_norm:
+        if not _role_aware_token_match(row, text):
             continue
-        if token_norm in normalized or token_compact in compact:
-            matches.append(row)
+        matches.append(row)
     return matches
+
+
+def _role_aware_token_match(row: dict[str, str], text: str) -> bool:
+    token = row["token"]
+    role = row["role"]
+    token_norm = _token_phrase(token)
+    if not token_norm:
+        return False
+    text_norm = _word_norm(text)
+    text_compact = _compact(text)
+
+    if role in {"exact_line", "expected_observation", "file", "route_path"}:
+        return token_norm in text_compact
+
+    if role in {"key", "section"}:
+        phrase = token_norm.replace("_", " ")
+        return _bounded_phrase_match(token_norm, text_norm) or _bounded_phrase_match(phrase, text_norm)
+
+    if role in {"new_value", "old_value", "word"}:
+        return _bounded_phrase_match(token_norm, text_norm)
+
+    return _bounded_phrase_match(token_norm, text_norm)
+
+
+def _bounded_phrase_match(phrase: str, text: str) -> bool:
+    phrase = phrase.strip()
+    if not phrase:
+        return False
+    pattern = re.compile(rf"(?<![a-z0-9_-]){re.escape(phrase)}(?![a-z0-9_-])")
+    return bool(pattern.search(text))
 
 
 def _has_role(matches: list[dict[str, str]], role: str) -> bool:
@@ -239,6 +277,18 @@ def _matches_boundary_combo(matches: list[dict[str, str]]) -> bool:
     )
 
 
+def _matches_future_boundary_combo(matches: list[dict[str, str]]) -> bool:
+    exact_line_match = _has_any_role(matches, {"exact_line", "expected_observation"})
+    route_match = _has_role(matches, "route_path")
+    value_match = _has_any_role(matches, {"new_value", "old_value"})
+    key_or_section_match = _has_any_role(matches, {"key", "section"})
+    return bool(
+        exact_line_match
+        or (route_match and value_match)
+        or (key_or_section_match and value_match)
+    )
+
+
 def detect_future_boundary_claim(
     worker_text: str,
     *,
@@ -260,7 +310,7 @@ def detect_future_boundary_claim(
         ),
         worker_text,
     )
-    return bool(_matches_boundary_combo(future_matches) and COMPLETION_WORDS.intersection(words))
+    return bool(_matches_future_boundary_combo(future_matches) and COMPLETION_WORDS.intersection(words))
 
 
 def match_worker_claim_to_current_boundary(

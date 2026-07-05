@@ -285,3 +285,107 @@ def test_boundary_matcher_second_fixture_different_names_and_extensions():
         slice_change_boundary=None,
     )
     assert result["accepted"] is True
+
+
+def _scenario3_p0002_ctx():
+    return {
+        "patchlet_id": "P0002",
+        "work_slice_id": "WS002",
+        "selected_goal_item_ids": ["GI002"],
+        "selected_proof_obligation_ids": ["PO002"],
+        "allowed_product_runtime_file": "policy.bundle",
+        "proof_obligations": {
+            "obligations": [
+                {
+                    "obligation_id": "PO002",
+                    "goal_item_ids": ["GI002"],
+                    "claim": "The accepted integration state has policy.bundle containing mode=strict.",
+                    "target_boundaries": ["policy.bundle"],
+                    "required": True,
+                },
+                {
+                    "obligation_id": "PO004",
+                    "goal_item_ids": ["GI004"],
+                    "claim": "The accepted integration state has policy.bundle containing event_logging=on.",
+                    "target_boundaries": ["policy.bundle"],
+                    "required": True,
+                },
+            ]
+        },
+        "probe_plan": {
+            "probes": [
+                {
+                    "probe_id": "GP002",
+                    "obligation_ids": ["PO002"],
+                    "expected_observation": {"value": "mode=strict"},
+                }
+            ]
+        },
+        "slice_change_boundary": {
+            "boundary_type": "text_key_value_update",
+            "allowed_product_runtime_file": "policy.bundle",
+            "allowed_changes": [
+                {
+                    "key": "mode",
+                    "old_value": "permissive",
+                    "new_value": "strict",
+                    "old_line": "mode=permissive",
+                    "new_line": "mode=strict",
+                }
+            ],
+            "forbidden_future_goal_item_ids": ["GI004"],
+            "forbidden_future_proof_obligation_ids": ["PO004"],
+            "forbidden_changes": [{"key": "event_logging", "new_value": "on"}],
+        },
+    }
+
+
+def _normalize_scenario3(text: str):
+    return normalize_semantic_goal_results(
+        raw_items=[{"goal_item": "GI002", "result": text}],
+        **_scenario3_p0002_ctx(),
+    )
+
+
+SCENARIO3_STRICT_MODE_CLAIM = (
+    "The allowed boundary in policy.bundle was updated from mode=permissive "
+    "to mode=strict, and the strict-mode probe now passes while the permissive "
+    "negative control fails."
+)
+
+
+def test_scenario3_p0002_strict_mode_claim_is_accepted():
+    result = _normalize_scenario3(SCENARIO3_STRICT_MODE_CLAIM)
+    assert result["accepted"] is True
+
+
+def test_scenario3_p0002_strict_mode_claim_preserves_raw_output():
+    result = _normalize_scenario3(SCENARIO3_STRICT_MODE_CLAIM)
+    assert result["accepted_raw_claims"][0]["raw_result_text"] == SCENARIO3_STRICT_MODE_CLAIM
+
+
+def test_scenario3_p0002_strict_mode_claim_mentions_current_boundary():
+    result = _normalize_scenario3(SCENARIO3_STRICT_MODE_CLAIM)
+    assert result["accepted_raw_claims"][0]["boundary_evidence_match"]["mentions_current_boundary"] is True
+
+
+def test_scenario3_p0002_strict_mode_claim_does_not_mention_future_boundary():
+    result = _normalize_scenario3(SCENARIO3_STRICT_MODE_CLAIM)
+    assert result["accepted_raw_claims"][0]["boundary_evidence_match"]["mentions_future_boundary"] is False
+
+
+def test_scenario3_future_event_logging_claim_is_rejected():
+    result = _normalize_scenario3("policy.bundle event_logging=on is also complete")
+    assert result["accepted"] is False
+    assert result["rejected_raw_claims"][0]["error_code"] == "FUTURE_SLICE_CLAIM"
+
+
+def test_scenario3_vague_fixed_claim_is_rejected():
+    result = _normalize_scenario3("fixed")
+    assert result["accepted"] is False
+    assert result["rejected_raw_claims"][0]["error_code"] == "VAGUE_RESULT_TEXT"
+
+
+def test_short_future_value_on_regression_in_ingestion_path():
+    result = _normalize_scenario3("policy.bundle mode=strict now passes the negative control")
+    assert result["accepted"] is True

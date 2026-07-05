@@ -475,3 +475,10 @@ Implemented deterministic general work decomposition artifacts and compiler inte
 ## RC6 Slice Boundary Status
 
 one allowed file per patchlet is necessary but not sufficient for same-file multi-patchlet workflows. Same-file patchlets require a slice-level allowed-change boundary, and future slice changes are rejected even when they are inside the same allowed product/runtime file. patchlet-scoped proof runs only selected current obligations; future obligations remain unproven, not failed. PARTIAL progress accepts patchlet progress but blocks DONE. Report ingestion accepts pass: / fail: / blocked: descriptive prefixes while rejecting vague success strings. Approved artifact directories are allowed only under approved roots. The full real-Codex matrix must pass before rc6.
+
+Boundary evidence matching is role-aware. Short tokens such as `on`, `off`,
+`no`, or `yes` do not match as substrings inside unrelated words like
+`boundary`, `control`, or `now`. Future-slice rejection requires a role-aware
+future boundary evidence combination, such as an exact line `event_logging=on`
+or matching future key and value. Same-file mention alone is not a future
+claim. Worker text is not proof; independent proof remains required.

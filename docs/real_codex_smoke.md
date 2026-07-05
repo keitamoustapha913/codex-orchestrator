@@ -378,3 +378,10 @@ cxor writes `goal_progress.json` and append-only `goal_progress.jsonl`; `cxor go
 ## Multi-Patchlet Smoke Expectations
 
 For complex targets, real-Codex smoke should show real decomposition artifacts, multiple bounded patchlets from work slices, exactly one allowed product/runtime file per patchlet, dependency ordering, and preserved stop/partial apply behavior. Do not manually edit generated patchlet or transaction artifacts. See `docs/general_work_decomposition.md`.
+
+Boundary evidence matching is role-aware. Short tokens such as `on`, `off`,
+`no`, or `yes` do not match as substrings inside unrelated words like
+`boundary`, `control`, or `now`. Future-slice rejection requires a role-aware
+future boundary evidence combination, such as an exact line `event_logging=on`
+or matching future key and value. Same-file mention alone is not a future
+claim. Worker text is not proof; independent proof remains required.

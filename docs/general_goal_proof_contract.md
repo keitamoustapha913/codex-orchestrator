@@ -39,3 +39,10 @@ that claims future slices or final master-prompt satisfaction is rejected.
 Canonical `passed=true` or `passed=false` semantic results are created only
 after the orchestrator-owned independent probe rerun. DONE still requires all
 required obligations and master-prompt satisfaction.
+
+Boundary evidence matching is role-aware. Short tokens such as `on`, `off`,
+`no`, or `yes` do not match as substrings inside unrelated words like
+`boundary`, `control`, or `now`. Future-slice rejection requires a role-aware
+future boundary evidence combination, such as an exact line `event_logging=on`
+or matching future key and value. Same-file mention alone is not a future
+claim. Worker text is not proof; independent proof remains required.

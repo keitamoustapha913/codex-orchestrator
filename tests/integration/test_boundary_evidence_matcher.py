@@ -173,3 +173,122 @@ def test_matcher_is_repo_agnostic_with_non_scenario_fixture():
         probe_plan=_probe("north lane: open"),
     )
     assert result["mentions_current_boundary"] is True
+
+
+def _same_file_policy_match(text: str):
+    return _match(
+        text,
+        allowed_product_runtime_file="policy.bundle",
+        slice_change_boundary={
+            "boundary_type": "text_key_value_update",
+            "allowed_changes": [
+                {
+                    "key": "mode",
+                    "old_value": "permissive",
+                    "new_value": "strict",
+                    "old_line": "mode=permissive",
+                    "new_line": "mode=strict",
+                }
+            ],
+            "forbidden_changes": [
+                {"key": "event_logging", "new_value": "on"},
+                {"key": "default", "new_value": "deny"},
+            ],
+        },
+        proof_obligations={
+            "obligations": [
+                {
+                    "obligation_id": "PO002",
+                    "goal_item_ids": ["GI002"],
+                    "claim": "The accepted state has policy.bundle containing mode=strict.",
+                    "target_boundaries": ["policy.bundle"],
+                },
+                {
+                    "obligation_id": "PO004",
+                    "goal_item_ids": ["GI004"],
+                    "claim": "The accepted state has policy.bundle containing event_logging=on.",
+                    "target_boundaries": ["policy.bundle"],
+                },
+            ]
+        },
+        probe_plan={
+            "probes": [
+                {
+                    "probe_id": "GP002",
+                    "obligation_ids": ["PO002"],
+                    "expected_observation": {"value": "mode=strict"},
+                }
+            ]
+        },
+        selected_proof_obligation_ids=["PO002"],
+        future_proof_obligation_ids=["PO004"],
+    )
+
+
+def test_short_future_value_on_does_not_match_inside_boundary():
+    result = _same_file_policy_match("policy.bundle boundary mode=strict was updated")
+    assert result["mentions_current_boundary"] is True
+    assert result["mentions_future_boundary"] is False
+
+
+def test_short_future_value_on_does_not_match_inside_control():
+    result = _same_file_policy_match("mode=strict proof used a negative control")
+    assert result["mentions_current_boundary"] is True
+    assert result["mentions_future_boundary"] is False
+
+
+def test_short_future_value_on_does_not_match_inside_now():
+    result = _same_file_policy_match("mode=strict is now present")
+    assert result["mentions_current_boundary"] is True
+    assert result["mentions_future_boundary"] is False
+
+
+def test_short_future_value_on_requires_standalone_token_or_exact_line():
+    assert _same_file_policy_match("event_logging is on and complete")["mentions_future_boundary"] is True
+    assert _same_file_policy_match("event_logging=on is complete")["mentions_future_boundary"] is True
+
+
+def test_future_boundary_requires_key_and_value_not_value_alone():
+    result = _same_file_policy_match("mode=strict is complete and on")
+    assert result["mentions_current_boundary"] is True
+    assert result["mentions_future_boundary"] is False
+
+
+def test_future_boundary_requires_exact_line_or_role_combination():
+    assert _same_file_policy_match("event_logging=on is also complete")["mentions_future_boundary"] is True
+
+
+def test_same_file_token_alone_does_not_trigger_future_claim():
+    result = _same_file_policy_match("policy.bundle mode=strict is complete")
+    assert result["mentions_current_boundary"] is True
+    assert result["mentions_future_boundary"] is False
+
+
+def test_current_mode_strict_claim_not_rejected_by_future_event_logging_on():
+    result = _same_file_policy_match(
+        "The allowed boundary in policy.bundle was updated from mode=permissive to mode=strict, and the strict-mode probe now passes while the permissive negative control fails."
+    )
+    assert result["mentions_current_boundary"] is True
+    assert result["mentions_future_boundary"] is False
+
+
+def test_future_event_logging_on_claim_is_rejected():
+    result = _same_file_policy_match("policy.bundle event_logging is on and complete")
+    assert result["mentions_future_boundary"] is True
+
+
+def test_future_exact_line_event_logging_on_is_rejected():
+    result = _same_file_policy_match("policy.bundle event_logging=on is also complete")
+    assert result["mentions_future_boundary"] is True
+
+
+def test_vague_claim_fixed_still_rejected():
+    assert is_vague_worker_claim("fixed") is True
+
+
+def test_probe_local_scenario3_claim_is_accepted():
+    result = _same_file_policy_match(
+        "The allowed boundary in policy.bundle was updated from mode=permissive to mode=strict, and the strict-mode probe now passes while the permissive negative control fails."
+    )
+    assert result["mentions_current_boundary"] is True
+    assert result["mentions_future_boundary"] is False
