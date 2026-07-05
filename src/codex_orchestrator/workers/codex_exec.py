@@ -80,6 +80,8 @@ class CodexExecWorker(Worker):
         worker_hooks_dir = run_dir / "worker_hooks"
         gates_dir = run_dir / "gates"
         diagnostics_dir = run_dir / "diagnostics"
+        worker_scratch_dir = run_ctx.attempt_scratch_dir
+        quarantine_dir = run_ctx.quarantine_dir
         preflight_stage_path = run_dir / "worker_stage" / "00_preflight.md"
         final_report_stage_path = run_dir / "worker_stage" / "05_final_report.md"
         forbidden_target_worker_stage = run_ctx.target_root / "worker_stage"
@@ -99,8 +101,14 @@ class CodexExecWorker(Worker):
             f"- CXOR_WORKER_HOOKS_DIR={worker_hooks_dir}\n"
             f"- CXOR_GATES_DIR={gates_dir}\n"
             f"- CXOR_DIAGNOSTICS_DIR={diagnostics_dir}\n"
+            f"- CXOR_ATTEMPT_ROOT={run_dir}\n"
+            f"- CXOR_WORKER_SCRATCH_DIR={worker_scratch_dir}\n"
+            f"- CXOR_QUARANTINE_DIR={quarantine_dir}\n"
             f"- CXOR_PREFLIGHT_PATH={preflight_stage_path}\n"
             f"- CXOR_FINAL_REPORT_PATH={final_report_stage_path}\n\n"
+            "Do not write scratch/check/validation files in the target repository root.\n"
+            "Write any temporary validation, report-checking, grep output, jq output, scratch notes, or intermediate verification output under:\n"
+            f"- $CXOR_WORKER_SCRATCH_DIR ({worker_scratch_dir})\n\n"
             "Then write the preflight only to:\n"
             f"- $CXOR_PREFLIGHT_PATH ({preflight_stage_path})\n\n"
             "Before final response, write the final report only to:\n"
@@ -149,8 +157,12 @@ class CodexExecWorker(Worker):
             "-",
         ])
         patchlet_id = patchlet["patchlet_id"]
-        report_path = run_ctx.reports_dir / f"{patchlet_id}.json"
-        probe_root = run_ctx.probe_dir / patchlet_id
+        report_path = run_ctx.required_report_path(patchlet_id)
+        probe_root = run_ctx.required_probe_artifact_root(patchlet_id)
+        worker_scratch_dir.mkdir(parents=True, exist_ok=True)
+        quarantine_dir.mkdir(parents=True, exist_ok=True)
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        probe_root.mkdir(parents=True, exist_ok=True)
         allowed_file = patchlet.get("allowed_product_runtime_file", "")
         live_progress = LiveProgressReporter(self.live_progress_policy, attempt_id=run_dir.name)
         attempt_prompt_text = (
@@ -283,11 +295,16 @@ class CodexExecWorker(Worker):
                 "CXOR_REPORTS_DIR": str(run_ctx.reports_dir),
                 "CXOR_RUNS_DIR": str(run_ctx.runs_dir),
                 "CXOR_RUN_DIR": str(run_dir),
+                "CXOR_ATTEMPT_ROOT": str(run_dir),
                 "CXOR_WORKER_STAGE_DIR": str(worker_stage_dir),
                 "CXOR_WORKER_MEMORY_DIR": str(worker_memory_dir),
                 "CXOR_WORKER_HOOKS_DIR": str(worker_hooks_dir),
                 "CXOR_GATES_DIR": str(gates_dir),
                 "CXOR_DIAGNOSTICS_DIR": str(diagnostics_dir),
+                "CXOR_REQUIRED_REPORT_PATH": str(report_path),
+                "CXOR_REQUIRED_PROBE_ARTIFACT_ROOT": str(probe_root),
+                "CXOR_WORKER_SCRATCH_DIR": str(worker_scratch_dir),
+                "CXOR_QUARANTINE_DIR": str(quarantine_dir),
                 "CXOR_PREFLIGHT_PATH": str(preflight_stage_path),
                 "CXOR_FINAL_REPORT_PATH": str(final_report_stage_path),
                 "CXOR_PATCHLET_ID": patchlet_id,
@@ -330,6 +347,8 @@ class CodexExecWorker(Worker):
             "attempt_id": run_dir.name,
             "report_path": str(report_path),
             "probe_root": str(probe_root),
+            "attempt_scratch_dir": str(worker_scratch_dir),
+            "quarantine_dir": str(quarantine_dir),
             "progress_path": str(progress_path),
             "repo_sha_before": repo_sha_before,
             "repo_sha_after": repo_sha_after,
@@ -341,6 +360,11 @@ class CodexExecWorker(Worker):
             "selected_model": self.codex_model,
             "selected_reasoning": self.codex_reasoning,
             "env": {
+                "CXOR_ATTEMPT_ROOT": str(run_dir),
+                "CXOR_REQUIRED_REPORT_PATH": str(report_path),
+                "CXOR_REQUIRED_PROBE_ARTIFACT_ROOT": str(probe_root),
+                "CXOR_WORKER_SCRATCH_DIR": str(worker_scratch_dir),
+                "CXOR_QUARANTINE_DIR": str(quarantine_dir),
                 "PYTHONDONTWRITEBYTECODE": "1",
             },
         }, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -365,6 +389,8 @@ class CodexExecWorker(Worker):
             "attempt_id": run_dir.name,
             "report_path": str(report_path),
             "probe_root": str(probe_root),
+            "attempt_scratch_dir": str(worker_scratch_dir),
+            "quarantine_dir": str(quarantine_dir),
             "progress_path": str(progress_path),
             "repo_sha_before": repo_sha_before,
             "repo_sha_after": repo_sha_after,

@@ -19,6 +19,20 @@ class PatchletRunContext:
     is_worktree: bool
     worktree_path: Path | None
 
+    @property
+    def attempt_scratch_dir(self) -> Path:
+        return self.run_dir / "worker_scratch"
+
+    @property
+    def quarantine_dir(self) -> Path:
+        return self.run_dir / "quarantined_scratch"
+
+    def required_report_path(self, patchlet_id: str) -> Path:
+        return self.reports_dir / f"{patchlet_id}.json"
+
+    def required_probe_artifact_root(self, patchlet_id: str) -> Path:
+        return self.probe_dir / patchlet_id
+
 
 def build_patchlet_run_context(
     ctx: TargetRepoContext,

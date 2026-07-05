@@ -114,6 +114,31 @@ cxor auto --repo /path/to/target-repo --master /path/to/master_prompt.md --until
 
 Worktree mode is optional, not default. It requires a clean target repo apart from volatile workflow artifacts and isolates unauthorized diffs before any target product/runtime merge.
 
+During real-Codex worktree runs, `cxor` may quarantine recognized root-level
+worker scratch artifacts such as report/probe validation outputs. Quarantine is
+recorded in `scratch_artifact_quarantine_result.json` with preserved content
+hash metadata, and the diff guard is rerun against the remaining product
+changes. Unknown root product/runtime files are rejected; the one-file rule and
+slice boundary still apply.
+
+Each attempt exposes `.codex-orchestrator/runs/<attempt>/worker_scratch/` as the
+worker scratch directory and tells Codex: Do not write scratch/check/validation
+files in the target repository root. After worker exit, the root scratch sweep
+uses role-based quarantine, writes `root_scratch_sweep_result.json`, and records
+content/hash metadata. Random root .txt/.out files are not automatically
+allowed, product/runtime files are still rejected, and the diff is recomputed
+after quarantine.
+
+The sweep uses actual changed/untracked paths, not file presence. Unchanged peer
+product files are ignored because presence is not a change. Changed peer product
+files are rejected, while safe role-shaped validation scratch such as
+`validate_report.out` can be quarantined.
+The allowed file from the patchlet plan is authoritative, not filename
+convention; arbitrary names such as `control.plan`, `rollout.table`, and
+`verify_result.log` follow the same policy.
+
+Operator shorthand: random root .txt files are not automatically allowed.
+
 Opt-in real Codex smoke:
 
 ```bash

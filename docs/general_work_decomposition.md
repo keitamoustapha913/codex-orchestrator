@@ -48,3 +48,27 @@ shorthand `semantic_goal_results`, those entries are raw worker semantic claims
 only. They must link to the current slice boundary and selected proof
 obligation, they must not claim future slices, and they become canonical
 passed/failed semantic results only after orchestrator-owned independent proof.
+
+Real Codex may create root-level scratch artifacts while validating reports or
+probes. Recognized worker scratch artifacts are quarantined under the attempt
+artifact root with preserved content, sha256, size, and reason metadata. The
+orchestrator then rechecks the product diff. Quarantine does not allow a second
+product/runtime file and does not weaken same-file slice boundaries.
+
+Each patchlet attempt has a worker scratch directory at
+`.codex-orchestrator/runs/<attempt>/worker_scratch/`. The worker contract says:
+Do not write scratch/check/validation files in the target repository root. The
+orchestrator still runs a root scratch sweep after worker exit. Role-based
+quarantine accepts report/probe validation-shaped leftovers, preserves content
+hash metadata, and writes `root_scratch_sweep_result.json`. Random root .txt and
+.out files are not automatically allowed, product/runtime files are still
+rejected, and the diff is recomputed after quarantine.
+
+Execution-root peer files are classified by actual changed/untracked paths, not
+file presence. Unchanged peer product files are ignored because presence is not a
+change. Changed peer product files are rejected unless they are the current
+patchlet's allowed product/runtime file. Role-shaped validation scratch such as
+`validate_report.out` may be quarantined after safety checks.
+The allowed file from the patchlet plan is authoritative, not filename
+convention, so the same rules apply to non-scenario names such as
+`control.plan`, `rollout.table`, and `verify_result.log`.

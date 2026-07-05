@@ -361,13 +361,14 @@ def runtime_side_effect_contract_text() -> str:
     return (
         "# RUNTIME SIDE EFFECT CONTRACT\n\n"
         "- Do not create language-runtime cache or build byproduct files under $CXOR_TARGET_ROOT.\n"
+        "- Do not write scratch/check/validation files in the target repository root.\n"
         "- Do not create scratch/check files at the execution-root or target-root top level.\n"
-        "- Put temporary validation scratch files under `/tmp`; put durable evidence only under `.artifacts/probes/<patchlet_id>/`.\n"
+        "- Put temporary validation scratch files under `$CXOR_WORKER_SCRATCH_DIR`; put durable evidence only under `.artifacts/probes/<patchlet_id>/`.\n"
         "- Run probes in a way that avoids writing transient runtime artifacts into the target root.\n"
         "- Do not load target-root product/runtime files in a way that mutates the target root.\n"
         "- If comparing target-root and execution-root behavior, keep transient outputs outside the target root.\n"
         "- Durable evidence belongs under .artifacts/probes/ and .codex-orchestrator/ only.\n"
-        "- Root-level scratch files such as `.report_check.json` are unauthorized and will make the diff gate reject the patchlet.\n"
+        "- Root-level scratch files are swept after worker exit; role-shaped scratch is quarantined, but product/runtime files are still rejected.\n"
         "- Never leave runtime cache directories or compiled byproducts under target root.\n"
         "- If a runtime byproduct appears, report it explicitly in the probe evidence instead of hiding it.\n"
     )
@@ -457,6 +458,8 @@ def _task_contract_text(
     timeout_seconds = resolve_patchlet_timeout_seconds(os.environ)
     soft_deadline = soft_deadline_seconds(timeout_seconds)
     worker_stage_dir = run_context.run_dir / "worker_stage"
+    worker_scratch_dir = run_context.attempt_scratch_dir
+    quarantine_dir = run_context.quarantine_dir
     preflight_path = worker_stage_dir / "00_preflight.md"
     final_report_path = worker_stage_dir / "05_final_report.md"
     target_root_worker_stage = run_context.target_root / "worker_stage"
@@ -486,6 +489,11 @@ def _task_contract_text(
         f"- final report contract: `{final_report_contract_path}`\n"
         f"- runtime side-effect contract: `{runtime_contract_path}`\n"
         f"- required probe root: `.artifacts/probes/{patchlet_id}`\n"
+        f"- attempt root env: `$CXOR_ATTEMPT_ROOT` = `{run_context.run_dir}`\n"
+        f"- required report path env: `$CXOR_REQUIRED_REPORT_PATH` = `{run_context.required_report_path(patchlet_id)}`\n"
+        f"- required probe artifact root env: `$CXOR_REQUIRED_PROBE_ARTIFACT_ROOT` = `{run_context.required_probe_artifact_root(patchlet_id)}`\n"
+        f"- worker scratch dir env: `$CXOR_WORKER_SCRATCH_DIR` = `{worker_scratch_dir}`\n"
+        f"- quarantine dir env: `$CXOR_QUARANTINE_DIR` = `{quarantine_dir}`\n"
         f"- worker stage dir env: `$CXOR_WORKER_STAGE_DIR` = `{worker_stage_dir}`\n"
         f"- required preflight stage file: `$CXOR_WORKER_STAGE_DIR/00_preflight.md` = `{preflight_path}`\n"
         f"- required final stage file: `$CXOR_WORKER_STAGE_DIR/05_final_report.md` = `{final_report_path}`\n"
@@ -495,12 +503,13 @@ def _task_contract_text(
         f"- soft deadline: Aim to finish by {soft_deadline} seconds\n"
         "- if blocked near the budget, write `$CXOR_FINAL_REPORT_PATH` with explicit BLOCKED or FAILED status and preserve what you learned\n"
         "- Do not create target-root worker_stage/; all Worker Capsule stage files must stay under `$CXOR_WORKER_STAGE_DIR`\n"
-        "- Do not create execution-root or target-root top-level scratch files; use `/tmp` for scratch checks and `.artifacts/probes/<patchlet_id>/` for durable evidence\n"
+        "- Do not create execution-root or target-root top-level scratch files; use `$CXOR_WORKER_SCRATCH_DIR` for scratch checks and `.artifacts/probes/<patchlet_id>/` for durable evidence\n"
         "- forbidden edit paths: any product/runtime file other than the allowed file; do not edit orchestrator source paths\n\n"
         "This patchlet is a small bounded work unit.\n\n"
         "Do not attempt to solve unrelated work slices.\n\n"
         "Do not edit any product/runtime file except the single allowed file.\n\n"
-        "Do not create root-level scratch/check files such as `.report_check.json`; use `/tmp` for scratch checks.\n\n"
+        "Do not write scratch/check/validation files in the target repository root.\n\n"
+        f"Write temporary validation, report-checking, grep output, jq output, scratch notes, and intermediate verification output under `$CXOR_WORKER_SCRATCH_DIR` (`{worker_scratch_dir}`).\n\n"
         "Do not compact memory by summarizing broad unrelated context.\n\n"
         "Finish within the patchlet time budget.\n\n"
         "## Execution-root edit contract\n\n"
@@ -551,6 +560,11 @@ def _live_memory_json(run_context: PatchletRunContext, patchlet: dict) -> dict:
         "graph_node_ids": patchlet.get("graph_node_ids", []),
         "required_report_path": f".codex-orchestrator/reports/{patchlet_id}.json",
         "required_probe_root": f".artifacts/probes/{patchlet_id}",
+        "attempt_root": str(run_context.run_dir),
+        "attempt_scratch_dir": str(run_context.attempt_scratch_dir),
+        "quarantine_dir": str(run_context.quarantine_dir),
+        "required_report_path_absolute": str(run_context.required_report_path(patchlet_id)),
+        "required_probe_artifact_root": str(run_context.required_probe_artifact_root(patchlet_id)),
         "current_stage": "worker_initialized",
         "known_facts": [],
         "previous_failures": patchlet.get("source_failure_ids", []),
@@ -569,6 +583,7 @@ def _allowed_paths_json(run_context: PatchletRunContext, patchlet: dict) -> dict
             ".codex-orchestrator/reports",
             ".codex-orchestrator/runs",
             ".artifacts/probes",
+            str((run_context.attempt_scratch_dir).relative_to(run_context.target_root)),
         ],
         "slice_change_boundary": patchlet.get("slice_change_boundary"),
         "forbidden_roots": [
@@ -648,7 +663,9 @@ def ensure_worker_memory(
         f"- final report contract: `{final_report_contract_path}`\n"
         f"- runtime side-effect contract: `{runtime_contract_path}`\n"
         f"- work slice contract: `{work_slice_contract_path}`\n"
-        f"- probe root: `{live_memory['required_probe_root']}`\n",
+        f"- probe root: `{live_memory['required_probe_root']}`\n"
+        f"- worker scratch directory: `{run_context.attempt_scratch_dir}`\n"
+        f"- quarantine directory: `{run_context.quarantine_dir}`\n",
         encoding="utf-8",
     )
     write_json(capsule.worker_memory_dir / "KNOWN_FACTS.json", {
@@ -679,11 +696,14 @@ def ensure_worker_memory(
         f"- Read and obey `{runtime_contract_path}` before running runtime probes.\n"
         f"- Read and obey `{work_slice_contract_path}` before editing product/runtime code.\n"
         f"- `.artifacts/probes/{patchlet['patchlet_id']}/...`\n"
+        f"- `$CXOR_WORKER_SCRATCH_DIR/...` (`{run_context.attempt_scratch_dir}`) for scratch/check/validation files only\n"
         + "\n"
         "Product/runtime edits must happen only under `$CXOR_EXECUTION_ROOT`. "
         f"Do not edit `$CXOR_TARGET_ROOT/{patchlet.get('allowed_product_runtime_file')}`.\n\n"
         f"Do not create target-root worker_stage/ at `{ctx.root}/worker_stage/`. "
         "All Worker Capsule stage artifacts must be written under `$CXOR_WORKER_STAGE_DIR`.\n\n"
+        "Do not write scratch/check/validation files in the target repository root. "
+        "Use `$CXOR_WORKER_SCRATCH_DIR` for temporary validation, report-checking, grep output, jq output, scratch notes, and intermediate verification output.\n\n"
         f"Time budget: hard timeout of {timeout_seconds} seconds; aim to finish by {soft_deadline} seconds. "
         "If you cannot complete, stop before the hard timeout and write "
         "`$CXOR_FINAL_REPORT_PATH` with explicit BLOCKED or FAILED status. "

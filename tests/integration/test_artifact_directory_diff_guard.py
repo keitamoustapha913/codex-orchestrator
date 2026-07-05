@@ -49,3 +49,15 @@ def test_artifact_dir_allowance_preserves_one_product_file_rule():
     result = validate_changed_paths([".artifacts", "other.cfg"], _patchlet())
     assert result.allowed is False
     assert "other.cfg" in result.unauthorized_paths
+
+
+def test_scratch_quarantine_does_not_allow_new_product_directory():
+    result = validate_changed_paths(["runtime"], _patchlet())
+    assert result.allowed is False
+    assert "runtime" in result.unauthorized_paths
+
+
+def test_scratch_quarantine_does_not_allow_second_product_file():
+    result = validate_changed_paths(["service.cfg", "other.cfg"], _patchlet())
+    assert result.allowed is False
+    assert "other.cfg" in result.unauthorized_paths

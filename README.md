@@ -129,6 +129,31 @@ The target repo must be clean apart from volatile workflow artifacts before work
 Worktree execution writes reports, runs, and durable probe artifacts to the target repo artifact root, validates the worktree diff, validates the report, and only then applies a validated merge back to the target product/runtime file.
 Unauthorized worktree diffs are isolated as failure evidence and do not mutate target product/runtime files.
 
+Real Codex may create root-level scratch artifacts while checking reports,
+probes, or validation. Recognized scratch artifacts are quarantined, not
+silently deleted, under `.codex-orchestrator/runs/<attempt>/quarantined_scratch/`.
+The quarantine preserves content and hash metadata in
+`scratch_artifact_quarantine_result.json`, then the product diff is rechecked.
+Product/runtime files remain restricted by the one-file rule and same-file
+slice boundary; unknown root product files are rejected.
+
+Each attempt also exposes a worker scratch directory at
+`.codex-orchestrator/runs/<attempt>/worker_scratch/`. Worker prompts say: Do not
+write scratch/check/validation files in the target repository root. After worker
+exit, a root scratch sweep classifies leftovers with role-based quarantine,
+writes `root_scratch_sweep_result.json`, and preserves content hashes. Random
+root .txt/.out files are not automatically allowed; product/runtime files remain
+rejected. The diff is recomputed after quarantine.
+
+The diff guard uses actual changed/untracked paths, not file presence. In an
+execution worktree, unchanged peer product files are ignored because presence is
+not a change. Changed peer product files are rejected, and role-shaped validation
+scratch such as `validate_report.out` is quarantined only after scratch safety
+checks pass.
+The allowed file comes from the patchlet plan, not filename convention; the same
+logic applies to arbitrary names such as `control.plan`, `rollout.table`, and
+role-shaped scratch like `verify_result.log`.
+
 No source is copied into the target repo beyond durable workflow artifacts and validated target-file edits.
 
 ## Opt-in real Codex smoke

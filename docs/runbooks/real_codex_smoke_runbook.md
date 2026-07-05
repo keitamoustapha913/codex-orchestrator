@@ -159,6 +159,31 @@ normalization or rejection is recorded in `report_ingestion_result.json` and
 `probe_artifact_refs_not_objects`; runbook evidence should not reduce this
 class to `unknown_repeated_failure`. See `docs/report_contract.md`.
 
+For scratch artifacts, inspect
+`.codex-orchestrator/runs/<attempt>/gates/scratch_artifact_quarantine_result.json`.
+Recognized real-Codex scratch files are quarantined, not silently deleted. The
+artifact preserves content hashes and records why the path was scratch. The
+diff guard then rechecks product/runtime paths. Unknown root product files,
+second product files, executable root files, and slice-boundary violations
+remain failures.
+
+Each attempt has a worker scratch directory:
+`.codex-orchestrator/runs/<attempt>/worker_scratch/`. The prompt tells Codex:
+Do not write scratch/check/validation files in the target repository root. A
+root scratch sweep runs after worker exit, writes `root_scratch_sweep_result.json`,
+and uses role-based quarantine for report/probe validation outputs. Random root
+.txt/.out files are not automatically allowed, product/runtime files are still
+rejected, and the diff is recomputed after quarantine.
+
+When inspecting Scenario 2-style multi-file targets, remember that the guard
+uses actual changed/untracked paths, not file presence. Unchanged peer product
+files are ignored because presence is not a change. Changed peer product files
+are rejected. `validate_report.out` is role-shaped validation scratch, but
+`random.out` is not automatically scratch.
+The allowed file from the patchlet plan is authoritative, not filename
+convention; non-scenario names such as `control.plan`, `rollout.table`, and
+`verify_result.log` use the same policy.
+
 The final Markdown report has a separate wrapper gate. It must contain a
 standalone canonical marker line: `FINAL_STATUS: PASS`,
 `FINAL_STATUS: BLOCKED`, or `FINAL_STATUS: FAILED`. Non-canonical forms are

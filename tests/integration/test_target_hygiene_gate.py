@@ -174,3 +174,24 @@ def test_target_hygiene_gate_result_json_contains_cache_evidence(git_repo: Path)
     assert result["cache_artifacts_detected"]
     assert result["cache_artifacts_removed"]
     assert "sha256" in result["cache_artifacts_detected"][0]
+
+
+def test_scratch_quarantine_does_not_allow_executable_root_file(git_repo: Path):
+    path = git_repo / "report_check.sh"
+    path.write_text("#!/bin/sh\n", encoding="utf-8")
+    path.chmod(0o755)
+
+    result = _run_gate(git_repo)
+
+    assert result["accepted"] is False
+    assert "report_check.sh" in result["unknown_dirty_paths"]
+
+
+def test_scratch_quarantine_result_is_included_in_wrapper_gate_diagnostics(git_repo: Path):
+    run_dir = git_repo / ".codex-orchestrator" / "runs" / "P0001_attempt1"
+    gates = run_dir / "gates"
+    gates.mkdir(parents=True)
+    path = gates / "scratch_artifact_quarantine_result.json"
+    path.write_text('{"kind":"scratch_artifact_quarantine_result","quarantined":[],"rejected":[]}', encoding="utf-8")
+
+    assert path.exists()

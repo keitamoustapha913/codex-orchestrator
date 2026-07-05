@@ -4,6 +4,8 @@ import json
 import os
 import subprocess
 import shutil
+import hashlib
+import mimetypes
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -106,11 +108,19 @@ EXECUTION_ROOT_SCRATCH_FILENAMES = {
     "report_validation.json",
 }
 
-EXECUTION_ROOT_SCRATCH_ROLE_TOKENS = {
-    "report",
-    "probe",
-    "validation",
-}
+SCRATCH_TEXT_EXTENSIONS = {".json", ".txt", ".log", ".md", ".out", ".scratch", ".tmp"}
+SCRATCH_ROLE_PREFIXES = (
+    "report_check",
+    "report_validation",
+    "report_validated",
+    "probe_check",
+    "probe_validation",
+    "validation_report",
+    "worker_report_check",
+)
+MAX_SCRATCH_ARTIFACT_BYTES = 1024 * 1024
+SCRATCH_ROLE_SUBJECTS = {"report", "probe", "artifact", "result"}
+SCRATCH_ROLE_ACTIONS = {"check", "valid", "validate", "validated", "validation", "verify", "verified", "verification"}
 
 
 def _declared_scratch_artifacts(report_path: Path | None) -> set[str]:
@@ -132,19 +142,180 @@ def _is_quarantinable_declared_scratch(path: Path, *, declared: set[str], allowe
         return False
     if path.name == allowed_product_runtime_file:
         return False
-    if path.suffix.lower() in {".cfg", ".py", ".toml", ".yaml", ".yml", ".ini"}:
-        return False
-    return path.suffix.lower() in {".json", ".txt", ".log", ".md"}
+    return path.suffix.lower() in SCRATCH_TEXT_EXTENSIONS
 
 
-def _is_known_role_scratch_file(path: Path, *, allowed_product_runtime_file: str | None) -> bool:
+def _scratch_role_reason(path: Path) -> str | None:
+    stem = path.stem.lower().replace("-", "_").lstrip(".")
+    prefix_reasons = {
+        "validation_report": "role_shaped_report_validation_output",
+    }
+    for prefix in SCRATCH_ROLE_PREFIXES:
+        if stem == prefix or stem.startswith(prefix + "_"):
+            return prefix_reasons.get(prefix, f"role_shaped_{prefix}_output")
+    tokens = [token for token in stem.split("_") if token]
+    subjects = SCRATCH_ROLE_SUBJECTS.intersection(tokens)
+    actions = SCRATCH_ROLE_ACTIONS.intersection(tokens)
+    if subjects and actions:
+        subject = "probe" if "probe" in subjects else "report" if "report" in subjects else sorted(subjects)[0]
+        action = "validate" if "validate" in actions else "validation" if actions.intersection({"valid", "validated", "validation"}) else sorted(actions)[0]
+        if action == "validate" and "report" in subjects:
+            return "role_shaped_report_validate_output"
+        if action == "validate" and "probe" in subjects:
+            return "role_shaped_probe_validate_output"
+        return f"role_shaped_{subject}_{action}_output"
+    if ("validation" in tokens or "validate" in tokens) and {"report", "result", "output", "check"}.intersection(tokens):
+        action = "validate" if "validate" in tokens else "validation"
+        return f"role_shaped_report_{action}_output"
+    if stem.startswith(("report_", "report-", ".report_", ".report-", "probe_", "probe-", ".probe_", ".probe-")):
+        return "role_shaped_worker_scratch_output"
+    return None
+
+
+def _is_executable(path: Path) -> bool:
+    return bool(path.stat().st_mode & 0o111)
+
+
+def _is_tracked_in_execution_root(path: Path, execution_root: Path) -> bool:
+    result = subprocess.run(
+        ["git", "-C", str(execution_root), "ls-files", "--error-unmatch", path.name],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    return result.returncode == 0
+
+
+def _content_type(path: Path) -> str:
+    guessed = mimetypes.guess_type(path.name)[0]
+    if guessed:
+        return guessed
+    if path.suffix.lower() in {".out", ".log", ".txt", ".tmp", ".scratch", ".md"}:
+        return "text/plain"
+    return "application/octet-stream"
+
+
+def _scratch_rejection(path: Path, *, allowed_product_runtime_file: str | None, execution_root: Path, declared: set[str]) -> dict | None:
     if path.name == allowed_product_runtime_file:
-        return False
-    if path.suffix.lower() not in {".json", ".txt", ".log", ".md"}:
-        return False
-    stem = path.stem.lower().replace("-", "_")
-    tokens = [part for part in stem.split("_") if part]
-    return bool(tokens and tokens[0] in EXECUTION_ROOT_SCRATCH_ROLE_TOKENS)
+        return {
+            "original_path": path.name,
+            "classification": "allowed_product_runtime_file",
+            "reason": "allowed_product_runtime_file_not_quarantined",
+        }
+    if _is_tracked_in_execution_root(path, execution_root):
+        return {
+            "original_path": path.name,
+            "classification": "tracked_file",
+            "reason": "tracked_file_not_quarantined",
+        }
+    if path.stat().st_size > MAX_SCRATCH_ARTIFACT_BYTES:
+        return {
+            "original_path": path.name,
+            "classification": "oversized_scratch_candidate",
+            "reason": "scratch_candidate_exceeds_size_limit",
+        }
+    if _is_executable(path):
+        return {
+            "original_path": path.name,
+            "classification": "executable_root_file",
+            "reason": "executable_root_file_not_quarantined",
+        }
+    if path.suffix.lower() not in SCRATCH_TEXT_EXTENSIONS:
+        return {
+            "original_path": path.name,
+            "classification": "unauthorized_product_runtime_candidate",
+            "reason": "unknown_root_file_not_declared_and_not_role_shaped_scratch",
+        }
+    if path.name in declared:
+        return None
+    if path.name in EXECUTION_ROOT_SCRATCH_FILENAMES:
+        return None
+    if _scratch_role_reason(path):
+        return None
+    return {
+        "original_path": path.name,
+        "classification": "unauthorized_product_runtime_candidate",
+        "reason": "unknown_root_file_not_declared_and_not_role_shaped_scratch",
+    }
+
+
+def _git_root_path_status(execution_root: Path) -> tuple[list[Path], dict]:
+    all_root_files = sorted(
+        [path for path in execution_root.iterdir() if path.is_file() and path.name != ".git"],
+        key=lambda item: item.name,
+    )
+    result = subprocess.run(
+        ["git", "-C", str(execution_root), "status", "--porcelain"],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if result.returncode != 0:
+        return all_root_files, {
+            "mode": "directory_scan_no_git_status",
+            "git_modified_paths": [],
+            "git_untracked_paths": [path.name for path in all_root_files],
+            "ignored_unchanged_peer_paths": [],
+            "candidate_paths": [path.name for path in all_root_files],
+        }
+
+    modified: list[str] = []
+    untracked: list[str] = []
+    candidate_names: set[str] = set()
+    deleted_or_missing: list[str] = []
+    for line in result.stdout.splitlines():
+        if not line:
+            continue
+        code = line[:2]
+        raw_path = line[3:]
+        if " -> " in raw_path:
+            raw_path = raw_path.split(" -> ", 1)[1]
+        rel = Path(raw_path)
+        if len(rel.parts) != 1 or rel.name == ".git":
+            continue
+        if code == "??":
+            untracked.append(rel.as_posix())
+        else:
+            modified.append(rel.as_posix())
+        candidate_names.add(rel.name)
+        if not (execution_root / rel).is_file():
+            deleted_or_missing.append(rel.as_posix())
+
+    root_files = [execution_root / name for name in sorted(candidate_names) if (execution_root / name).is_file()]
+    ignored = [
+        path.name
+        for path in all_root_files
+        if path.name not in candidate_names and _is_tracked_in_execution_root(path, execution_root)
+    ]
+    return root_files, {
+        "mode": "git_status_actual_changes",
+        "git_modified_paths": sorted(modified),
+        "git_untracked_paths": sorted(untracked),
+        "git_deleted_or_missing_paths": sorted(deleted_or_missing),
+        "ignored_unchanged_peer_paths": sorted(ignored),
+        "candidate_paths": sorted(path.name for path in root_files),
+    }
+
+
+def _quarantine_record(run_ctx: PatchletRunContext, path: Path, *, declared: set[str], reason: str) -> dict:
+    data = path.read_bytes()
+    quarantine_dir = run_ctx.quarantine_dir
+    quarantine_dir.mkdir(parents=True, exist_ok=True)
+    dest = quarantine_dir / path.name
+    shutil.move(str(path), dest)
+    return {
+        "original_path": path.name,
+        "quarantine_path": str(dest.relative_to(run_ctx.target_root)),
+        "sha256": hashlib.sha256(data).hexdigest(),
+        "size_bytes": len(data),
+        "classification": "worker_scratch_artifact",
+        "reason": reason,
+        "declared_by_worker_report": path.name in declared,
+        "declared_by_report": path.name in declared,
+        "content_type": _content_type(dest),
+    }
 
 
 def _quarantine_execution_root_scratch_files(
@@ -154,46 +325,76 @@ def _quarantine_execution_root_scratch_files(
     allowed_product_runtime_file: str | None,
 ) -> list[dict]:
     quarantined: list[dict] = []
-    quarantine_dir = run_ctx.run_dir / "quarantined_scratch"
+    rejected: list[dict] = []
+    classified: list[dict] = []
     declared = _declared_scratch_artifacts(report_path)
-    root_files = [path for path in run_ctx.execution_root.iterdir() if path.is_file()]
+    root_files, candidate_source = _git_root_path_status(run_ctx.execution_root)
     for path in sorted(root_files, key=lambda item: item.name):
-        name = path.name
-        if name in EXECUTION_ROOT_SCRATCH_FILENAMES or _is_known_role_scratch_file(
+        rejection = _scratch_rejection(
             path,
             allowed_product_runtime_file=allowed_product_runtime_file,
-        ):
-            quarantine_dir.mkdir(parents=True, exist_ok=True)
-            dest = quarantine_dir / path.name
-            shutil.move(str(path), dest)
-            quarantined.append({
-                "original_path": name,
-                "quarantine_path": str(dest.relative_to(run_ctx.target_root)),
-                "reason": "worker_root_scratch_artifact",
-                "declared_by_report": name in declared,
-            })
-    for name in sorted(declared):
-        path = run_ctx.execution_root / name
-        if not path.exists() or not path.is_file():
-            continue
-        if any(item["original_path"] == name for item in quarantined):
-            continue
-        if not _is_quarantinable_declared_scratch(
-            path,
+            execution_root=run_ctx.execution_root,
             declared=declared,
-            allowed_product_runtime_file=allowed_product_runtime_file,
-        ):
+        )
+        if rejection:
+            if rejection["classification"] not in {"allowed_product_runtime_file", "tracked_file"}:
+                rejected.append(rejection)
             continue
-        quarantine_dir.mkdir(parents=True, exist_ok=True)
-        dest = quarantine_dir / path.name
-        shutil.move(str(path), dest)
-        quarantined.append({
-            "original_path": name,
-            "quarantine_path": str(dest.relative_to(run_ctx.target_root)),
-            "reason": "worker_root_scratch_artifact",
-            "declared_by_report": True,
+        if path.name in declared:
+            reason = "declared_worker_scratch_artifact"
+        elif path.name in EXECUTION_ROOT_SCRATCH_FILENAMES:
+            reason = "legacy_known_worker_scratch_artifact"
+        else:
+            reason = _scratch_role_reason(path) or "worker_root_scratch_artifact"
+        record = _quarantine_record(run_ctx, path, declared=declared, reason=reason)
+        quarantined.append(record)
+        classified.append({
+            "path": record["original_path"],
+            "classification": record["classification"],
+            "reason": record["reason"],
+            "action": "quarantine",
+            "quarantine_path": record["quarantine_path"],
         })
+    gates_dir = run_ctx.run_dir / "gates"
+    gates_dir.mkdir(parents=True, exist_ok=True)
+    root_sweep_result = {
+        "schema_version": "1.0",
+        "kind": "root_scratch_sweep_result",
+        "patchlet_id": run_ctx.run_dir.name.split("_attempt", 1)[0],
+        "attempt_id": run_ctx.run_dir.name,
+        "root_level_untracked_files": [
+            path.name
+            for path in root_files
+            if path.name in set(candidate_source.get("git_untracked_paths", []))
+        ],
+        "candidate_source": candidate_source,
+        "classified": classified,
+        "rejected": rejected,
+        "product_runtime_candidates": [allowed_product_runtime_file] if allowed_product_runtime_file else [],
+        "recomputed_diff_required": bool(quarantined),
+    }
+    write_json(gates_dir / "root_scratch_sweep_result.json", root_sweep_result)
+    if quarantined or rejected:
+        result = {
+            "schema_version": "1.0",
+            "kind": "scratch_artifact_quarantine_result",
+            "patchlet_id": run_ctx.run_dir.name.split("_attempt", 1)[0],
+            "attempt_id": run_ctx.run_dir.name,
+            "quarantined": quarantined,
+            "rejected": rejected,
+            "product_runtime_paths_still_rejected": [
+                row["original_path"]
+                for row in rejected
+                if row.get("classification") == "unauthorized_product_runtime_candidate"
+            ],
+            "one_file_rule_preserved": True,
+            "slice_boundary_preserved": True,
+            "root_scratch_sweep_completed_before_diff_guard": True,
+            "root_scratch_sweep_result_path": str((gates_dir / "root_scratch_sweep_result.json").relative_to(run_ctx.target_root)),
+        }
+        write_json(gates_dir / "scratch_artifact_quarantine_result.json", result)
     if quarantined:
+        quarantine_dir = run_ctx.quarantine_dir
         write_json(quarantine_dir / "quarantined_scratch_files.json", {
             "schema_version": "1.0",
             "kind": "quarantined_scratch_files",
@@ -772,6 +973,13 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
         status="ATTEMPT_STARTED",
         success=False,
         paths=_base_manifest_paths(ctx, initial_run_dir),
+        worker_scratch_contract={
+            "attempt_root": _record_path_for_manifest(ctx, initial_run_dir),
+            "attempt_scratch_dir": _record_path_for_manifest(ctx, initial_run_dir / "worker_scratch"),
+            "quarantine_dir": _record_path_for_manifest(ctx, initial_run_dir / "quarantined_scratch"),
+            "required_report_path": _record_path_for_manifest(ctx, ctx.paths.reports_dir / f"{pid}.json"),
+            "required_probe_artifact_root": _record_path_for_manifest(ctx, ctx.paths.probe_dir / pid),
+        },
     )
     _append_patchlet_event(
         ctx,
@@ -809,6 +1017,10 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
     )
     run_dir = run_ctx.run_dir
     worker_capsule = build_worker_capsule(run_ctx, patchlet)
+    run_ctx.attempt_scratch_dir.mkdir(parents=True, exist_ok=True)
+    run_ctx.quarantine_dir.mkdir(parents=True, exist_ok=True)
+    run_ctx.required_report_path(pid).parent.mkdir(parents=True, exist_ok=True)
+    run_ctx.required_probe_artifact_root(pid).mkdir(parents=True, exist_ok=True)
     ensure_worker_capsule(ctx, worker_capsule)
     ensure_worker_memory(ctx, worker_capsule, run_ctx, patchlet, worker_mode=worker_mode)
     ensure_worker_stage_templates(worker_capsule, run_ctx, patchlet)
@@ -888,6 +1100,24 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
         prompt_path=prompt_path,
         details={"prompt_id": prompt_entry.get("prompt_id")},
         next_action="Starting worker.",
+    )
+    _append_patchlet_event(
+        ctx,
+        "worker_scratch_contract_written",
+        patchlet_id=pid,
+        attempt_id=run_id,
+        summary=f"Worker scratch contract written for {run_id}.",
+        artifact_paths=[
+            _record_path_for_manifest(ctx, run_ctx.attempt_scratch_dir),
+            _record_path_for_manifest(ctx, run_ctx.quarantine_dir),
+            _record_path_for_manifest(ctx, worker_capsule.worker_memory_dir / "TASK_CONTRACT.md"),
+        ],
+        details={
+            "attempt_scratch_dir": _record_path_for_manifest(ctx, run_ctx.attempt_scratch_dir),
+            "quarantine_dir": _record_path_for_manifest(ctx, run_ctx.quarantine_dir),
+            "required_report_path": _record_path_for_manifest(ctx, run_ctx.required_report_path(pid)),
+            "required_probe_artifact_root": _record_path_for_manifest(ctx, run_ctx.required_probe_artifact_root(pid)),
+        },
     )
     if patchlet.get("slice_change_boundary"):
         _append_patchlet_event(
@@ -992,6 +1222,31 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
             report_path=worker_result.report_path,
             allowed_product_runtime_file=patchlet.get("allowed_product_runtime_file"),
         )
+        quarantine_result_path = run_dir / "gates" / "scratch_artifact_quarantine_result.json"
+        root_sweep_result_path = run_dir / "gates" / "root_scratch_sweep_result.json"
+        if root_sweep_result_path.exists():
+            _append_patchlet_event(
+                ctx,
+                "root_scratch_sweep_completed",
+                patchlet_id=pid,
+                attempt_id=run_id,
+                summary=f"Root scratch sweep completed for {run_id}.",
+                artifact_paths=[_record_path_for_manifest(ctx, root_sweep_result_path)],
+                details=read_json(root_sweep_result_path),
+            )
+        if quarantine_result_path.exists():
+            quarantine_result = read_json(quarantine_result_path)
+            for scratch in quarantine_result.get("rejected", []):
+                _append_patchlet_event(
+                    ctx,
+                    "root_scratch_artifact_rejected",
+                    patchlet_id=pid,
+                    attempt_id=run_id,
+                    severity="error",
+                    summary=f"Rejected root-level scratch candidate {scratch.get('original_path')}.",
+                    artifact_paths=[_record_path_for_manifest(ctx, quarantine_result_path)],
+                    details=scratch,
+                )
         if quarantined_scratch_files:
             append_worker_event(
                 ctx,
@@ -1007,12 +1262,35 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
                 patchlet_id=pid,
                 attempt_id=run_id,
                 summary=f"Quarantined execution-root scratch files for {pid}.",
-                artifact_paths=[_record_path_for_manifest(ctx, run_dir / "quarantined_scratch" / "quarantined_scratch_files.json")],
+                artifact_paths=[
+                    _record_path_for_manifest(ctx, quarantine_result_path),
+                    _record_path_for_manifest(ctx, run_dir / "quarantined_scratch" / "quarantined_scratch_files.json"),
+                ],
                 details={"quarantined_scratch_files": quarantined_scratch_files},
             )
+            for scratch in quarantined_scratch_files:
+                _append_patchlet_event(
+                    ctx,
+                    "root_scratch_artifact_quarantined",
+                    patchlet_id=pid,
+                    attempt_id=run_id,
+                    summary=f"Quarantined worker scratch artifact {scratch.get('original_path')}.",
+                    artifact_paths=[_record_path_for_manifest(ctx, quarantine_result_path)],
+                    details=scratch,
+                )
         after = snapshot_status(run_ctx.execution_root)
         changed_paths = changed_between(before, after)
         diff_text = git_diff(run_ctx.execution_root)
+        if quarantined_scratch_files:
+            _append_patchlet_event(
+                ctx,
+                "product_diff_recomputed_after_scratch_sweep",
+                patchlet_id=pid,
+                attempt_id=run_id,
+                summary=f"Product diff rechecked after scratch quarantine for {pid}.",
+                artifact_paths=[_record_path_for_manifest(ctx, run_dir / "gates" / "scratch_artifact_quarantine_result.json")],
+                details={"changed_paths_after_quarantine": changed_paths},
+            )
         run_dir.mkdir(parents=True, exist_ok=True)
         diff_path.write_text(diff_text, encoding="utf-8")
         (run_dir / "diff_name_status.txt").write_text("\n".join(changed_paths) + "\n", encoding="utf-8")

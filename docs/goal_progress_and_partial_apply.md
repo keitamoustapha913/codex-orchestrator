@@ -17,3 +17,25 @@ In-progress unaccepted worker changes are never applied by default. `partial_app
 ## RC6 Partial Coverage
 
 PARTIAL progress accepts patchlet progress but blocks DONE. A patchlet can be accepted when its selected current obligations pass; future obligations remain unproven, not failed. DONE is available only after workflow-level coverage proves every required obligation and master-prompt satisfaction passes. Same-file progress also requires a slice-level allowed-change boundary because one allowed file per patchlet is necessary but not sufficient, and future slice changes are rejected.
+
+Scratch artifact quarantine does not change goal progress. Recognized worker
+scratch files are preserved under the attempt artifact root and removed from
+the candidate product diff before acceptance. Product/runtime files remain
+restricted by the one-file rule and same-file slice boundary before any PARTIAL
+or DONE status is considered.
+
+Each attempt has a worker scratch directory, and workers are told: Do not write
+scratch/check/validation files in the target repository root. The root scratch
+sweep quarantines role-based scratch under the run directory, records
+`root_scratch_sweep_result.json`, and the diff is recomputed after quarantine.
+Random root .txt and .out files are not automatically allowed, and product/runtime
+files are still rejected before any checkpoint can be accepted.
+
+Scratch quarantine does not let file presence masquerade as a product diff. The
+guard uses actual changed/untracked paths, not file presence. Unchanged peer
+product files are ignored because presence is not a change; changed peer product
+files are rejected. Role-shaped validation scratch such as `validate_report.out`
+is quarantined only after safety checks.
+The allowed file from the patchlet plan is authoritative, not filename
+convention, so `control.plan` and `rollout.table` are handled by the same
+changed-path rules as any other product/runtime names.

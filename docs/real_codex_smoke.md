@@ -90,6 +90,31 @@ Workers edit product/runtime files only in `CXOR_EXECUTION_ROOT`.
 root remains writable only for `.codex-orchestrator/` and `.artifacts/probes/`
 evidence.
 
+Workers may leave root-level scratch artifacts such as `report_check.out` while
+checking reports. Recognized scratch artifacts are quarantined, not silently
+deleted, under the attempt run directory. The quarantine result records original
+path, quarantine path, sha256, size, content type, and reason. After quarantine,
+cxor recomputes the product diff before applying the one-file rule and
+slice-boundary guard. Unknown root product/runtime files and executable root
+files remain rejected.
+
+Every real-Codex patchlet attempt exposes a worker scratch directory:
+`.codex-orchestrator/runs/<attempt>/worker_scratch/`. Prompt and memory artifacts
+say: Do not write scratch/check/validation files in the target repository root.
+The orchestrator still performs a root scratch sweep after worker exit, using
+role-based quarantine for report/probe validation-shaped files and writing
+`root_scratch_sweep_result.json`. Random root .txt/.out files are not
+automatically allowed, product/runtime files are still rejected, and the diff is
+recomputed after quarantine.
+
+The sweep and diff guard use actual changed/untracked paths, not file presence.
+Unchanged peer product files are ignored because presence is not a change.
+Changed peer product files are rejected, and role-shaped validation scratch such
+as `validate_report.out` is quarantined only after scratch safety checks pass.
+The allowed file from the patchlet plan is authoritative, not filename
+convention. Non-scenario names such as `control.plan`, `rollout.table`, and
+`verify_result.log` follow the same changed-path and scratch-role rules.
+
 The final Markdown report must contain a canonical `FINAL_STATUS` marker as a
 standalone line beginning at column 1. Accepted lines are `FINAL_STATUS: PASS`,
 `FINAL_STATUS: BLOCKED`, and `FINAL_STATUS: FAILED`. Non-canonical forms are

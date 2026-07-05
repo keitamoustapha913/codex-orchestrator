@@ -145,6 +145,32 @@ preserves raw worker output, rejects vague shorthand and future-slice claims,
 and remains pending until orchestrator-owned independent proof canonicalizes
 the result. Worker claims are not proof and do not satisfy DONE.
 
+RC6C scratch handling quarantines recognized real-Codex root-level scratch
+artifacts before final diff guard acceptance. Quarantine is not silent delete:
+content is preserved under the attempt run directory, sha256 and size metadata
+are written to `scratch_artifact_quarantine_result.json`, and the product diff
+is rechecked after quarantine. Unknown product/runtime files, second product
+files, executable root files, the one-file rule, and same-file slice boundaries
+remain enforced.
+
+RC6D adds a worker scratch directory at
+`.codex-orchestrator/runs/<attempt>/worker_scratch/`. Worker prompts and memory
+contracts say: Do not write scratch/check/validation files in the target
+repository root. After worker exit, a root scratch sweep performs role-based
+quarantine, writes `root_scratch_sweep_result.json`, and preserves content
+hashes. Random root .txt and .out files are not automatically allowed,
+product/runtime files are still rejected, and the diff is recomputed after
+quarantine.
+
+RC6E tightens the sweep to actual changed/untracked paths, not file presence.
+Unchanged peer product files are ignored because presence is not a change;
+changed peer product files are rejected. Validation scratch role tokens include
+`validate`, so safe files such as `validate_report.out` are quarantined while
+random `.out` files remain rejected.
+The allowed file is read from the patchlet plan, not filename convention; tests
+cover non-scenario names such as `control.plan`, `rollout.table`, and
+`verify_result.log`.
+
 Real-Codex attempts write compact liveness events to `progress.jsonl`. This is
 not success evidence. Timeout safe-failure preserves evidence and containment;
 it is not task success and not `DONE`.
