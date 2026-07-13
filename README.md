@@ -145,10 +145,13 @@ slice boundary; unknown root product files are rejected.
 Each attempt also exposes a worker scratch directory at
 `.codex-orchestrator/runs/<attempt>/worker_scratch/`. Worker prompts say: Do not
 write scratch/check/validation files in the target repository root. After worker
-exit, a root scratch sweep classifies leftovers with role-based quarantine,
-writes `root_scratch_sweep_result.json`, and preserves content hashes. Random
-root .txt/.out files are not automatically allowed; product/runtime files remain
-rejected. The diff is recomputed after quarantine.
+exit, a root scratch sweep classifies leftovers with role-based quarantine.
+Only role-shaped untracked worker scratch directories are eligible for
+quarantine. Not all directories are allowed. Not all scratch directories are
+allowed. Tracked `worker_scratch` content is rejected. Executable scratch
+content is rejected. Changed peer product files remain rejected. Directory
+quarantine preserves hashes and metadata, writes `root_scratch_sweep_result.json`,
+and changed paths are recomputed after quarantine before the diff guard runs.
 
 Patchlet-prefixed report formatting scratch is quarantined only when every
 safety condition is met: the root file is untracked, non-executable,

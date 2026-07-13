@@ -235,6 +235,96 @@ def test_scratch_quarantine_runs_only_on_changed_or_untracked_files(tmp_path: Pa
     assert (run_ctx.execution_root / "release.env").exists()
 
 
+def test_worker_scratch_directory_quarantine_preserves_one_allowed_file_rule(tmp_path: Path):
+    run_ctx = _execution_ctx(tmp_path)
+    before = snapshot_status(run_ctx.execution_root)
+    (run_ctx.execution_root / "gateway.routes").write_text("/health -> ready-health\n", encoding="utf-8")
+    scratch_dir = run_ctx.execution_root / "worker_scratch"
+    scratch_dir.mkdir()
+    (scratch_dir / "report.json").write_text('{"status": "pass"}\n', encoding="utf-8")
+
+    _quarantine_execution_root_scratch_files(run_ctx, report_path=None, allowed_product_runtime_file="gateway.routes")
+    after = snapshot_status(run_ctx.execution_root)
+    diff_result = validate_changed_paths(changed_between(before, after), _patchlet())
+
+    assert diff_result.allowed is True
+    assert diff_result.product_runtime_paths == ["gateway.routes"]
+    assert not (run_ctx.execution_root / "worker_scratch").exists()
+
+
+def test_worker_scratch_directory_quarantine_does_not_allow_second_product_file(tmp_path: Path):
+    run_ctx = _execution_ctx(tmp_path)
+    before = snapshot_status(run_ctx.execution_root)
+    (run_ctx.execution_root / "gateway.routes").write_text("/health -> ready-health\n", encoding="utf-8")
+    (run_ctx.execution_root / "peer.record").write_text("owner=platform-release\n", encoding="utf-8")
+    scratch_dir = run_ctx.execution_root / "worker_scratch"
+    scratch_dir.mkdir()
+    (scratch_dir / "report.json").write_text('{"status": "pass"}\n', encoding="utf-8")
+
+    _quarantine_execution_root_scratch_files(run_ctx, report_path=None, allowed_product_runtime_file="gateway.routes")
+    after = snapshot_status(run_ctx.execution_root)
+    diff_result = validate_changed_paths(changed_between(before, after), _patchlet())
+
+    assert diff_result.allowed is False
+    assert "peer.record" in diff_result.unauthorized_paths
+
+
+def test_worker_scratch_directory_quarantine_does_not_allow_product_directory(tmp_path: Path):
+    run_ctx = _execution_ctx(tmp_path)
+    before = snapshot_status(run_ctx.execution_root)
+    (run_ctx.execution_root / "gateway.routes").write_text("/health -> ready-health\n", encoding="utf-8")
+    product_dir = run_ctx.execution_root / "runtime"
+    product_dir.mkdir()
+    (product_dir / "state.cfg").write_text("state=dirty\n", encoding="utf-8")
+    scratch_dir = run_ctx.execution_root / "worker_scratch"
+    scratch_dir.mkdir()
+    (scratch_dir / "report.json").write_text('{"status": "pass"}\n', encoding="utf-8")
+
+    _quarantine_execution_root_scratch_files(run_ctx, report_path=None, allowed_product_runtime_file="gateway.routes")
+    after = snapshot_status(run_ctx.execution_root)
+    diff_result = validate_changed_paths(changed_between(before, after), _patchlet())
+
+    assert diff_result.allowed is False
+    assert "runtime" in diff_result.unauthorized_paths
+
+
+def test_worker_scratch_directory_quarantine_does_not_mask_dirty_tracked_files(tmp_path: Path):
+    run_ctx = _execution_ctx(tmp_path)
+    before = snapshot_status(run_ctx.execution_root)
+    (run_ctx.execution_root / "gateway.routes").write_text("/health -> ready-health\n", encoding="utf-8")
+    (run_ctx.execution_root / "peer.record").write_text("owner=platform-release\n", encoding="utf-8")
+    _git("add", "peer.record", cwd=run_ctx.execution_root)
+    _git("commit", "-m", "track peer", cwd=run_ctx.execution_root)
+    (run_ctx.execution_root / "peer.record").write_text("owner=platform\n", encoding="utf-8")
+    scratch_dir = run_ctx.execution_root / "worker_scratch"
+    scratch_dir.mkdir()
+    (scratch_dir / "report.json").write_text('{"status": "pass"}\n', encoding="utf-8")
+
+    _quarantine_execution_root_scratch_files(run_ctx, report_path=None, allowed_product_runtime_file="gateway.routes")
+    after = snapshot_status(run_ctx.execution_root)
+    diff_result = validate_changed_paths(changed_between(before, after), _patchlet())
+
+    assert diff_result.allowed is False
+    assert "peer.record" in diff_result.unauthorized_paths
+
+
+def test_worker_scratch_directory_quarantine_does_not_mask_changed_peer_files(tmp_path: Path):
+    run_ctx = _execution_ctx(tmp_path)
+    before = snapshot_status(run_ctx.execution_root)
+    (run_ctx.execution_root / "gateway.routes").write_text("/health -> ready-health\n", encoding="utf-8")
+    (run_ctx.execution_root / "release.env").write_text("release_channel=green\n", encoding="utf-8")
+    scratch_dir = run_ctx.execution_root / "worker_scratch"
+    scratch_dir.mkdir()
+    (scratch_dir / "report.json").write_text('{"status": "pass"}\n', encoding="utf-8")
+
+    _quarantine_execution_root_scratch_files(run_ctx, report_path=None, allowed_product_runtime_file="gateway.routes")
+    after = snapshot_status(run_ctx.execution_root)
+    diff_result = validate_changed_paths(changed_between(before, after), _patchlet())
+
+    assert diff_result.allowed is False
+    assert "release.env" in diff_result.unauthorized_paths
+
+
 def test_generic_unchanged_peer_files_with_different_names_extensions_are_ignored(tmp_path: Path):
     run_ctx = _generic_execution_ctx(tmp_path)
 

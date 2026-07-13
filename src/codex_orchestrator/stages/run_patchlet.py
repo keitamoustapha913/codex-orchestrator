@@ -111,6 +111,7 @@ EXECUTION_ROOT_SCRATCH_FILENAMES = {
 }
 
 SCRATCH_TEXT_EXTENSIONS = {".json", ".txt", ".log", ".md", ".out", ".scratch", ".tmp"}
+WORKER_SCRATCH_DIRECTORY_TEXT_EXTENSIONS = SCRATCH_TEXT_EXTENSIONS | {".err", ".jsonl"}
 SCRATCH_ROLE_PREFIXES = (
     "report_check",
     "report_validation",
@@ -212,6 +213,17 @@ def _scratch_role_reason(path: Path) -> str | None:
     return None
 
 
+def _normalized_worker_scratch_name_tokens(name: str) -> list[str]:
+    normalized = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", name)
+    normalized = normalized.replace("-", "_").replace(".", "_").lstrip(".").lower()
+    return [token for token in normalized.split("_") if token]
+
+
+def _is_role_shaped_worker_scratch_dir_name(name: str) -> bool:
+    tokens = _normalized_worker_scratch_name_tokens(name)
+    return "worker" in tokens and "scratch" in tokens
+
+
 def _is_executable(path: Path) -> bool:
     return bool(path.stat().st_mode & 0o111)
 
@@ -236,12 +248,134 @@ def _content_type(path: Path) -> str:
     return "application/octet-stream"
 
 
+def _directory_tree_entries(directory: Path) -> list[Path]:
+    entries: list[Path] = []
+    stack = [directory]
+    while stack:
+        current = stack.pop()
+        children = sorted(current.iterdir(), key=lambda item: item.name, reverse=True)
+        for child in children:
+            entries.append(child)
+            if child.is_symlink():
+                continue
+            if child.is_dir():
+                stack.append(child)
+    return sorted(entries, key=lambda item: item.relative_to(directory).as_posix())
+
+
+def _directory_file_record(directory: Path, path: Path) -> dict[str, object]:
+    data = path.read_bytes()
+    return {
+        "relative_path": path.relative_to(directory).as_posix(),
+        "sha256": hashlib.sha256(data).hexdigest(),
+        "size_bytes": len(data),
+        "mode": f"{path.stat().st_mode:o}",
+        "content_type": _content_type(path),
+    }
+
+
+def _build_directory_quarantine_manifest(directory: Path) -> dict[str, object]:
+    file_records: list[dict[str, object]] = []
+    total_size_bytes = 0
+    for entry in _directory_tree_entries(directory):
+        rel = entry.relative_to(directory)
+        if entry.is_symlink():
+            raise ValueError("symlink_escape")
+        if ".git" in rel.parts:
+            raise ValueError("nested_git_directory")
+        if entry.is_dir():
+            continue
+        if not entry.is_file():
+            raise ValueError("unsupported_directory_entry")
+        if entry.stat().st_mode & 0o111:
+            raise ValueError("executable_file")
+        if entry.suffix.lower() not in WORKER_SCRATCH_DIRECTORY_TEXT_EXTENSIONS:
+            raise ValueError("unsupported_extension")
+        try:
+            entry.read_text(encoding="utf-8")
+        except UnicodeDecodeError as exc:
+            raise ValueError("binary_content") from exc
+        record = _directory_file_record(directory, entry)
+        file_records.append(record)
+        total_size_bytes += int(record["size_bytes"])
+    tree_hash = hashlib.sha256()
+    for record in file_records:
+        tree_hash.update(str(record["relative_path"]).encode("utf-8"))
+        tree_hash.update(b"\0")
+        tree_hash.update(str(record["mode"]).encode("utf-8"))
+        tree_hash.update(b"\0")
+        tree_hash.update(str(record["size_bytes"]).encode("utf-8"))
+        tree_hash.update(b"\0")
+        tree_hash.update(str(record["sha256"]).encode("utf-8"))
+        tree_hash.update(b"\n")
+    return {
+        "entries": file_records,
+        "file_count": len(file_records),
+        "total_size_bytes": total_size_bytes,
+        "tree_sha256": tree_hash.hexdigest(),
+    }
+
+
+def _worker_scratch_directory_safety_reason(directory: Path, *, execution_root: Path) -> tuple[bool, str, list[dict[str, object]]]:
+    if not directory.is_dir() or directory.is_symlink():
+        return False, "not_directory", []
+    if not _is_role_shaped_worker_scratch_dir_name(directory.name):
+        return False, "not_role_shaped_worker_scratch_directory", []
+    tracked = subprocess.run(
+        ["git", "-C", str(execution_root), "ls-files", "--", directory.name],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    ).stdout.splitlines()
+    if tracked:
+        return False, "tracked_worker_scratch_directory", []
+    if not any(True for _ in directory.iterdir()):
+        return False, "empty_directory", []
+    file_records: list[dict[str, object]] = []
+    total_size_bytes = 0
+    for entry in _directory_tree_entries(directory):
+        rel = entry.relative_to(directory)
+        if entry.is_symlink():
+            return False, "symlink_escape", []
+        if ".git" in rel.parts:
+            return False, "nested_git_directory", []
+        if entry.is_dir():
+            continue
+        if not entry.is_file():
+            return False, "unsupported_directory_entry", []
+        if entry.stat().st_mode & 0o111:
+            return False, "executable_file", []
+        if entry.suffix.lower() not in WORKER_SCRATCH_DIRECTORY_TEXT_EXTENSIONS:
+            return False, "unsupported_extension", []
+        try:
+            entry.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            return False, "binary_content", []
+        record = _directory_file_record(directory, entry)
+        file_records.append(record)
+        total_size_bytes += int(record["size_bytes"])
+        if int(record["size_bytes"]) > MAX_SCRATCH_ARTIFACT_BYTES:
+            return False, "oversized_file", []
+        if total_size_bytes > MAX_SCRATCH_ARTIFACT_BYTES:
+            return False, "oversized_directory", []
+    if not file_records:
+        return False, "empty_directory", []
+    return True, "role_shaped_untracked_worker_scratch_directory", file_records
+
+
 def _scratch_rejection(path: Path, *, allowed_product_runtime_file: str | None, execution_root: Path, declared: set[str]) -> dict | None:
     if path.name == allowed_product_runtime_file:
         return {
             "original_path": path.name,
             "classification": "allowed_product_runtime_file",
             "reason": "allowed_product_runtime_file_not_quarantined",
+        }
+    if path.is_symlink():
+        return {
+            "original_path": path.name,
+            "classification": "symlink_escape",
+            "reason": "symlink_escape_not_quarantined",
         }
     if _is_tracked_in_execution_root(path, execution_root):
         return {
@@ -281,8 +415,8 @@ def _scratch_rejection(path: Path, *, allowed_product_runtime_file: str | None, 
 
 
 def _git_root_path_status(execution_root: Path) -> tuple[list[Path], dict]:
-    all_root_files = sorted(
-        [path for path in execution_root.iterdir() if path.is_file() and path.name != ".git"],
+    all_root_paths = sorted(
+        [path for path in execution_root.iterdir() if path.name != ".git" and (path.is_file() or path.is_dir() or path.is_symlink())],
         key=lambda item: item.name,
     )
     result = subprocess.run(
@@ -293,12 +427,13 @@ def _git_root_path_status(execution_root: Path) -> tuple[list[Path], dict]:
         check=False,
     )
     if result.returncode != 0:
-        return all_root_files, {
+        return all_root_paths, {
             "mode": "directory_scan_no_git_status",
             "git_modified_paths": [],
-            "git_untracked_paths": [path.name for path in all_root_files],
+            "git_untracked_paths": [path.name for path in all_root_paths],
+            "git_untracked_directories": [path.name for path in all_root_paths if path.is_dir()],
             "ignored_unchanged_peer_paths": [],
-            "candidate_paths": [path.name for path in all_root_files],
+            "candidate_paths": [path.name for path in all_root_paths],
         }
 
     modified: list[str] = []
@@ -323,19 +458,20 @@ def _git_root_path_status(execution_root: Path) -> tuple[list[Path], dict]:
         if not (execution_root / rel).is_file():
             deleted_or_missing.append(rel.as_posix())
 
-    root_files = [execution_root / name for name in sorted(candidate_names) if (execution_root / name).is_file()]
+    root_paths = [execution_root / name for name in sorted(candidate_names) if (execution_root / name).exists()]
     ignored = [
         path.name
-        for path in all_root_files
+        for path in all_root_paths
         if path.name not in candidate_names and _is_tracked_in_execution_root(path, execution_root)
     ]
-    return root_files, {
+    return root_paths, {
         "mode": "git_status_actual_changes",
         "git_modified_paths": sorted(modified),
         "git_untracked_paths": sorted(untracked),
+        "git_untracked_directories": sorted(path.name for path in root_paths if path.is_dir() and path.name in set(untracked)),
         "git_deleted_or_missing_paths": sorted(deleted_or_missing),
         "ignored_unchanged_peer_paths": sorted(ignored),
-        "candidate_paths": sorted(path.name for path in root_files),
+        "candidate_paths": sorted(path.name for path in root_paths),
     }
 
 
@@ -358,6 +494,36 @@ def _quarantine_record(run_ctx: PatchletRunContext, path: Path, *, declared: set
     }
 
 
+def _quarantine_directory_record(
+    run_ctx: PatchletRunContext,
+    path: Path,
+    *,
+    reason: str,
+    file_records: list[dict[str, object]],
+) -> dict:
+    manifest = _build_directory_quarantine_manifest(path)
+    quarantine_dir = run_ctx.quarantine_dir
+    quarantine_dir.mkdir(parents=True, exist_ok=True)
+    dest = quarantine_dir / path.name
+    if dest.exists():
+        shutil.rmtree(dest)
+    shutil.move(str(path), dest)
+    quarantined_manifest = _build_directory_quarantine_manifest(dest)
+    return {
+        "original_path": path.name,
+        "quarantine_path": str(dest.relative_to(run_ctx.target_root)),
+        "classification": "worker_scratch_directory",
+        "reason": reason,
+        "tree_sha256": manifest["tree_sha256"],
+        "file_count": manifest["file_count"],
+        "total_size_bytes": manifest["total_size_bytes"],
+        "entries": manifest["entries"],
+        "content_preserved": manifest["entries"] == quarantined_manifest["entries"],
+        "quarantine_kind": "directory",
+        "files_before": file_records,
+    }
+
+
 def _quarantine_execution_root_scratch_files(
     run_ctx: PatchletRunContext,
     *,
@@ -368,8 +534,29 @@ def _quarantine_execution_root_scratch_files(
     rejected: list[dict] = []
     classified: list[dict] = []
     declared = _declared_scratch_artifacts(report_path)
-    root_files, candidate_source = _git_root_path_status(run_ctx.execution_root)
-    for path in sorted(root_files, key=lambda item: item.name):
+    root_paths, candidate_source = _git_root_path_status(run_ctx.execution_root)
+    for path in sorted(root_paths, key=lambda item: item.name):
+        if path.is_dir():
+            safe, reason, file_records = _worker_scratch_directory_safety_reason(path, execution_root=run_ctx.execution_root)
+            if not safe:
+                rejected.append({
+                    "original_path": path.name,
+                    "classification": "worker_scratch_directory" if _is_role_shaped_worker_scratch_dir_name(path.name) else "unauthorized_product_runtime_candidate",
+                    "reason": reason,
+                })
+                continue
+            record = _quarantine_directory_record(run_ctx, path, reason=reason, file_records=file_records)
+            quarantined.append(record)
+            classified.append(
+                {
+                    "path": record["original_path"],
+                    "classification": record["classification"],
+                    "reason": record["reason"],
+                    "action": "quarantine",
+                    "quarantine_path": record["quarantine_path"],
+                }
+            )
+            continue
         rejection = _scratch_rejection(
             path,
             allowed_product_runtime_file=allowed_product_runtime_file,
@@ -404,7 +591,12 @@ def _quarantine_execution_root_scratch_files(
         "attempt_id": run_ctx.run_dir.name,
         "root_level_untracked_files": [
             path.name
-            for path in root_files
+            for path in root_paths
+            if path.name in set(candidate_source.get("git_untracked_paths", []))
+        ],
+        "root_level_untracked_paths": [
+            path.name
+            for path in root_paths
             if path.name in set(candidate_source.get("git_untracked_paths", []))
         ],
         "candidate_source": candidate_source,
@@ -421,6 +613,7 @@ def _quarantine_execution_root_scratch_files(
             "patchlet_id": run_ctx.run_dir.name.split("_attempt", 1)[0],
             "attempt_id": run_ctx.run_dir.name,
             "quarantined": quarantined,
+            "quarantined_directories": [row for row in quarantined if row.get("classification") == "worker_scratch_directory"],
             "rejected": rejected,
             "product_runtime_paths_still_rejected": [
                 row["original_path"]
@@ -1350,6 +1543,17 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
         if quarantine_result_path.exists():
             quarantine_result = read_json(quarantine_result_path)
             for scratch in quarantine_result.get("rejected", []):
+                if scratch.get("classification") == "worker_scratch_directory":
+                    _append_patchlet_event(
+                        ctx,
+                        "worker_scratch_directory_rejected",
+                        patchlet_id=pid,
+                        attempt_id=run_id,
+                        severity="error",
+                        summary=f"Rejected worker scratch directory candidate {scratch.get('original_path')}.",
+                        artifact_paths=[_record_path_for_manifest(ctx, quarantine_result_path)],
+                        details=scratch,
+                    )
                 _append_patchlet_event(
                     ctx,
                     "root_scratch_artifact_rejected",
@@ -1369,6 +1573,21 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
                 worker_mode=worker_mode,
                 details={"quarantined_scratch_files": quarantined_scratch_files},
             )
+            quarantined_directories = [
+                scratch
+                for scratch in quarantined_scratch_files
+                if scratch.get("classification") == "worker_scratch_directory"
+            ]
+            if quarantined_directories:
+                _append_patchlet_event(
+                    ctx,
+                    "worker_scratch_directory_quarantined",
+                    patchlet_id=pid,
+                    attempt_id=run_id,
+                    summary=f"Quarantined worker scratch directories for {pid}.",
+                    artifact_paths=[_record_path_for_manifest(ctx, quarantine_result_path)],
+                    details={"quarantined_directories": quarantined_directories},
+                )
             _append_patchlet_event(
                 ctx,
                 "execution_root_scratch_quarantined",
@@ -1395,6 +1614,16 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
         changed_paths = changed_between(before, after)
         diff_text = git_diff(run_ctx.execution_root)
         if quarantined_scratch_files:
+            if any(scratch.get("classification") == "worker_scratch_directory" for scratch in quarantined_scratch_files):
+                _append_patchlet_event(
+                    ctx,
+                    "changed_paths_recomputed_after_directory_quarantine",
+                    patchlet_id=pid,
+                    attempt_id=run_id,
+                    summary=f"Changed paths recomputed after directory quarantine for {pid}.",
+                    artifact_paths=[_record_path_for_manifest(ctx, run_dir / "gates" / "scratch_artifact_quarantine_result.json")],
+                    details={"changed_paths_after_quarantine": changed_paths},
+                )
             _append_patchlet_event(
                 ctx,
                 "product_diff_recomputed_after_scratch_sweep",

@@ -157,10 +157,12 @@ RC6D adds a worker scratch directory at
 `.codex-orchestrator/runs/<attempt>/worker_scratch/`. Worker prompts and memory
 contracts say: Do not write scratch/check/validation files in the target
 repository root. After worker exit, a root scratch sweep performs role-based
-quarantine, writes `root_scratch_sweep_result.json`, and preserves content
-hashes. Random root .txt and .out files are not automatically allowed,
-product/runtime files are still rejected, and the diff is recomputed after
-quarantine.
+quarantine. Only role-shaped untracked worker scratch directories are eligible
+for quarantine. Not all directories are allowed. Not all scratch directories
+are allowed. Tracked `worker_scratch` content is rejected. Executable scratch
+content is rejected. Changed peer product files remain rejected. Directory
+quarantine preserves hashes and metadata, writes `root_scratch_sweep_result.json`,
+and changed paths are recomputed after quarantine.
 
 RC6H extends that role-based quarantine narrowly for patchlet-prefixed report
 formatting scratch. A file is eligible only when it is untracked,

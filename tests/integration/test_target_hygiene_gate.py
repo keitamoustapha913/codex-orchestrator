@@ -252,3 +252,16 @@ def test_patchlet_report_pretty_quarantine_preserves_slice_boundary(git_repo: Pa
     assert result["accepted"] is False
     assert result["unknown_dirty_paths"] == ["p0001_report_pretty.json"]
     assert (git_repo / "p0001_report_pretty.json").exists()
+
+
+def test_worker_scratch_directory_does_not_mask_dirty_tracked_files(git_repo: Path):
+    scratch_dir = git_repo / "worker_scratch"
+    scratch_dir.mkdir()
+    (scratch_dir / "report.json").write_text('{"status":"scratch"}\n', encoding="utf-8")
+    (git_repo / "app.py").write_text("def main():\n    return 'dirty'\n", encoding="utf-8")
+
+    result = _run_gate(git_repo)
+
+    assert result["accepted"] is False
+    assert result["product_runtime_dirty_paths"] == ["app.py"]
+    assert "worker_scratch/" in result["unknown_dirty_paths"]

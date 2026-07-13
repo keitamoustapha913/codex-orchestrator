@@ -74,6 +74,10 @@ def _policy_patchlet() -> dict:
     }
 
 
+def _patchlet() -> dict:
+    return _policy_patchlet()
+
+
 def _report(path: Path, changed_artifact_files: list[str]) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({"changed_artifact_files": changed_artifact_files}), encoding="utf-8")
@@ -541,6 +545,220 @@ def test_worker_scratch_dir_file_is_quarantined_or_moved_without_product_diff(tm
 
     assert result == []
     assert (scratch_dir / "debug.txt").exists()
+
+
+def _git_worker_scratch_ctx(tmp_path: Path, *, scratch_name: str = "worker_scratch") -> tuple[PatchletRunContext, object]:
+    run_ctx = _git_run_ctx(tmp_path)
+    before = snapshot_status(run_ctx.execution_root)
+    (run_ctx.execution_root / "policy.bundle").write_text("profile=no-compat\nmode=permissive\n", encoding="utf-8")
+    scratch_dir = run_ctx.execution_root / scratch_name
+    scratch_dir.mkdir()
+    return run_ctx, before
+
+
+def _write_tree(root: Path, tree: dict[str, str]) -> None:
+    for rel_path, content in tree.items():
+        path = root / rel_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+
+
+def test_untracked_worker_scratch_directory_is_quarantined(tmp_path: Path):
+    run_ctx, _ = _git_worker_scratch_ctx(tmp_path)
+    _write_tree(run_ctx.execution_root / "worker_scratch", {"report.json": '{"status": "pass"}\n'})
+
+    result = _quarantine_execution_root_scratch_files(run_ctx, report_path=None, allowed_product_runtime_file="policy.bundle")
+
+    assert result[0]["original_path"] == "worker_scratch"
+    assert result[0]["classification"] == "worker_scratch_directory"
+    assert not (run_ctx.execution_root / "worker_scratch").exists()
+    assert (run_ctx.target_root / result[0]["quarantine_path"]).exists()
+
+
+def test_worker_scratch_directory_removed_before_diff_validation(tmp_path: Path):
+    run_ctx, before = _git_worker_scratch_ctx(tmp_path)
+    _write_tree(run_ctx.execution_root / "worker_scratch", {"report.json": '{"status": "pass"}\n'})
+
+    _quarantine_execution_root_scratch_files(run_ctx, report_path=None, allowed_product_runtime_file="policy.bundle")
+    after = snapshot_status(run_ctx.execution_root)
+    changed = changed_between(before, after)
+
+    assert not (run_ctx.execution_root / "worker_scratch").exists()
+    assert changed == ["policy.bundle"]
+
+
+def test_worker_scratch_directory_recomputes_changed_paths_to_allowed_file_only(tmp_path: Path):
+    run_ctx, before = _git_worker_scratch_ctx(tmp_path)
+    _write_tree(run_ctx.execution_root / "worker_scratch", {"report.json": '{"status": "pass"}\n'})
+
+    _quarantine_execution_root_scratch_files(run_ctx, report_path=None, allowed_product_runtime_file="policy.bundle")
+    after = snapshot_status(run_ctx.execution_root)
+    changed = changed_between(before, after)
+    diff_result = validate_changed_paths(changed, _patchlet())
+
+    assert changed == ["policy.bundle"]
+    assert diff_result.allowed is True
+
+
+def test_worker_scratch_directory_manifest_preserves_file_hashes(tmp_path: Path):
+    run_ctx, _ = _git_worker_scratch_ctx(tmp_path)
+    content = '{"status": "pass"}\n'
+    _write_tree(run_ctx.execution_root / "worker_scratch", {"report.json": content})
+
+    result = _quarantine_execution_root_scratch_files(run_ctx, report_path=None, allowed_product_runtime_file="policy.bundle")
+    record = result[0]
+    entries = {entry["relative_path"]: entry for entry in record["entries"]}
+
+    assert entries["report.json"]["sha256"] == hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
+def test_worker_scratch_directory_manifest_preserves_total_size(tmp_path: Path):
+    run_ctx, _ = _git_worker_scratch_ctx(tmp_path)
+    _write_tree(run_ctx.execution_root / "worker_scratch", {"report.json": '{"status": "pass"}\n', "notes.txt": "ok\n"})
+
+    result = _quarantine_execution_root_scratch_files(run_ctx, report_path=None, allowed_product_runtime_file="policy.bundle")
+    record = result[0]
+
+    assert record["total_size_bytes"] == len('{"status": "pass"}\n'.encode("utf-8")) + len("ok\n".encode("utf-8"))
+
+
+def test_worker_scratch_directory_manifest_records_quarantine_reason(tmp_path: Path):
+    run_ctx, _ = _git_worker_scratch_ctx(tmp_path)
+    _write_tree(run_ctx.execution_root / "worker_scratch", {"report.json": '{"status": "pass"}\n'})
+
+    result = _quarantine_execution_root_scratch_files(run_ctx, report_path=None, allowed_product_runtime_file="policy.bundle")
+
+    assert result[0]["reason"] == "role_shaped_untracked_worker_scratch_directory"
+
+
+def test_worker_scratch_directory_with_nested_safe_text_files_is_quarantined(tmp_path: Path):
+    run_ctx, _ = _git_worker_scratch_ctx(tmp_path)
+    _write_tree(
+        run_ctx.execution_root / "worker_scratch",
+        {
+            "reports/report.json": '{"status": "pass"}\n',
+            "logs/notes.txt": "ok\n",
+        },
+    )
+
+    result = _quarantine_execution_root_scratch_files(run_ctx, report_path=None, allowed_product_runtime_file="policy.bundle")
+
+    assert result[0]["original_path"] == "worker_scratch"
+    assert result[0]["file_count"] == 2
+
+
+def test_worker_scratch_directory_with_executable_file_is_rejected(tmp_path: Path):
+    run_ctx, _ = _git_worker_scratch_ctx(tmp_path)
+    scratch_dir = run_ctx.execution_root / "worker_scratch"
+    _write_tree(scratch_dir, {"report.sh": "#!/bin/sh\n"})
+    (scratch_dir / "report.sh").chmod(0o755)
+
+    result = _quarantine_execution_root_scratch_files(run_ctx, report_path=None, allowed_product_runtime_file="policy.bundle")
+
+    assert result == []
+    assert scratch_dir.exists()
+
+
+def test_worker_scratch_directory_with_symlink_escape_is_rejected(tmp_path: Path):
+    run_ctx, _ = _git_worker_scratch_ctx(tmp_path)
+    scratch_dir = run_ctx.execution_root / "worker_scratch"
+    outside = run_ctx.execution_root / "outside.txt"
+    outside.write_text("outside\n", encoding="utf-8")
+    scratch_dir.mkdir(exist_ok=True)
+    (scratch_dir / "escape.txt").symlink_to(outside)
+
+    result = _quarantine_execution_root_scratch_files(run_ctx, report_path=None, allowed_product_runtime_file="policy.bundle")
+
+    assert result == []
+    assert (scratch_dir / "escape.txt").exists()
+
+
+def test_worker_scratch_directory_with_nested_git_dir_is_rejected(tmp_path: Path):
+    run_ctx, _ = _git_worker_scratch_ctx(tmp_path)
+    scratch_dir = run_ctx.execution_root / "worker_scratch"
+    _write_tree(scratch_dir, {"report.json": '{"status": "pass"}\n'})
+    (scratch_dir / ".git").mkdir()
+
+    result = _quarantine_execution_root_scratch_files(run_ctx, report_path=None, allowed_product_runtime_file="policy.bundle")
+
+    assert result == []
+    assert scratch_dir.exists()
+
+
+def test_worker_scratch_directory_with_product_like_file_is_rejected(tmp_path: Path):
+    run_ctx, _ = _git_worker_scratch_ctx(tmp_path)
+    scratch_dir = run_ctx.execution_root / "worker_scratch"
+    _write_tree(scratch_dir, {"policy.bundle": "profile=legacy\nmode=permissive\n"})
+
+    result = _quarantine_execution_root_scratch_files(run_ctx, report_path=None, allowed_product_runtime_file="policy.bundle")
+
+    assert result == []
+    assert scratch_dir.exists()
+
+
+def test_random_scratch_directory_is_rejected(tmp_path: Path):
+    run_ctx, _ = _git_worker_scratch_ctx(tmp_path, scratch_name="random_scratch")
+    _write_tree(run_ctx.execution_root / "random_scratch", {"report.json": '{"status": "pass"}\n'})
+
+    result = _quarantine_execution_root_scratch_files(run_ctx, report_path=None, allowed_product_runtime_file="policy.bundle")
+
+    assert result == []
+    assert (run_ctx.execution_root / "random_scratch").exists()
+
+
+def test_scratch_directory_without_worker_role_is_rejected(tmp_path: Path):
+    run_ctx, _ = _git_worker_scratch_ctx(tmp_path, scratch_name="scratch")
+    _write_tree(run_ctx.execution_root / "scratch", {"report.json": '{"status": "pass"}\n'})
+
+    result = _quarantine_execution_root_scratch_files(run_ctx, report_path=None, allowed_product_runtime_file="policy.bundle")
+
+    assert result == []
+    assert (run_ctx.execution_root / "scratch").exists()
+
+
+def test_worker_output_directory_is_rejected(tmp_path: Path):
+    run_ctx, _ = _git_worker_scratch_ctx(tmp_path, scratch_name="worker_output")
+    _write_tree(run_ctx.execution_root / "worker_output", {"report.json": '{"status": "pass"}\n'})
+
+    result = _quarantine_execution_root_scratch_files(run_ctx, report_path=None, allowed_product_runtime_file="policy.bundle")
+
+    assert result == []
+    assert (run_ctx.execution_root / "worker_output").exists()
+
+
+def test_tracked_worker_scratch_directory_is_rejected(tmp_path: Path):
+    run_ctx = _git_run_ctx(tmp_path)
+    before = snapshot_status(run_ctx.execution_root)
+    (run_ctx.execution_root / "policy.bundle").write_text("profile=no-compat\nmode=permissive\n", encoding="utf-8")
+    scratch_dir = run_ctx.execution_root / "worker_scratch"
+    scratch_dir.mkdir()
+    (scratch_dir / "report.json").write_text('{"status": "tracked"}\n', encoding="utf-8")
+    _git("add", "worker_scratch/report.json", cwd=run_ctx.execution_root)
+    _git("commit", "-m", "track worker scratch", cwd=run_ctx.execution_root)
+    (run_ctx.execution_root / "policy.bundle").write_text("profile=no-compat\nmode=permissive\n", encoding="utf-8")
+    (scratch_dir / "report.json").write_text('{"status": "changed"}\n', encoding="utf-8")
+
+    result = _quarantine_execution_root_scratch_files(run_ctx, report_path=None, allowed_product_runtime_file="policy.bundle")
+    after = snapshot_status(run_ctx.execution_root)
+    changed = changed_between(before, after)
+    diff_result = validate_changed_paths(changed, _patchlet())
+
+    assert result == []
+    assert diff_result.allowed is False
+    assert "worker_scratch/report.json" in diff_result.unauthorized_paths
+
+
+def test_changed_peer_product_file_still_rejected_when_worker_scratch_dir_present(tmp_path: Path):
+    run_ctx, before = _git_worker_scratch_ctx(tmp_path)
+    _write_tree(run_ctx.execution_root / "worker_scratch", {"report.json": '{"status": "pass"}\n'})
+    (run_ctx.execution_root / "release.env").write_text("release_channel=green\n", encoding="utf-8")
+
+    _quarantine_execution_root_scratch_files(run_ctx, report_path=None, allowed_product_runtime_file="policy.bundle")
+    after = snapshot_status(run_ctx.execution_root)
+    diff_result = validate_changed_paths(changed_between(before, after), _patchlet())
+
+    assert diff_result.allowed is False
+    assert "release.env" in diff_result.unauthorized_paths
 
 
 def test_root_scratch_sweep_result_written(tmp_path: Path):

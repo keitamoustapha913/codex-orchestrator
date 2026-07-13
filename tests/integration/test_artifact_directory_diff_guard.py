@@ -110,3 +110,17 @@ def test_patchlet_report_pretty_quarantine_preserves_slice_boundary():
 
     assert result.allowed is False
     assert result.slice_boundary_violations
+
+
+def test_worker_scratch_directory_quarantine_does_not_allow_second_product_file():
+    result = validate_changed_paths(["service.cfg", "peer.record"], _patchlet())
+
+    assert result.allowed is False
+    assert "peer.record" in result.unauthorized_paths
+
+
+def test_worker_scratch_directory_quarantine_does_not_allow_product_directory():
+    result = validate_changed_paths(["service.cfg", "runtime"], _patchlet())
+
+    assert result.allowed is False
+    assert "runtime" in result.unauthorized_paths

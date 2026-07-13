@@ -40,8 +40,12 @@ Each attempt has a worker scratch directory, and workers are told: Do not write
 scratch/check/validation files in the target repository root. The root scratch
 sweep quarantines role-based scratch under the run directory, records
 `root_scratch_sweep_result.json`, and the diff is recomputed after quarantine.
-Random root .txt and .out files are not automatically allowed, and product/runtime
-files are still rejected before any checkpoint can be accepted.
+Only role-shaped untracked worker scratch directories are eligible for
+quarantine. Not all directories are allowed. Not all scratch directories are
+allowed. Tracked `worker_scratch` content is rejected. Executable scratch
+content is rejected. Changed peer product files remain rejected. Directory
+quarantine preserves hashes and metadata, and changed paths are recomputed
+after quarantine before any checkpoint can be accepted.
 
 Patchlet-prefixed report formatting scratch does not affect goal progress and is
 quarantined only after safety checks: untracked, non-executable,

@@ -176,9 +176,13 @@ Each attempt has a worker scratch directory:
 `.codex-orchestrator/runs/<attempt>/worker_scratch/`. The prompt tells Codex:
 Do not write scratch/check/validation files in the target repository root. A
 root scratch sweep runs after worker exit, writes `root_scratch_sweep_result.json`,
-and uses role-based quarantine for report/probe validation outputs. Random root
-.txt/.out files are not automatically allowed, product/runtime files are still
-rejected, and the diff is recomputed after quarantine.
+and uses role-based quarantine for report/probe validation outputs. Only
+role-shaped untracked worker scratch directories are eligible for quarantine.
+Not all directories are allowed. Not all scratch directories are allowed.
+Tracked `worker_scratch` content is rejected. Executable scratch content is
+rejected. Changed peer product files remain rejected. Directory quarantine
+preserves hashes and metadata, and changed paths are recomputed after
+quarantine.
 
 Patchlet-prefixed report formatting scratch is quarantined only when it is safe:
 untracked, non-executable, text/JSON-like, patchlet-prefixed, report-role
