@@ -60,6 +60,138 @@ def _desired_changes(candidate: dict[str, Any], proof_obligations: dict[str, Any
     return desired
 
 
+def _structured_boundary_for_obligation(candidate: dict[str, Any], obligation_id: str) -> dict[str, Any]:
+    obligation = (candidate.get("proof_obligations_by_id") or {}).get(obligation_id, {})
+    goal_ids = list(obligation.get("goal_item_ids") or [])
+    goal = next(iter((candidate.get("goal_items_by_id") or {}).values()), {})
+    metadata = obligation.get("metadata") if isinstance(obligation.get("metadata"), dict) else {}
+    goal_metadata = goal.get("metadata") if isinstance(goal.get("metadata"), dict) else {}
+    symbol = metadata.get("symbol") or metadata.get("function") or metadata.get("key") or goal_metadata.get("symbol") or goal_metadata.get("function") or goal_metadata.get("key")
+    expected = metadata.get("expected_observation") or metadata.get("expected") or goal_metadata.get("expected_observation") or goal_metadata.get("expected")
+    if expected is None and obligation.get("expected") is not None:
+        text = str(obligation.get("expected"))
+        expected = text.split("=", 1)[1] if "=" in text else text
+    if symbol is None:
+        text = str(obligation.get("expected") or obligation.get("claim") or "")
+        if "=" in text:
+            symbol = text.split("=", 1)[0].split()[-1].strip("` ")
+    return {
+        "file": candidate["path"],
+        "symbol": str(symbol or obligation_id),
+        "expected_observation": str(expected or ""),
+        "goal_item_id": goal_ids[0] if goal_ids else None,
+        "goal_item_ids": goal_ids,
+        "proof_obligation_id": obligation_id,
+        "probe_ids": list((candidate.get("probes_by_obligation") or {}).get(obligation_id, [])),
+    }
+
+
+def _positive_evidence_slices(
+    *,
+    impact_analysis: dict[str, Any],
+    default_patchlet_timeout_seconds: int | None,
+) -> dict[str, Any] | None:
+    candidates = [row for row in impact_analysis.get("candidate_files", []) if row.get("positive_file_link_evidence")]
+    if not candidates:
+        return None
+    timeout = _default_timeout(default_patchlet_timeout_seconds)
+    slices: list[dict[str, Any]] = []
+    last_slice_by_path: dict[str, str] = {}
+    for path in _topological_file_order({"candidate_files": candidates, "dependency_edges": impact_analysis.get("dependency_edges", [])}):
+        candidate = {row["path"]: row for row in candidates}[path]
+        obligation_ids = list(candidate.get("proof_obligation_ids") or [])
+        boundaries = [_structured_boundary_for_obligation(candidate, oid) for oid in obligation_ids]
+        for index, obligation_id in enumerate(obligation_ids):
+            boundary = boundaries[index]
+            work_slice_id = f"WS{len(slices) + 1:03d}"
+            depends = []
+            for dependency_file in candidate.get("dependency_inputs", []):
+                dep_slice = last_slice_by_path.get(dependency_file)
+                if dep_slice and dep_slice not in depends:
+                    depends.append(dep_slice)
+            if path in last_slice_by_path:
+                depends.append(last_slice_by_path[path])
+            future = [
+                {
+                    "file": item["file"],
+                    "symbol": item.get("symbol"),
+                    "expected_observation": item.get("expected_observation"),
+                    "goal_item_id": item.get("goal_item_id"),
+                    "proof_obligation_id": item.get("proof_obligation_id"),
+                    "probe_ids": item.get("probe_ids", []),
+                }
+                for item in boundaries[index + 1 :]
+            ]
+            forbidden = sorted(row["path"] for row in candidates if row["path"] != path)
+            slices.append(
+                {
+                    "work_slice_id": work_slice_id,
+                    "title": f"Update {boundary['symbol']} in {path}",
+                    "allowed_product_runtime_file": path,
+                    "slice_type": "positive_evidence_behavior_slice",
+                    "scope_statement": f"Only update {boundary['symbol']} in {path}; do not edit any other product/runtime file.",
+                    "goal_item_ids": list(boundary.get("goal_item_ids") or []),
+                    "proof_obligation_ids": [obligation_id],
+                    "probe_ids": list(boundary.get("probe_ids") or []),
+                    "inventory_node_ids": list(candidate.get("inventory_node_ids", [])),
+                    "depends_on_work_slice_ids": depends,
+                    "risk_level": candidate.get("risk_level", "low"),
+                    "estimated_complexity": "small",
+                    "time_budget_seconds": timeout,
+                    "budget_source": "CODEX_PATCHLET_TIMEOUT_SECONDS" if os.environ.get("CODEX_PATCHLET_TIMEOUT_SECONDS") else "default_600_seconds",
+                    "scope_size": "single_product_runtime_file",
+                    "memory_compacting_required": False,
+                    "budget_fit_assessment": {
+                        "fits_default_600_seconds": timeout <= 600,
+                        "reason": "One allowed edit file, one proof obligation, and explicit probe mapping.",
+                    },
+                    "prompt_scope": {
+                        "allowed_context_files": [path],
+                        "allowed_edit_file": path,
+                        "forbidden_edit_files": forbidden,
+                        "must_include": [
+                            "proof obligation " + obligation_id,
+                            "probe " + ", ".join(boundary.get("probe_ids") or []),
+                            "positive file-link evidence",
+                        ],
+                        "must_exclude": ["broad fallback", "multi-file edit", "future slice claim"],
+                        "memory_compacting_required": False,
+                    },
+                    "current_slice_boundary": boundary,
+                    "future_slice_boundaries": future,
+                    "slice_change_boundary": {
+                        "boundary_id": f"SCB{len(slices) + 1:03d}",
+                        "boundary_type": "structured_positive_evidence",
+                        "allowed_product_runtime_file": path,
+                        "goal_item_ids": list(boundary.get("goal_item_ids") or []),
+                        "proof_obligation_ids": [obligation_id],
+                        "probe_ids": list(boundary.get("probe_ids") or []),
+                        "current_boundary": boundary,
+                        "future_boundaries": future,
+                        "allowed_changes": [],
+                        "forbidden_future_goal_item_ids": sorted({item.get("goal_item_id") for item in future if item.get("goal_item_id")}),
+                        "forbidden_future_proof_obligation_ids": sorted({item.get("proof_obligation_id") for item in future if item.get("proof_obligation_id")}),
+                        "forbidden_changes": [
+                            {"key": item.get("symbol"), "reason": "reserved for later patchlet"}
+                            for item in future
+                            if item.get("symbol")
+                        ],
+                    },
+                    "acceptance_summary": f"{path} satisfies {obligation_id} only.",
+                }
+            )
+            last_slice_by_path[path] = work_slice_id
+    return {
+        "schema_version": "1.0",
+        "kind": "work_slices",
+        "workflow_id": impact_analysis.get("workflow_id"),
+        "run_id": impact_analysis.get("run_id"),
+        "slices": slices,
+        "per_file_slice_counts": dict(sorted(defaultdict(int, {p: len([s for s in slices if s["allowed_product_runtime_file"] == p]) for p in {s["allowed_product_runtime_file"] for s in slices}}).items())),
+        "required_proof_obligation_ids": [oid for row in candidates for oid in row.get("proof_obligation_ids", [])],
+    }
+
+
 def _slice_boundaries(candidate: dict[str, Any], proof_obligations: dict[str, Any]) -> list[dict[str, Any]]:
     old_by_key = _key_value_rows(candidate)
     desired = _desired_changes(candidate, proof_obligations)
@@ -168,6 +300,12 @@ def plan_work_slices(
     default_patchlet_timeout_seconds: int | None = None,
     max_slices_per_file: int | None = None,
 ) -> dict[str, Any]:
+    positive = _positive_evidence_slices(
+        impact_analysis=impact_analysis,
+        default_patchlet_timeout_seconds=default_patchlet_timeout_seconds,
+    )
+    if positive is not None:
+        return positive
     timeout = _default_timeout(default_patchlet_timeout_seconds)
     candidates_by_path = {row["path"]: row for row in impact_analysis.get("candidate_files", [])}
     order = _topological_file_order(impact_analysis)

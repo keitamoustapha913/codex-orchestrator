@@ -113,15 +113,31 @@ def _row_mentions_file(row: dict[str, Any], path: str) -> bool:
 
 
 def _ids_for_file(*, path: str, goal_interpretation: dict[str, Any], proof_obligations: dict[str, Any]) -> tuple[list[str], list[str]]:
-    all_goal_ids = _goal_item_ids(goal_interpretation)
-    all_obligation_ids = _proof_obligation_ids(proof_obligations)
     goal_ids = [item["goal_item_id"] for item in _goal_items(goal_interpretation) if _row_mentions_file(item, path)]
     obligation_ids = [item["obligation_id"] for item in _obligations(proof_obligations) if _row_mentions_file(item, path)]
-    if not goal_ids and len(all_goal_ids) == 1:
-        goal_ids = all_goal_ids
-    if not obligation_ids and len(all_obligation_ids) == 1:
-        obligation_ids = all_obligation_ids
-    return goal_ids or all_goal_ids, obligation_ids or all_obligation_ids
+    return goal_ids, obligation_ids
+
+
+def _match_evidence(row: dict[str, Any], path: str) -> list[dict[str, Any]]:
+    evidence: list[dict[str, Any]] = []
+    path_name = Path(path).name
+    for location, source in (("row", row), ("repo_context", row.get("repo_context"))):
+        if not isinstance(source, dict):
+            continue
+        for key in ("target_boundaries", "affected_runtime_boundaries", "entrypoints"):
+            value = source.get(key)
+            values = value if isinstance(value, list) else [value] if value else []
+            for item in values:
+                text = str(item)
+                if text == path or Path(text).name == path_name:
+                    evidence.append(
+                        {
+                            "planning_field": f"{location}.{key}",
+                            "matched_value": text,
+                            "match_type": "path" if text == path else "basename",
+                        }
+                    )
+    return evidence
 
 
 def _suggested_slice_types(path: str, *, inbound: bool, outbound: bool, content: str) -> list[str]:
@@ -255,6 +271,16 @@ def build_impact_dependency_analysis(
             goal_interpretation=goal_interpretation,
             proof_obligations=proof_obligations,
         )
+        goal_match_evidence = {
+            item["goal_item_id"]: _match_evidence(item, path)
+            for item in _goal_items(goal_interpretation)
+            if _row_mentions_file(item, path)
+        }
+        obligation_match_evidence = {
+            item["obligation_id"]: _match_evidence(item, path)
+            for item in _obligations(proof_obligations)
+            if _row_mentions_file(item, path)
+        }
         suggested_slice_types = _expand_slice_types(
             _suggested_slice_types(
                 path,
@@ -262,7 +288,7 @@ def build_impact_dependency_analysis(
                 outbound=bool(dependency_outputs),
                 content=content,
             ),
-            max(len(file_goal_ids), len(file_obligation_ids), 1),
+            max(len(file_goal_ids), len(file_obligation_ids), 1) if (file_goal_ids or file_obligation_ids) else 1,
         )
         candidate_files.append(
             {
@@ -271,6 +297,10 @@ def build_impact_dependency_analysis(
                 "relevance": "candidate product/runtime file connected to goal evidence and inventory graph",
                 "goal_item_ids": file_goal_ids,
                 "proof_obligation_ids": file_obligation_ids,
+                "probe_ids": [],
+                "positive_file_link_evidence": bool(file_goal_ids or file_obligation_ids),
+                "goal_match_evidence": goal_match_evidence,
+                "obligation_match_evidence": obligation_match_evidence,
                 "dependency_inputs": dependency_inputs,
                 "dependency_outputs": dependency_outputs,
                 "risk_level": risk,

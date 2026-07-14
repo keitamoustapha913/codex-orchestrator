@@ -506,3 +506,17 @@ Boundary evidence matching is role-aware. Short tokens such as `on`, `off`,
 future boundary evidence combination, such as an exact line `event_logging=on`
 or matching future key and value. Same-file mention alone is not a future
 claim. Worker text is not proof; independent proof remains required.
+
+## RC6L Positive-Evidence Decomposition Status
+
+Implemented: decomposition requires positive planning evidence before a
+candidate file receives work. An unmatched candidate receives no work and does
+not inherit all goals or all proof obligations through broad fallback behavior.
+Support files remain targetable when explicitly named by the prompt and
+planning artifacts.
+
+Patchlet cardinality follows independently provable slices rather than file
+count: one goal, one proof obligation, and one probe define the canonical slice,
+and multiple patchlets may target one file. Unresolved goals, unresolved
+obligations, ambiguous file mappings, and missing mandatory probes are reported
+as safe pre-worker decomposition evidence.

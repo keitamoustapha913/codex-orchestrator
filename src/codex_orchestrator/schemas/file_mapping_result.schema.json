@@ -1,0 +1,109 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "File Mapping Result",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "kind",
+    "accepted",
+    "candidate_files",
+    "positive_mappings",
+    "unmatched_candidate_files",
+    "unmapped_goal_item_ids",
+    "unmapped_proof_obligation_ids",
+    "ambiguous_goal_item_ids",
+    "ambiguous_proof_obligation_ids",
+    "missing_probe_obligation_ids",
+    "probes_by_obligation",
+    "errors"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "kind": {"const": "file_mapping_result"},
+    "accepted": {"type": "boolean"},
+    "candidate_files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["file", "positive_file_link_evidence", "goal_item_ids", "proof_obligation_ids", "probe_ids", "inventory_node_ids"],
+        "properties": {
+          "file": {"type": "string", "minLength": 1},
+          "positive_file_link_evidence": {"type": "boolean"},
+          "goal_item_ids": {"type": "array", "items": {"type": "string"}},
+          "proof_obligation_ids": {"type": "array", "items": {"type": "string"}},
+          "probe_ids": {"type": "array", "items": {"type": "string"}},
+          "inventory_node_ids": {"type": "array", "items": {"type": "string"}}
+        },
+        "additionalProperties": false
+      }
+    },
+    "positive_mappings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["file", "goal_item_ids", "proof_obligation_ids", "probe_ids", "inventory_node_ids", "match_evidence"],
+        "properties": {
+          "file": {"type": "string", "minLength": 1},
+          "goal_item_ids": {"type": "array", "items": {"type": "string"}},
+          "proof_obligation_ids": {"type": "array", "items": {"type": "string"}},
+          "probe_ids": {"type": "array", "items": {"type": "string"}},
+          "inventory_node_ids": {"type": "array", "items": {"type": "string"}},
+          "match_evidence": {
+            "type": "object",
+            "required": ["goal_items", "proof_obligations"],
+            "properties": {
+              "goal_items": {"type": "object"},
+              "proof_obligations": {"type": "object"}
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "unmatched_candidate_files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["file", "goal_item_ids", "proof_obligation_ids", "probe_ids", "inventory_node_ids", "reason", "work_assigned"],
+        "properties": {
+          "file": {"type": "string", "minLength": 1},
+          "goal_item_ids": {"type": "array", "items": {"type": "string"}},
+          "proof_obligation_ids": {"type": "array", "items": {"type": "string"}},
+          "probe_ids": {"type": "array", "items": {"type": "string"}},
+          "inventory_node_ids": {"type": "array", "items": {"type": "string"}},
+          "reason": {"type": "string", "minLength": 1},
+          "work_assigned": {"type": "integer", "minimum": 0}
+        },
+        "additionalProperties": false
+      }
+    },
+    "unmapped_goal_item_ids": {"type": "array", "items": {"type": "string"}},
+    "unmapped_proof_obligation_ids": {"type": "array", "items": {"type": "string"}},
+    "ambiguous_goal_item_ids": {"type": "array", "items": {"type": "string"}},
+    "ambiguous_proof_obligation_ids": {"type": "array", "items": {"type": "string"}},
+    "missing_probe_obligation_ids": {"type": "array", "items": {"type": "string"}},
+    "probes_by_obligation": {
+      "type": "object",
+      "patternProperties": {
+        "^.*$": {"type": "array", "items": {"type": "string"}}
+      },
+      "additionalProperties": false
+    },
+    "errors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["code"],
+        "properties": {
+          "code": {"type": "string", "minLength": 1},
+          "goal_item_id": {"type": "string"},
+          "proof_obligation_id": {"type": "string"},
+          "candidate_files": {"type": "array", "items": {"type": "string"}}
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

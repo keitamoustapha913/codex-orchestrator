@@ -52,3 +52,15 @@ Boundary evidence matching is role-aware. Short tokens such as `on`, `off`,
 future boundary evidence combination, such as an exact line `event_logging=on`
 or matching future key and value. Same-file mention alone is not a future
 claim. Worker text is not proof; independent proof remains required.
+
+## Decomposition Linkage
+
+Goal and proof planning are consumed by decomposition as structured linkage
+evidence. For a bounded slice, the expected shape is one goal, one proof
+obligation, and one probe, with the current file and boundary carried into the
+patchlet plan. Multiple patchlets may target one file when several obligations
+share the same product file.
+
+Positive planning evidence is required before a file receives work. An
+unmatched candidate receives no work, and unresolved or ambiguous mappings are
+treated as safe pre-worker failures rather than broad fallbacks.

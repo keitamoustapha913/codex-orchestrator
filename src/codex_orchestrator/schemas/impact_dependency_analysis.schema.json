@@ -20,6 +20,34 @@
           "relevance": {"type": "string", "minLength": 1},
           "goal_item_ids": {"type": "array", "items": {"type": "string"}},
           "proof_obligation_ids": {"type": "array", "items": {"type": "string"}},
+          "probe_ids": {"type": "array", "items": {"type": "string"}},
+          "positive_file_link_evidence": {"type": "boolean"},
+          "goal_match_evidence": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["id", "field", "match_type"],
+              "properties": {
+                "id": {"type": "string"},
+                "field": {"type": "string"},
+                "match_type": {"type": "string"}
+              },
+              "additionalProperties": false
+            }
+          },
+          "obligation_match_evidence": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["id", "field", "match_type"],
+              "properties": {
+                "id": {"type": "string"},
+                "field": {"type": "string"},
+                "match_type": {"type": "string"}
+              },
+              "additionalProperties": false
+            }
+          },
           "dependency_inputs": {"type": "array", "items": {"type": "string"}},
           "dependency_outputs": {"type": "array", "items": {"type": "string"}},
           "risk_level": {"enum": ["low", "medium", "high"]},

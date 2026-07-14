@@ -56,6 +56,7 @@ def build_patchlet_plan(
                 "allowed_product_runtime_files": [allowed_file],
                 "proof_obligation_ids": list(row.get("proof_obligation_ids", [])),
                 "goal_item_ids": list(row.get("goal_item_ids", [])),
+                "probe_ids": list(row.get("probe_ids", [])),
                 "dependency_patchlet_ids": [],
                 "downstream_patchlet_ids": [],
                 "time_budget_seconds": int(row.get("time_budget_seconds") or default_patchlet_timeout_seconds),
@@ -68,6 +69,8 @@ def build_patchlet_plan(
                 "prompt_scope": row.get("prompt_scope", {}),
                 "scope_statement": row.get("scope_statement"),
                 "slice_change_boundary": row.get("slice_change_boundary"),
+                "current_slice_boundary": row.get("current_slice_boundary"),
+                "future_slice_boundaries": row.get("future_slice_boundaries", []),
                 "boundary_enforcement_status": row.get("boundary_enforcement_status"),
                 "title": row.get("title"),
                 "expected_patchlet_statuses": [

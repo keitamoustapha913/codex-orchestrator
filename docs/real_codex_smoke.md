@@ -410,3 +410,12 @@ Boundary evidence matching is role-aware. Short tokens such as `on`, `off`,
 future boundary evidence combination, such as an exact line `event_logging=on`
 or matching future key and value. Same-file mention alone is not a future
 claim. Worker text is not proof; independent proof remains required.
+
+## Decomposition Preconditions
+
+Real-Codex smoke execution depends on decomposition artifacts that use positive
+planning evidence. An unmatched candidate receives no work, support files
+remain targetable only when explicitly planned, and each independently provable
+slice carries one goal, one proof obligation, and one probe. Multiple patchlets
+may target one file when the plan contains multiple independent same-file
+slices. Unresolved mappings are safe pre-worker failures.

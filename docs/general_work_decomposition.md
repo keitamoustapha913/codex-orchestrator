@@ -95,3 +95,31 @@ Boundary evidence matching is role-aware. Short tokens such as `on`, `off`,
 future boundary evidence combination, such as an exact line `event_logging=on`
 or matching future key and value. Same-file mention alone is not a future
 claim. Worker text is not proof; independent proof remains required.
+
+## Positive File Evidence
+
+The decomposition compiler requires positive planning evidence before a
+candidate file receives work. Positive evidence can come from consumed goal or
+proof-obligation fields that identify the target file and current boundary.
+Tracked presence, source directory placement, and source-like extensions are
+diagnostics only; they do not assign work.
+
+An unmatched candidate receives no work. It retains empty goal,
+proof-obligation, and probe mappings so operators can see that the file was
+present but not targeted. The compiler must not fan out all goals or all
+obligations to a file merely because the file appears in inventory.
+
+Support files remain targetable when they are explicitly linked by the frozen
+prompt and planning artifacts. This avoids filename or language blacklists
+while preventing untargeted support files from receiving unrelated runtime work.
+
+The canonical independently provable work slice has one target product/runtime
+file, one goal, one proof obligation, one probe, a current boundary, and zero or
+more future boundaries. Multiple patchlets may target one file when multiple
+independent slices share that file. File count does not determine patchlet
+count.
+
+Unresolved goal mappings, unresolved proof-obligation mappings, ambiguous file
+mappings, and missing mandatory probes are safe pre-worker conditions. They
+must be recorded explicitly and must not be hidden by assigning the item to
+every candidate file.

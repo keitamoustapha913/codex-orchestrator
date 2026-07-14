@@ -202,6 +202,7 @@ def normalize_master_prompt(ctx: TargetRepoContext) -> dict:
         proof_request = build_proof_planning_request(
             master_prompt_frozen=frozen,
             goal_interpretation_path=".codex-orchestrator/goal_interpretation/goal_interpretation.json",
+            workflow_root=ctx.paths.workflow_dir,
         )
         append_operator_event(
             ctx.root,
@@ -246,6 +247,7 @@ def normalize_master_prompt(ctx: TargetRepoContext) -> dict:
         probe_request = build_probe_planning_request(
             master_prompt_frozen=frozen,
             proof_obligations_path=".codex-orchestrator/proof_planning/proof_obligations.json",
+            workflow_root=ctx.paths.workflow_dir,
         )
         append_operator_event(
             ctx.root,

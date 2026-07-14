@@ -43,8 +43,22 @@ def _patchlet_plan_path(ctx: TargetRepoContext) -> Path:
     return _decomposition_dir(ctx) / "patchlet_plan.json"
 
 
+def _file_mapping_result_path(ctx: TargetRepoContext) -> Path:
+    return _decomposition_dir(ctx) / "file_mapping_result.json"
+
+
 def _transaction_group_plan_path(ctx: TargetRepoContext) -> Path:
     return _decomposition_dir(ctx) / "transaction_group_plan.json"
+
+
+def _mapping_rejection(ctx: TargetRepoContext) -> dict | None:
+    path = _file_mapping_result_path(ctx)
+    if not path.exists():
+        return None
+    mapping = read_json(path)
+    if mapping.get("accepted") is not False:
+        return None
+    return mapping
 
 
 def _ensure_decomposition_plan(ctx: TargetRepoContext, *, timeout_seconds: int) -> dict | None:
@@ -117,13 +131,34 @@ def _slice_boundary_prompt_section(patchlet: dict) -> str:
         return ""
     allowed_changes = boundary.get("allowed_changes") or []
     forbidden = boundary.get("forbidden_changes") or []
+    current_boundary = boundary.get("current_boundary") or patchlet.get("current_slice_boundary") or {}
+    future_boundaries = boundary.get("future_boundaries") or patchlet.get("future_slice_boundaries") or []
     current_lines = []
     for change in allowed_changes:
         if change.get("operation") == "replace_line":
             current_lines.append(f"- replace exactly `{change.get('old_line')}` with `{change.get('new_line')}`")
         elif change.get("key"):
             current_lines.append(f"- update `{change.get('key')}` only")
+    if current_boundary:
+        current_lines.append(
+            "- current structured boundary: "
+            f"file `{current_boundary.get('file')}`, "
+            f"symbol `{current_boundary.get('symbol')}`, "
+            f"expected observation `{current_boundary.get('expected_observation')}`, "
+            f"goal `{current_boundary.get('goal_item_id')}`, "
+            f"proof `{current_boundary.get('proof_obligation_id')}`, "
+            f"probes `{', '.join(current_boundary.get('probe_ids') or [])}`"
+        )
     forbidden_lines = [f"- `{row.get('key')}`" for row in forbidden if row.get("key")]
+    forbidden_lines.extend(
+        "- future structured boundary: "
+        f"file `{row.get('file')}`, "
+        f"symbol `{row.get('symbol')}`, "
+        f"expected observation `{row.get('expected_observation')}`, "
+        f"goal `{row.get('goal_item_id')}`, "
+        f"proof `{row.get('proof_obligation_id')}`"
+        for row in future_boundaries
+    )
     return (
         "## Allowed change boundary\n\n"
         f"Boundary type: `{boundary.get('boundary_type')}`\n\n"
@@ -358,6 +393,36 @@ def compile_patchlets(ctx: TargetRepoContext) -> dict:
     soft_deadline = soft_deadline_seconds(timeout_seconds)
     semantic_criteria: list[dict] = []
     patchlet_plan = _ensure_decomposition_plan(ctx, timeout_seconds=timeout_seconds)
+    mapping_rejection = _mapping_rejection(ctx)
+    if mapping_rejection is not None:
+        append_operator_event(
+            ctx.root,
+            event_type="decomposition_mapping_rejected",
+            severity="error",
+            stage="PATCHLET_COMPILATION_REQUIRED",
+            summary="Patchlet compilation blocked: required planning items could not be mapped to bounded work slices.",
+            artifact_paths=[".codex-orchestrator/decomposition/file_mapping_result.json"],
+            details={
+                "failure_signature": "decomposition_mapping_rejected",
+                "errors": mapping_rejection.get("errors", []),
+                "unmapped_goal_item_ids": mapping_rejection.get("unmapped_goal_item_ids", []),
+                "unmapped_proof_obligation_ids": mapping_rejection.get("unmapped_proof_obligation_ids", []),
+                "ambiguous_goal_item_ids": mapping_rejection.get("ambiguous_goal_item_ids", []),
+                "ambiguous_proof_obligation_ids": mapping_rejection.get("ambiguous_proof_obligation_ids", []),
+                "missing_probe_obligation_ids": mapping_rejection.get("missing_probe_obligation_ids", []),
+            },
+        )
+        index = {"schema_version": "1.0", "kind": "patchlet_index", "patchlets": []}
+        write_json(ctx.paths.patchlet_index, index)
+        write_json(ctx.paths.transaction_groups, {
+            "schema_version": "1.0",
+            "kind": "transaction_groups",
+            "transaction_groups": [],
+        })
+        state = load_state(ctx)
+        state.pending_patchlets = []
+        transition(ctx, state, "FAILURE_CLASSIFICATION_REQUIRED", reason="decomposition_mapping_rejected")
+        return index
     patchlets, transaction_groups = _compile_from_patchlet_plan(
         ctx,
         patchlet_plan=patchlet_plan,

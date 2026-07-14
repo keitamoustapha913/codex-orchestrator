@@ -20,6 +20,38 @@
           "allowed_product_runtime_files": {"type": "array", "minItems": 1, "maxItems": 1, "items": {"type": "string", "minLength": 1}},
           "proof_obligation_ids": {"type": "array", "items": {"type": "string"}},
           "goal_item_ids": {"type": "array", "items": {"type": "string"}},
+          "probe_ids": {"type": "array", "items": {"type": "string"}},
+          "current_slice_boundary": {
+            "type": ["object", "null"],
+            "properties": {
+              "file": {"type": "string"},
+              "symbol": {"type": ["string", "null"]},
+              "expected_observation": {},
+              "goal_item_id": {"type": ["string", "null"]},
+              "goal_item_ids": {"type": "array", "items": {"type": "string"}},
+              "proof_obligation_id": {"type": ["string", "null"]},
+              "proof_obligation_ids": {"type": "array", "items": {"type": "string"}},
+              "probe_ids": {"type": "array", "items": {"type": "string"}}
+            },
+            "additionalProperties": false
+          },
+          "future_slice_boundaries": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "file": {"type": "string"},
+                "symbol": {"type": ["string", "null"]},
+                "expected_observation": {},
+                "goal_item_id": {"type": ["string", "null"]},
+                "goal_item_ids": {"type": "array", "items": {"type": "string"}},
+                "proof_obligation_id": {"type": ["string", "null"]},
+                "proof_obligation_ids": {"type": "array", "items": {"type": "string"}},
+                "probe_ids": {"type": "array", "items": {"type": "string"}}
+              },
+              "additionalProperties": false
+            }
+          },
           "dependency_patchlet_ids": {"type": "array", "items": {"type": "string"}},
           "downstream_patchlet_ids": {"type": "array", "items": {"type": "string"}},
           "time_budget_seconds": {"type": "integer", "minimum": 1},

@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import subprocess
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from codex_orchestrator.atomic_io import atomic_write_text
@@ -62,6 +64,8 @@ def build_goal_interpretation_request(
         "kind": "goal_interpretation_model_request",
         "workflow_id": master_prompt_frozen.get("workflow_id"),
         "run_id": master_prompt_frozen.get("run_id"),
+        "workflow_root": str(workflow_root),
+        "repo_root": str(workflow_root.parent),
         "master_prompt_frozen_path": ".codex-orchestrator/master_prompt_frozen.json",
         "master_prompt_sha256": master_prompt_frozen.get("sha256"),
         "source_spans": master_prompt_frozen.get("source_spans", []),
@@ -82,8 +86,9 @@ def build_proof_planning_request(
     *,
     master_prompt_frozen: dict[str, Any],
     goal_interpretation_path: str,
+    workflow_root: Path | None = None,
 ) -> dict[str, Any]:
-    return {
+    request = {
         "schema_version": "1.0",
         "kind": "proof_planning_model_request",
         "workflow_id": master_prompt_frozen.get("workflow_id"),
@@ -99,14 +104,19 @@ def build_proof_planning_request(
             "require_independent_verifiability": True,
         },
     }
+    if workflow_root is not None:
+        request["workflow_root"] = str(workflow_root)
+        request["repo_root"] = str(workflow_root.parent)
+    return request
 
 
 def build_probe_planning_request(
     *,
     master_prompt_frozen: dict[str, Any],
     proof_obligations_path: str,
+    workflow_root: Path | None = None,
 ) -> dict[str, Any]:
-    return {
+    request = {
         "schema_version": "1.0",
         "kind": "probe_planning_model_request",
         "workflow_id": master_prompt_frozen.get("workflow_id"),
@@ -122,6 +132,10 @@ def build_probe_planning_request(
             "require_no_product_mutation": True,
         },
     }
+    if workflow_root is not None:
+        request["workflow_root"] = str(workflow_root)
+        request["repo_root"] = str(workflow_root.parent)
+    return request
 
 
 def run_planning_model(
@@ -198,6 +212,126 @@ def _common_instructions() -> dict[str, Any]:
     }
 
 
+def _request_workflow_root(request: dict[str, Any]) -> Path | None:
+    raw = request.get("workflow_root")
+    if not raw:
+        return None
+    path = Path(str(raw))
+    return path if path.exists() else None
+
+
+def _request_repo_root(request: dict[str, Any]) -> Path | None:
+    raw = request.get("repo_root")
+    if raw:
+        path = Path(str(raw))
+        if path.exists():
+            return path
+    workflow_root = _request_workflow_root(request)
+    return workflow_root.parent if workflow_root else None
+
+
+def _tracked_files(repo_root: Path | None) -> list[str]:
+    if repo_root is None or not repo_root.exists():
+        return []
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(repo_root), "ls-files"],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+        if proc.returncode == 0:
+            files = [line.strip() for line in proc.stdout.splitlines() if line.strip()]
+            if files:
+                return sorted(
+                    file
+                    for file in files
+                    if not file.startswith(".codex-orchestrator/")
+                    and not file.startswith(".artifacts/")
+                    and file != "master_prompt.md"
+                )
+    except OSError:
+        pass
+    files: list[str] = []
+    for path in repo_root.rglob("*"):
+        if not path.is_file():
+            continue
+        rel = path.relative_to(repo_root).as_posix()
+        if rel.startswith(".git/") or rel.startswith(".codex-orchestrator/") or rel.startswith(".artifacts/"):
+            continue
+        if rel == "master_prompt.md":
+            continue
+        files.append(rel)
+    return sorted(files)
+
+
+def _prompt_text(request: dict[str, Any]) -> str:
+    spans = request.get("source_spans") or [{"text": "frozen master prompt"}]
+    return "\n".join(str(span.get("text", "")) for span in spans if isinstance(span, dict)).strip()
+
+
+def _path_tokens(text: str) -> set[str]:
+    tokens = set(re.findall(r"[\w./-]+", text))
+    return {token.strip("`'\".,:;()[]{}") for token in tokens if token.strip("`'\".,:;()[]{}")}
+
+
+def _resolve_stub_target_file(request: dict[str, Any]) -> tuple[str | None, str | None]:
+    repo_files = _tracked_files(_request_repo_root(request))
+    text = _prompt_text(request)
+    tokens = _path_tokens(text)
+    exact = sorted({file for file in repo_files if file in tokens or file in text})
+    if len(exact) == 1:
+        return exact[0], None
+    if len(exact) > 1:
+        return None, "ambiguous target files named in master prompt"
+    stem_hits = sorted(
+        {
+            file
+            for file in repo_files
+            if PurePosixPath(file).stem in tokens or PurePosixPath(file).name in tokens
+        }
+    )
+    if len(stem_hits) == 1:
+        return stem_hits[0], None
+    if len(stem_hits) > 1:
+        return None, "ambiguous target files named by prompt token"
+    return None, "no resolvable target file named in master prompt"
+
+
+def _stub_symbol(request: dict[str, Any], target_file: str | None) -> str:
+    text = _prompt_text(request)
+    match = re.search(r"\b([A-Za-z_][A-Za-z0-9_-]*)\s*\(\s*\)", text)
+    if match:
+        return match.group(1)
+    if re.search(r"\bmain\b", text, re.IGNORECASE):
+        return "main"
+    if target_file:
+        return PurePosixPath(target_file).stem
+    return "target repository behavior"
+
+
+def _stub_expected_observation(request: dict[str, Any]) -> str:
+    text = _prompt_text(request)
+    quoted = re.search(r"(?:return|produce|emit|equal|be)\s+(?:exactly\s+)?[\"'`]([^\"'`]+)[\"'`]", text, re.IGNORECASE)
+    if quoted:
+        return quoted.group(1)
+    bare = re.search(r"(?:return|produce|emit|equal|be)\s+(?:exactly\s+)?([A-Za-z0-9_.:-]+)", text, re.IGNORECASE)
+    if bare:
+        return bare.group(1)
+    return "requested_state"
+
+
+def _read_json_from_request(request: dict[str, Any], relative_path: str) -> dict[str, Any] | None:
+    workflow_root = _request_workflow_root(request)
+    if workflow_root is None:
+        return None
+    path = workflow_root / relative_path
+    if not path.exists():
+        return None
+    return read_json(path)
+
+
 def _stub_response(kind: str, request: dict[str, Any]) -> dict[str, Any]:
     sha = request.get("master_prompt_sha256")
     workflow_id = request.get("workflow_id")
@@ -205,8 +339,12 @@ def _stub_response(kind: str, request: dict[str, Any]) -> dict[str, Any]:
     spans = request.get("source_spans") or [{"span_id": "MPS001", "text": "frozen master prompt"}]
     span_id = spans[0].get("span_id", "MPS001")
     text = str(spans[0].get("text", "frozen master prompt")).strip() or "frozen master prompt"
+    target_file, target_error = _resolve_stub_target_file(request)
+    symbol = _stub_symbol(request, target_file)
+    expected = _stub_expected_observation(request)
     if kind == "goal_interpretation":
         subjective = any(word in text.lower() for word in ["delightful", "perfect", "everyone agrees", "feel perfect"])
+        ambiguous = subjective or target_file is None
         return {
             "schema_version": "1.0",
             "kind": "goal_interpretation",
@@ -214,7 +352,7 @@ def _stub_response(kind: str, request: dict[str, Any]) -> dict[str, Any]:
             "run_id": run_id,
             "master_prompt_sha256": sha,
             "master_prompt_frozen_path": ".codex-orchestrator/master_prompt_frozen.json",
-            "interpretation_status": "AMBIGUOUS" if subjective else "CONCORDANT",
+            "interpretation_status": "AMBIGUOUS" if ambiguous else "CONCORDANT",
             "goal_summary": text,
             "goal_items": [
                 {
@@ -222,11 +360,19 @@ def _stub_response(kind: str, request: dict[str, Any]) -> dict[str, Any]:
                     "source_span_ids": [span_id],
                     "goal_type": "behavioral_change",
                     "repo_context": {
-                        "language_or_framework": "derived_from_repo_or_unknown",
-                        "entrypoints": ["derived_from_repo_or_unknown"],
-                        "affected_runtime_boundaries": ["derived_from_repo_or_unknown"],
+                        "language_or_framework": "deterministic_stub_from_repo_context",
+                        "entrypoints": [f"{target_file}:{symbol}"] if target_file else [],
+                        "affected_runtime_boundaries": [target_file] if target_file else [],
                     },
-                    "subject": "target repository behavior",
+                    "target_boundaries": [target_file] if target_file else [],
+                    "affected_runtime_boundaries": [target_file] if target_file else [],
+                    "entrypoints": [f"{target_file}:{symbol}"] if target_file else [],
+                    "metadata": {
+                        "symbol": symbol,
+                        "expected_observation": expected,
+                        "target_file": target_file,
+                    },
+                    "subject": symbol,
                     "desired_state": text,
                     "success_conditions": ["accepted integration state satisfies the frozen master prompt"],
                     "must_change_product": "unknown",
@@ -235,13 +381,21 @@ def _stub_response(kind: str, request: dict[str, Any]) -> dict[str, Any]:
                 }
             ],
             "non_goals": [],
-            "ambiguities": ["Subjective goal lacks objective success conditions."] if subjective else [],
+            "ambiguities": (
+                (["Subjective goal lacks objective success conditions."] if subjective else [])
+                + ([target_error] if target_file is None and target_error else [])
+            ),
             "assumptions": [],
             "contradictions": [],
             "requires_external_resources": False,
             "proof_not_claimed_here": True,
         }
     if kind == "proof_obligations":
+        interpretation = _read_json_from_request(request, "goal_interpretation.json") or {}
+        goal = (interpretation.get("goal_items") or [{}])[0]
+        target_file = (goal.get("target_boundaries") or [target_file])[0] if (goal.get("target_boundaries") or [target_file]) else target_file
+        metadata = goal.get("metadata") if isinstance(goal.get("metadata"), dict) else {}
+        symbol = str(metadata.get("symbol") or symbol)
         return {
             "schema_version": "1.0",
             "kind": "proof_obligations",
@@ -259,8 +413,16 @@ def _stub_response(kind: str, request: dict[str, Any]) -> dict[str, Any]:
                     "proof_strategy": "executable_probe",
                     "proof_kind": "executable_probe",
                     "required": True,
-                    "language": "derived_or_unknown",
-                    "target_boundaries": ["derived_from_repo_or_unknown"],
+                    "language": "deterministic_stub_from_repo_context",
+                    "target_boundaries": [target_file] if target_file else [],
+                    "affected_runtime_boundaries": [target_file] if target_file else [],
+                    "entrypoints": [f"{target_file}:{symbol}"] if target_file else [],
+                    "metadata": {
+                        "symbol": symbol,
+                        "expected_observation": expected,
+                        "target_file": target_file,
+                    },
+                    "expected": f"{symbol}={expected}",
                     "status": "UNPROVEN",
                     "evidence_requirements": [
                         "expected_actual_record",

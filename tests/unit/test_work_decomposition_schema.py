@@ -17,6 +17,18 @@ def _work_slices():
                 "slice_type": "entrypoint_wiring",
                 "goal_item_ids": ["GI001"],
                 "proof_obligation_ids": ["PO001"],
+                "probe_ids": ["GP001"],
+                "current_slice_boundary": {
+                    "file": "app.py",
+                    "symbol": "main",
+                    "expected_observation": "ready",
+                    "goal_item_id": "GI001",
+                    "goal_item_ids": ["GI001"],
+                    "proof_obligation_id": "PO001",
+                    "proof_obligation_ids": ["PO001"],
+                    "probe_ids": ["GP001"],
+                },
+                "future_slice_boundaries": [],
                 "inventory_node_ids": ["N001"],
                 "depends_on_work_slice_ids": [],
                 "risk_level": "low",
@@ -47,6 +59,18 @@ def _patchlet_plan():
                 "allowed_product_runtime_files": ["app.py"],
                 "proof_obligation_ids": ["PO001"],
                 "goal_item_ids": ["GI001"],
+                "probe_ids": ["GP001"],
+                "current_slice_boundary": {
+                    "file": "app.py",
+                    "symbol": "main",
+                    "expected_observation": "ready",
+                    "goal_item_id": "GI001",
+                    "goal_item_ids": ["GI001"],
+                    "proof_obligation_id": "PO001",
+                    "proof_obligation_ids": ["PO001"],
+                    "probe_ids": ["GP001"],
+                },
+                "future_slice_boundaries": [],
                 "dependency_patchlet_ids": [],
                 "downstream_patchlet_ids": ["P0002"],
                 "time_budget_seconds": 600,
@@ -70,6 +94,18 @@ def _patchlet_plan():
                 "allowed_product_runtime_files": ["app.py"],
                 "proof_obligation_ids": ["PO001"],
                 "goal_item_ids": ["GI001"],
+                "probe_ids": ["GP001"],
+                "current_slice_boundary": {
+                    "file": "app.py",
+                    "symbol": "main",
+                    "expected_observation": "ready",
+                    "goal_item_id": "GI001",
+                    "goal_item_ids": ["GI001"],
+                    "proof_obligation_id": "PO001",
+                    "proof_obligation_ids": ["PO001"],
+                    "probe_ids": ["GP001"],
+                },
+                "future_slice_boundaries": [],
                 "dependency_patchlet_ids": ["P0001"],
                 "downstream_patchlet_ids": [],
                 "time_budget_seconds": 600,
@@ -122,6 +158,66 @@ def test_work_slices_schema_validates():
 
 def test_patchlet_plan_schema_validates():
     assert validate_json(_patchlet_plan(), "patchlet_plan.schema.json") == []
+
+
+def test_file_mapping_result_schema_validates_positive_and_unmatched_candidates():
+    assert validate_json(
+        {
+            "schema_version": "1.0",
+            "kind": "file_mapping_result",
+            "accepted": True,
+            "candidate_files": [
+                {
+                    "file": "app.py",
+                    "positive_file_link_evidence": True,
+                    "goal_item_ids": ["GI001"],
+                    "proof_obligation_ids": ["PO001"],
+                    "probe_ids": ["GP001"],
+                    "inventory_node_ids": ["N001"],
+                },
+                {
+                    "file": "support.py",
+                    "positive_file_link_evidence": False,
+                    "goal_item_ids": [],
+                    "proof_obligation_ids": [],
+                    "probe_ids": [],
+                    "inventory_node_ids": ["N002"],
+                },
+            ],
+            "positive_mappings": [
+                {
+                    "file": "app.py",
+                    "goal_item_ids": ["GI001"],
+                    "proof_obligation_ids": ["PO001"],
+                    "probe_ids": ["GP001"],
+                    "inventory_node_ids": ["N001"],
+                    "match_evidence": {
+                        "goal_items": {"GI001": [{"id": "GI001", "field": "target_boundaries", "match_type": "path"}]},
+                        "proof_obligations": {"PO001": [{"id": "PO001", "field": "target_boundaries", "match_type": "path"}]},
+                    },
+                }
+            ],
+            "unmatched_candidate_files": [
+                {
+                    "file": "support.py",
+                    "goal_item_ids": [],
+                    "proof_obligation_ids": [],
+                    "probe_ids": [],
+                    "inventory_node_ids": ["N002"],
+                    "reason": "no positive slice evidence",
+                    "work_assigned": 0,
+                }
+            ],
+            "unmapped_goal_item_ids": [],
+            "unmapped_proof_obligation_ids": [],
+            "ambiguous_goal_item_ids": [],
+            "ambiguous_proof_obligation_ids": [],
+            "missing_probe_obligation_ids": [],
+            "probes_by_obligation": {"PO001": ["GP001"]},
+            "errors": [],
+        },
+        "file_mapping_result.schema.json",
+    ) == []
 
 
 def test_dependency_graph_schema_validates():

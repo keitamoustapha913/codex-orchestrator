@@ -20,6 +20,38 @@
           "slice_type": {"type": "string", "minLength": 1},
           "goal_item_ids": {"type": "array", "items": {"type": "string"}},
           "proof_obligation_ids": {"type": "array", "items": {"type": "string"}},
+          "probe_ids": {"type": "array", "items": {"type": "string"}},
+          "current_slice_boundary": {
+            "type": ["object", "null"],
+            "properties": {
+              "file": {"type": "string"},
+              "symbol": {"type": ["string", "null"]},
+              "expected_observation": {},
+              "goal_item_id": {"type": ["string", "null"]},
+              "goal_item_ids": {"type": "array", "items": {"type": "string"}},
+              "proof_obligation_id": {"type": ["string", "null"]},
+              "proof_obligation_ids": {"type": "array", "items": {"type": "string"}},
+              "probe_ids": {"type": "array", "items": {"type": "string"}}
+            },
+            "additionalProperties": false
+          },
+          "future_slice_boundaries": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "file": {"type": "string"},
+                "symbol": {"type": ["string", "null"]},
+                "expected_observation": {},
+                "goal_item_id": {"type": ["string", "null"]},
+                "goal_item_ids": {"type": "array", "items": {"type": "string"}},
+                "proof_obligation_id": {"type": ["string", "null"]},
+                "proof_obligation_ids": {"type": "array", "items": {"type": "string"}},
+                "probe_ids": {"type": "array", "items": {"type": "string"}}
+              },
+              "additionalProperties": false
+            }
+          },
           "inventory_node_ids": {"type": "array", "items": {"type": "string"}},
           "depends_on_work_slice_ids": {"type": "array", "items": {"type": "string"}},
           "risk_level": {"enum": ["low", "medium", "high"]},
@@ -48,12 +80,16 @@
                   "line_exact_change",
                   "file_presence_change",
                   "artifact_only",
-                  "model_planned_custom_static_boundary"
+                  "model_planned_custom_static_boundary",
+                  "structured_positive_evidence"
                 ]
               },
               "allowed_product_runtime_file": {"type": "string"},
               "goal_item_ids": {"type": "array", "items": {"type": "string"}},
               "proof_obligation_ids": {"type": "array", "items": {"type": "string"}},
+              "probe_ids": {"type": "array", "items": {"type": "string"}},
+              "current_boundary": {"type": ["object", "null"]},
+              "future_boundaries": {"type": "array", "items": {"type": "object"}},
               "allowed_changes": {"type": "array", "items": {"type": "object"}},
               "forbidden_future_goal_item_ids": {"type": "array", "items": {"type": "string"}},
               "forbidden_future_proof_obligation_ids": {"type": "array", "items": {"type": "string"}},

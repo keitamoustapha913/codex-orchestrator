@@ -353,3 +353,11 @@ Boundary evidence matching is role-aware. Short tokens such as `on`, `off`,
 future boundary evidence combination, such as an exact line `event_logging=on`
 or matching future key and value. Same-file mention alone is not a future
 claim. Worker text is not proof; independent proof remains required.
+## Positive-Evidence Checks
+
+When reviewing smoke evidence, confirm that each patchlet is backed by positive
+planning evidence. An unmatched candidate must receive no work. Support files
+remain targetable when explicitly planned, but they must not inherit unrelated
+goals or proof obligations. For same-file work, multiple patchlets may target
+one file, with one goal, one proof obligation, and one probe per independently
+provable slice. Treat unresolved or ambiguous mappings as safe pre-worker stops.

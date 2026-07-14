@@ -93,3 +93,14 @@ not be satisfied. See `docs/goal_progress_and_partial_apply.md`.
 ## Decomposition Lifecycle
 
 After inventory and proof analysis, cxor writes decomposition artifacts under `.codex-orchestrator/decomposition/`. Patchlet compilation reads `patchlet_plan.json` when present and preserves legacy invariant fields for verification compatibility. Transaction groups derive from dependency layers and proof-obligation coverage. See `docs/multi_patchlet_transaction_graph.md`.
+
+Before worker execution, the workflow records whether candidate files have
+positive planning evidence. An unmatched candidate receives no work and is not
+assigned every goal or proof obligation by fallback. Support files remain
+targetable when explicitly linked by planning evidence, but untargeted support
+or verification files stay out of patchlet work.
+
+Each accepted decomposition slice carries one goal, one proof obligation, and
+one probe unless a legitimate obligation has additional explicit probes.
+Multiple patchlets may target one file. Unresolved, ambiguous, or missing-probe
+mappings are safe pre-worker stop conditions.
