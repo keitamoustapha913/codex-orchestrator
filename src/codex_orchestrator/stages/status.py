@@ -26,6 +26,7 @@ def status(ctx: TargetRepoContext) -> dict:
     decomposition = _decomposition_status(ctx)
     master_prompt_proof = _master_prompt_proof_status(ctx)
     applyable_progress = _applyable_progress_status(ctx, goal_progress)
+    patch_promotion = _patch_promotion_status(ctx)
     last_report_ingestion = None
     for run in reversed(runs):
         attempt_id = run.get("attempt_id")
@@ -87,7 +88,94 @@ def status(ctx: TargetRepoContext) -> dict:
         "goal_progress": goal_progress,
         "decomposition": decomposition,
         "applyable_progress": applyable_progress,
+        "patch_promotion": patch_promotion,
     }
+
+
+def _patch_promotion_status(ctx: TargetRepoContext) -> dict:
+    if not ctx.paths.runs_dir.exists():
+        return {"available": False}
+    attempts = sorted([path for path in ctx.paths.runs_dir.iterdir() if path.is_dir()])
+    for attempt_dir in reversed(attempts):
+        hygiene_path = attempt_dir / "gates" / "worker_sandbox_hygiene_result.json"
+        evidence_inventory_path = attempt_dir / "gates" / "worker_evidence_inventory.json"
+        evidence_preservation_path = attempt_dir / "gates" / "worker_evidence_preservation_result.json"
+        proposal_manifest_path = attempt_dir / "patch_promotion" / "patch_proposal_manifest.json"
+        proposal_validation_path = attempt_dir / "patch_promotion" / "patch_proposal_validation_result.json"
+        reconstruction_path = attempt_dir / "patch_promotion" / "patch_reconstruction_result.json"
+        proof_path = attempt_dir / "gates" / "independent_probe_rerun_result.json"
+        coverage_path = attempt_dir / "gates" / "goal_coverage_gate_result.json"
+        semantic_quality_path = attempt_dir / "gates" / "worker_report_semantic_quality_result.json"
+        canonical_semantic_path = attempt_dir / "gates" / "canonical_patchlet_semantic_result.json"
+        preparation_path = attempt_dir / "patch_promotion" / "clean_candidate_preparation_result.json"
+        promotion_path = attempt_dir / "patch_promotion" / "clean_candidate_promotion_result.json"
+        disposal_path = attempt_dir / "patch_promotion" / "worker_sandbox_disposal_result.json"
+        if not any(path.exists() for path in [hygiene_path, proposal_validation_path, reconstruction_path, proof_path, coverage_path, semantic_quality_path, canonical_semantic_path, preparation_path, promotion_path, disposal_path]):
+            continue
+        hygiene = read_json(hygiene_path) if hygiene_path.exists() else {}
+        evidence_inventory = read_json(evidence_inventory_path) if evidence_inventory_path.exists() else {}
+        proposal_manifest = read_json(proposal_manifest_path) if proposal_manifest_path.exists() else {}
+        proposal = read_json(proposal_validation_path) if proposal_validation_path.exists() else {}
+        reconstruction = read_json(reconstruction_path) if reconstruction_path.exists() else {}
+        proof = read_json(proof_path) if proof_path.exists() else {}
+        coverage = read_json(coverage_path) if coverage_path.exists() else {}
+        semantic_quality = read_json(semantic_quality_path) if semantic_quality_path.exists() else {}
+        canonical_semantic = read_json(canonical_semantic_path) if canonical_semantic_path.exists() else {}
+        preparation = read_json(preparation_path) if preparation_path.exists() else {}
+        promotion = read_json(promotion_path) if promotion_path.exists() else {}
+        disposal = read_json(disposal_path) if disposal_path.exists() else {}
+        promotion_accepted = promotion.get("promotion_accepted") is True
+        hygiene_status = hygiene.get("status")
+        return {
+            "available": True,
+            "attempt_id": attempt_dir.name,
+            "worker_hygiene_status": hygiene_status,
+            "sandbox_debris_count": hygiene.get("sandbox_debris_count", 0),
+            "allowed_product_change_count": hygiene.get("allowed_product_change_count", 0),
+            "allowed_path_violation_count": hygiene.get("allowed_path_violation_count", 0),
+            "containment_violation_count": hygiene.get("containment_violation_count", 0),
+            "diagnostic_evidence_files": evidence_inventory.get("captured_file_count", 0),
+            "canonical_patch_paths": len(proposal_manifest.get("changed_paths", [])),
+            "promotion_blocked": hygiene.get("promotion_blocked", False),
+            "patch_proposal_status": "ACCEPTED" if proposal.get("accepted") is True else "REJECTED" if proposal else None,
+            "clean_reconstruction_status": "ACCEPTED" if reconstruction.get("accepted") is True else "REJECTED" if reconstruction else None,
+            "candidate_preparation_status": "PREPARED" if preparation.get("candidate_prepared") is True else "REJECTED" if preparation else None,
+            "independent_proof_status": "ACCEPTED" if proof.get("accepted") is True else "REJECTED" if proof else None,
+            "goal_coverage_status": "ACCEPTED" if coverage.get("accepted") is True else "REJECTED" if coverage else None,
+            "worker_report_semantic_quality": semantic_quality.get("status"),
+            "canonical_semantic_status": "ACCEPTED" if canonical_semantic.get("accepted") is True else "REJECTED" if canonical_semantic else None,
+            "promotion_status": "ACCEPTED" if promotion_accepted else "REJECTED" if promotion else "NOT_PROMOTED",
+            "sandbox_disposal_status": "COMPLETE" if disposal.get("cleanup_succeeded") is True else "INCOMPLETE" if disposal else None,
+            "raw_worker_sandbox_promoted": False,
+            "product_result": "accepted" if promotion_accepted else "prepared" if preparation else "rejected" if promotion else None,
+            "candidate_scopes": {
+                "worker_hygiene": hygiene.get("candidate_scope"),
+                "patch_proposal": proposal.get("candidate_scope"),
+                "clean_reconstruction": reconstruction.get("candidate_scope"),
+                "candidate_preparation": preparation.get("candidate_scope"),
+                "independent_proof": proof.get("candidate_scope"),
+                "goal_coverage": coverage.get("candidate_scope"),
+                "worker_report_semantic_quality": semantic_quality.get("candidate_scope"),
+                "canonical_semantic": canonical_semantic.get("candidate_scope"),
+                "promotion": promotion.get("candidate_scope"),
+                "sandbox_disposal": disposal.get("candidate_scope"),
+            },
+            "artifact_paths": {
+                "worker_hygiene": f".codex-orchestrator/runs/{attempt_dir.name}/gates/worker_sandbox_hygiene_result.json" if hygiene_path.exists() else None,
+                "worker_evidence_inventory": f".codex-orchestrator/runs/{attempt_dir.name}/gates/worker_evidence_inventory.json" if evidence_inventory_path.exists() else None,
+                "worker_evidence_preservation": f".codex-orchestrator/runs/{attempt_dir.name}/gates/worker_evidence_preservation_result.json" if evidence_preservation_path.exists() else None,
+                "patch_proposal_validation": f".codex-orchestrator/runs/{attempt_dir.name}/patch_promotion/patch_proposal_validation_result.json" if proposal_validation_path.exists() else None,
+                "clean_reconstruction": f".codex-orchestrator/runs/{attempt_dir.name}/patch_promotion/patch_reconstruction_result.json" if reconstruction_path.exists() else None,
+                "candidate_preparation": f".codex-orchestrator/runs/{attempt_dir.name}/patch_promotion/clean_candidate_preparation_result.json" if preparation_path.exists() else None,
+                "independent_proof": f".codex-orchestrator/runs/{attempt_dir.name}/gates/independent_probe_rerun_result.json" if proof_path.exists() else None,
+                "goal_coverage": f".codex-orchestrator/runs/{attempt_dir.name}/gates/goal_coverage_gate_result.json" if coverage_path.exists() else None,
+                "worker_report_semantic_quality": f".codex-orchestrator/runs/{attempt_dir.name}/gates/worker_report_semantic_quality_result.json" if semantic_quality_path.exists() else None,
+                "canonical_semantic": f".codex-orchestrator/runs/{attempt_dir.name}/gates/canonical_patchlet_semantic_result.json" if canonical_semantic_path.exists() else None,
+                "promotion": f".codex-orchestrator/runs/{attempt_dir.name}/patch_promotion/clean_candidate_promotion_result.json" if promotion_path.exists() else None,
+                "sandbox_disposal": f".codex-orchestrator/runs/{attempt_dir.name}/patch_promotion/worker_sandbox_disposal_result.json" if disposal_path.exists() else None,
+            },
+        }
+    return {"available": False}
 
 
 def _current_dirty_status(ctx: TargetRepoContext) -> list[str]:

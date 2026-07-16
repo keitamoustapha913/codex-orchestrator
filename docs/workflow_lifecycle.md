@@ -104,3 +104,29 @@ Each accepted decomposition slice carries one goal, one proof obligation, and
 one probe unless a legitimate obligation has additional explicit probes.
 Multiple patchlets may target one file. Unresolved, ambiguous, or missing-probe
 mappings are safe pre-worker stop conditions.
+
+Real-worker attempts receive a dedicated `$CXOR_WORKER_SCRATCH_DIR`.
+Temporary validation output, command transcripts, intermediate JSON, formatter
+output, cache files, and disposable artifacts must be written beneath that
+scratch root. The launcher routes common temporary/cache variables there before
+worker launch.
+
+Every write-capable worker runs in a disposable sandbox. The deterministic
+allowlist is the only product boundary. All in-sandbox non-allowlisted outputs
+are sandbox debris, and sandbox debris never blocks promotion. Its name,
+tracking state, content, shape, or report reference cannot make it authoritative.
+
+The orchestrator inventories debris, extracts only valid allowlisted changes,
+and reconstructs the canonical patch from the accepted checkpoint. Independent
+proof runs only in that clean reconstruction. Containment escape remains
+blocking, along with allowlisted-path, reconstruction, proof, coverage, and
+canonical semantic failures.
+# Workflow artifact path ownership
+
+Workflow artifact references may remain repository-relative so that manifests
+stay portable. Before any filesystem write, the reference must be resolved
+against the owning target workflow root; library behavior must not depend on
+the process current working directory. Deterministic tests must leave the
+orchestrator checkout free of local workflow state. Adding
+`.codex-orchestrator` to ignore rules is not a substitute for repository
+isolation.

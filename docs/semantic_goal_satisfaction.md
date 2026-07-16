@@ -25,8 +25,14 @@ obligations, probe plans, decomposition plans, patchlet plans, worker reports,
 and worker-authored probes are derived artifacts. They are not proof by
 themselves.
 
-Real Codex reports may contain shorthand `semantic_goal_results`. A shorthand
-item is accepted only as a raw worker semantic claim when it links to the
+Every write-capable worker runs in a disposable sandbox. The deterministic
+allowlist is the only product boundary; all in-sandbox non-allowlisted outputs
+are sandbox debris, and sandbox debris never blocks promotion. Canonical
+semantic acceptance reads only the clean reconstruction of the allowlisted
+patch. Containment escape remains blocking.
+
+Real Codex reports may contain `semantic_goal_results`. Each item uses the
+canonical V2 `goal_item_id` field and is accepted only as a raw worker semantic claim when it links to the
 current patchlet's selected goal item, selected proof obligation, slice
 boundary, and probe plan. The raw worker output is preserved. The claim remains
 `LINKED_PENDING_ORCHESTRATOR_PROOF` and does not set `passed=true`.

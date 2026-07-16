@@ -49,39 +49,20 @@ only. They must link to the current slice boundary and selected proof
 obligation, they must not claim future slices, and they become canonical
 passed/failed semantic results only after orchestrator-owned independent proof.
 
-Real Codex may create root-level scratch artifacts while validating reports or
-probes. Recognized worker scratch artifacts are quarantined under the attempt
-artifact root with preserved content, sha256, size, and reason metadata. The
-orchestrator then rechecks the product diff. Quarantine does not allow a second
-product/runtime file and does not weaken same-file slice boundaries.
+Every write-capable patchlet worker runs in a disposable sandbox. The compiled
+patchlet's deterministic allowlist is the only product boundary. All in-sandbox
+non-allowlisted outputs are sandbox debris regardless of name, extension,
+tracking state, directory shape, content, or report reference.
 
-Each patchlet attempt has a worker scratch directory at
-`.codex-orchestrator/runs/<attempt>/worker_scratch/`. The worker contract says:
-Do not write scratch/check/validation files in the target repository root. The
-orchestrator still runs a root scratch sweep after worker exit. Role-based
-quarantine accepts report/probe validation-shaped leftovers, preserves content
-hash metadata, and writes `root_scratch_sweep_result.json`. Only role-shaped
-untracked worker scratch directories are eligible for quarantine. Not all
-directories are allowed. Not all scratch directories are allowed. Tracked
-`worker_scratch` content is rejected. Executable scratch content is rejected.
-Changed peer product files remain rejected. Directory quarantine preserves
-hashes and metadata, and changed paths are recomputed after quarantine.
+Sandbox debris never blocks promotion and never expands patchlet ownership. The
+orchestrator inventories it for diagnostics, constructs the canonical patch
+only from allowlisted product files, and discards the debris. Independent proof
+and all downstream acceptance gates use a clean reconstruction of that
+canonical patch.
 
-Patchlet-prefixed report formatting scratch is allowed only as safe worker
-scratch: untracked, non-executable, text/JSON-like, patchlet-prefixed,
-report-role shaped, and formatting/check/output-role shaped. Not all JSON files
-are allowed. Not all pretty files are allowed. Product/runtime files remain
-rejected, changed peer product files remain rejected, quarantine preserves
-content and hash metadata, and the diff is recomputed after quarantine.
-
-Execution-root peer files are classified by actual changed/untracked paths, not
-file presence. Unchanged peer product files are ignored because presence is not a
-change. Changed peer product files are rejected unless they are the current
-patchlet's allowed product/runtime file. Role-shaped validation scratch such as
-`validate_report.out` may be quarantined after safety checks.
-The allowed file from the patchlet plan is authoritative, not filename
-convention, so the same rules apply to non-scenario names such as
-`control.plan`, `rollout.table`, and `verify_result.log`.
+An invalid allowlisted object, an absent required allowlisted change, a
+slice-boundary violation, failed reconstruction, failed proof/coverage/semantic
+acceptance, or a containment escape remains blocking.
 
 Semantic shorthand matching is boundary-type aware. Route-style claims can
 match route/path and expected target evidence, key-value claims can match key

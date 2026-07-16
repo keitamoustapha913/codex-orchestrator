@@ -7,6 +7,7 @@ import subprocess
 from pathlib import Path
 
 from codex_orchestrator.patchlet_run_context import build_patchlet_run_context
+from codex_orchestrator.patch_promotion import prepare_clean_patch_candidate
 from codex_orchestrator.stages.build_inventory import build_inventory
 from codex_orchestrator.stages.census import run_census
 from codex_orchestrator.stages.classify_evidence import classify_evidence
@@ -179,8 +180,9 @@ def test_fake_codex_success_payload_writes_valid_complete_report_and_probe_artif
 
     assert result.report_path == ctx.paths.reports_dir / "P0001.json"
     assert result.report_path.exists()
-    assert (ctx.paths.probe_dir / "P0001" / "probe.py").exists()
-    assert (ctx.paths.probe_dir / "P0001" / "run_001" / "row_ledger.jsonl").exists()
+    assert (run_ctx.worker_evidence_dir / "GP001" / "probe.py").exists()
+    assert (run_ctx.worker_evidence_dir / "GP001" / "run_001" / "row_ledger.jsonl").exists()
+    assert not (ctx.paths.probe_dir / "P0001" / "probe.py").exists()
     assert (run_ctx.run_dir / "env.json").exists()
 
 
@@ -196,12 +198,22 @@ def test_fake_codex_success_payload_passes_patchlet_report_validator(
     _write_fake_codex_success_binary(fake_codex)
     monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ.get('PATH', '')}")
 
-    _run_fake_success(ctx, patchlet, execution_root=execution_root, artifact_root=ctx.root)
+    run_ctx, result, _env = _run_fake_success(ctx, patchlet, execution_root=execution_root, artifact_root=ctx.root)
+    prepare_clean_patch_candidate(
+        ctx=ctx,
+        run_ctx=run_ctx,
+        patchlet=patchlet,
+        report_path=result.report_path,
+    )
 
     report = validate_patchlet_report_file(ctx.paths.reports_dir / "P0001.json", patchlet)
     probe_result = validate_probe_artifact_run(ctx.paths.probe_dir / "P0001" / "run_001", patchlet_id="P0001")
 
     assert report["status"] == "COMPLETE"
+    evidence_inventory = json.loads(
+        (run_ctx.run_dir / "gates" / "worker_evidence_inventory.json").read_text(encoding="utf-8")
+    )
+    assert evidence_inventory["captured_file_count"] == 6
     assert probe_result["valid"] is True
 
 
@@ -255,7 +267,7 @@ def test_fake_codex_success_payload_uses_only_cxor_environment_paths(
     assert env_dump["execution_root"] == str(execution_root)
     assert env_dump["artifact_root"] == str(ctx.root)
     assert env_dump["report_path"] == str(ctx.paths.reports_dir / "P0001.json")
-    assert env_dump["probe_root"] == str(ctx.paths.probe_dir / "P0001")
+    assert env_dump["probe_root"] == str(Path(env_dump["probe_dir"]) / patchlet["probe_ids"][0])
     assert env_dump["run_dir"] == str(ctx.paths.runs_dir / "P0001_attempt1")
     assert Path(env_dump["report_path"]).exists()
     assert Path(env_dump["probe_root"]).exists()

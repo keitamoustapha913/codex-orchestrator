@@ -17,6 +17,25 @@ from codex_orchestrator.target_repo import TargetRepoContext
 DEFAULT_INTEGRATION_RUN_ID = "R0001"
 
 
+def _git_ref_exists(ctx: TargetRepoContext, ref: str) -> bool:
+    result = subprocess.run(
+        ["git", "-C", str(ctx.root), "rev-parse", "--verify", ref],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    return result.returncode == 0
+
+
+def _ensure_integration_ref(ctx: TargetRepoContext, state: dict[str, Any]) -> None:
+    ref = state.get("integration_ref")
+    sha = state.get("integration_sha")
+    if not ref or not sha or _git_ref_exists(ctx, ref):
+        return
+    subprocess_run(["git", "-C", str(ctx.root), "update-ref", ref, sha])
+
+
 def ensure_integration_state(ctx: TargetRepoContext) -> dict[str, Any]:
     ctx.paths.integration_dir.mkdir(parents=True, exist_ok=True)
     ctx.paths.integration_checkpoints_dir.mkdir(parents=True, exist_ok=True)
@@ -29,6 +48,7 @@ def ensure_integration_state(ctx: TargetRepoContext) -> dict[str, Any]:
             state["target_head_sha"] = current_head
             state["integration_sha"] = current_head
             write_json(ctx.paths.integration_state, state)
+        _ensure_integration_ref(ctx, state)
         return state
 
     target_head_sha = repo_head(ctx.root)
@@ -44,6 +64,7 @@ def ensure_integration_state(ctx: TargetRepoContext) -> dict[str, Any]:
         "last_checkpoint_path": None,
         "final_diff_path": relative_to_repo(ctx.root, ctx.paths.final_diff_path),
     }
+    _ensure_integration_ref(ctx, state)
     write_json(ctx.paths.integration_state, state)
     return state
 
@@ -228,6 +249,7 @@ def advance_integration_ref_from_worktree(
 ) -> str:
     state = ensure_integration_state(ctx)
     previous_sha = state.get("integration_sha")
+    integration_ref = state["integration_ref"]
     if not previous_sha:
         raise RuntimeError("integration_state.json is missing integration_sha")
     if not changed_product_runtime_files:
@@ -254,7 +276,13 @@ def advance_integration_ref_from_worktree(
         ],
     )
     new_sha = subprocess_run(["git", "-C", str(worktree_path), "rev-parse", "HEAD"]).stdout.strip()
-    subprocess_run(["git", "-C", str(ctx.root), "update-ref", state["integration_ref"], new_sha])
+    current_ref = subprocess_run(["git", "-C", str(ctx.root), "rev-parse", "--verify", integration_ref]).stdout.strip()
+    if current_ref != previous_sha:
+        raise RuntimeError(f"integration ref changed before promotion: expected {previous_sha}, found {current_ref}")
+    subprocess_run(["git", "-C", str(ctx.root), "update-ref", integration_ref, new_sha, previous_sha])
+    ref_after = subprocess_run(["git", "-C", str(ctx.root), "rev-parse", "--verify", integration_ref]).stdout.strip()
+    if ref_after != new_sha:
+        raise RuntimeError(f"integration ref update verification failed: expected {new_sha}, found {ref_after}")
     return new_sha
 
 

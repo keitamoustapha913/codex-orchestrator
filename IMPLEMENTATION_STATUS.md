@@ -145,41 +145,21 @@ preserves raw worker output, rejects vague shorthand and future-slice claims,
 and remains pending until orchestrator-owned independent proof canonicalizes
 the result. Worker claims are not proof and do not satisfy DONE.
 
-RC6C scratch handling quarantines recognized real-Codex root-level scratch
-artifacts before final diff guard acceptance. Quarantine is not silent delete:
-content is preserved under the attempt run directory, sha256 and size metadata
-are written to `scratch_artifact_quarantine_result.json`, and the product diff
-is rechecked after quarantine. Unknown product/runtime files, second product
-files, executable root files, the one-file rule, and same-file slice boundaries
-remain enforced.
+The worker-output boundary is deterministic and compatibility-free. Every
+write-capable worker runs in a disposable sandbox. The deterministic allowlist
+is the only product boundary; every other in-sandbox created, changed, staged,
+or deleted path is `SANDBOX_DEBRIS`.
 
-RC6D adds a worker scratch directory at
-`.codex-orchestrator/runs/<attempt>/worker_scratch/`. Worker prompts and memory
-contracts say: Do not write scratch/check/validation files in the target
-repository root. After worker exit, a root scratch sweep performs role-based
-quarantine. Only role-shaped untracked worker scratch directories are eligible
-for quarantine. Not all directories are allowed. Not all scratch directories
-are allowed. Tracked `worker_scratch` content is rejected. Executable scratch
-content is rejected. Changed peer product files remain rejected. Directory
-quarantine preserves hashes and metadata, writes `root_scratch_sweep_result.json`,
-and changed paths are recomputed after quarantine.
+Sandbox debris never blocks promotion. It is retained only as a diagnostic
+inventory, excluded from the canonical patch, and discarded with the sandbox.
+Tracked peer edits, hidden files, caches, and checkout-local artifacts receive
+the same non-authoritative debris treatment.
 
-RC6H extends that role-based quarantine narrowly for patchlet-prefixed report
-formatting scratch. A file is eligible only when it is untracked,
-non-executable, text/JSON-like, patchlet-prefixed, report-role shaped, and
-formatting/check/output-role shaped. Not all JSON files are allowed. Not all
-pretty files are allowed. Product/runtime files remain rejected, changed peer
-product files remain rejected, quarantine preserves content and hash metadata,
-and the diff is recomputed after quarantine.
-
-RC6E tightens the sweep to actual changed/untracked paths, not file presence.
-Unchanged peer product files are ignored because presence is not a change;
-changed peer product files are rejected. Validation scratch role tokens include
-`validate`, so safe files such as `validate_report.out` are quarantined while
-random `.out` files remain rejected.
-The allowed file is read from the patchlet plan, not filename convention; tests
-cover non-scenario names such as `control.plan`, `rollout.table`, and
-`verify_result.log`.
+Only allowlisted changes can enter a canonical patch. Independent proof runs
+against a clean reconstruction of that patch. Invalid allowlisted objects,
+missing required allowlisted changes, slice-boundary violations, reconstruction
+failure, proof/coverage/semantic failure, and containment escape remain
+blocking.
 
 Real-Codex attempts write compact liveness events to `progress.jsonl`. This is
 not success evidence. Timeout safe-failure preserves evidence and containment;
@@ -520,3 +500,24 @@ count: one goal, one proof obligation, and one probe define the canonical slice,
 and multiple patchlets may target one file. Unresolved goals, unresolved
 obligations, ambiguous file mappings, and missing mandatory probes are reported
 as safe pre-worker decomposition evidence.
+
+## RC6M Worker Scratch Contract Status
+
+Implemented: real-worker attempts receive an absolute worker scratch root and
+the worker environment routes temporary and cache paths beneath it. Worker
+prompts and memory contracts explicitly require temporary validation output,
+formatter output, cache files, command transcripts, intermediate JSON, and
+disposable artifacts to stay under `$CXOR_WORKER_SCRATCH_DIR`.
+
+Unknown regular files in the raw disposable worker sandbox are recorded as
+worker hygiene warnings when they are untracked, bounded, unreferenced, outside
+protected paths, and excluded from the canonical patch. They are not promoted.
+Unsafe path types, tracked/protected changes, support or verification changes,
+and report/probe references to excluded debris remain hard failures.
+
+Implemented: patch-only promotion reconstructs the trusted candidate from the
+accepted integration checkpoint plus an orchestrator-built canonical patch. The
+worker filesystem and worker Git index are not trusted. Independent proof runs
+in the clean reconstructed verification worktree, and only that clean verified
+candidate advances the integration ref. Worker scratch routing remains defense
+in depth rather than the primary acceptance boundary.

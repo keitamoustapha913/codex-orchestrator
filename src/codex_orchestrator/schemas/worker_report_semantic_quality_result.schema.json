@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "worker_report_semantic_quality_result",
+  "type": "object",
+  "required": ["schema_version", "kind", "candidate_scope", "patchlet_id", "attempt_id", "status", "expected_components", "matched_components", "missing_components", "contradictions", "overclaims", "blocking", "warnings", "errors"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "kind": {"const": "worker_report_semantic_quality_result"},
+    "candidate_scope": {"const": "clean_reconstruction"},
+    "patchlet_id": {"type": "string"},
+    "attempt_id": {"type": "string"},
+    "status": {"enum": ["COMPLETE", "INCOMPLETE", "CONTRADICTORY", "OVERCLAIMED"]},
+    "expected_components": {"type": "object"},
+    "matched_components": {"type": "array", "items": {"type": "string"}},
+    "missing_components": {"type": "array", "items": {"type": "string"}},
+    "contradictions": {"type": "array"},
+    "overclaims": {"type": "array"},
+    "blocking": {"const": false},
+    "warnings": {"type": "array"},
+    "errors": {"type": "array", "maxItems": 0}
+  },
+  "additionalProperties": false
+}

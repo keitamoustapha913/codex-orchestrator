@@ -4,6 +4,12 @@ Canonical patchlet reports must keep `probe_artifact_refs` as object entries.
 Raw real-Codex reports may contain string paths only as worker output before
 report ingestion. String paths are never canonical report truth.
 
+Report declarations do not expand product ownership. Every write-capable
+worker runs in a disposable sandbox, and the deterministic allowlist is the
+only product boundary. All in-sandbox non-allowlisted outputs are sandbox
+debris. Sandbox debris never blocks promotion and a report reference cannot
+make debris part of the canonical patch. Containment escape remains blocking.
+
 ## Canonical Probe References
 
 Invalid canonical report shape:
@@ -56,8 +62,8 @@ Nested probe runs use the nested directory as `run_id`:
 }
 ```
 
-`files` metadata is optional for legacy canonical reports, but when present the
-validator checks path, kind, sha256, and size. File paths must remain under
+Canonical V2 reports may include `files` metadata. When present, the validator
+checks path, kind, sha256, and size. File paths must remain under
 `.artifacts/probes/<patchlet_id>/`.
 
 ## Report Ingestion

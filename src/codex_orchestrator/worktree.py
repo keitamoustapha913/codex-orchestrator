@@ -24,6 +24,7 @@ class WorktreeContext:
     base_source: str
     integration_ref: str | None
     cleanup_policy: str
+    sandbox_root: Path | None = None
     cleanup_status: str | None = None
 
 
@@ -68,7 +69,8 @@ def create_patchlet_worktree(ctx: TargetRepoContext, *, patchlet_id: str) -> Wor
     base_sha = integration_state.get("integration_sha") or repo_head(ctx.root)
     if not base_sha:
         raise WorkerPreconditionError(f"Unable to resolve base SHA for target repo: {ctx.root}")
-    root = Path(tempfile.mkdtemp(prefix=f"cxor-{patchlet_id.lower()}-", dir="/tmp")).resolve()
+    sandbox_root = Path(tempfile.mkdtemp(prefix=f"cxor-{patchlet_id.lower()}-", dir="/tmp")).resolve()
+    root = sandbox_root / "checkout"
     subprocess.run(
         ["git", "-C", str(ctx.root), "worktree", "add", "--detach", str(root), base_sha],
         text=True,
@@ -84,6 +86,7 @@ def create_patchlet_worktree(ctx: TargetRepoContext, *, patchlet_id: str) -> Wor
         base_source="integration_state",
         integration_ref=integration_state.get("integration_ref"),
         cleanup_policy="remove",
+        sandbox_root=sandbox_root,
         cleanup_status=None,
     )
 
@@ -97,8 +100,9 @@ def cleanup_patchlet_worktree(worktree: WorktreeContext) -> WorktreeContext:
         stderr=subprocess.PIPE,
         check=False,
     )
-    if path.exists():
-        shutil.rmtree(path)
+    sandbox_root = worktree.sandbox_root or path
+    if sandbox_root.exists():
+        shutil.rmtree(sandbox_root)
     return WorktreeContext(
         patchlet_id=worktree.patchlet_id,
         target_root=worktree.target_root,
@@ -107,5 +111,6 @@ def cleanup_patchlet_worktree(worktree: WorktreeContext) -> WorktreeContext:
         base_source=worktree.base_source,
         integration_ref=worktree.integration_ref,
         cleanup_policy=worktree.cleanup_policy,
+        sandbox_root=worktree.sandbox_root,
         cleanup_status="removed",
     )

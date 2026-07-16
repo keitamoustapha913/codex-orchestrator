@@ -18,33 +18,35 @@ def _text() -> str:
     return "\n".join(path.read_text(encoding="utf-8") for path in DOCS)
 
 
-def test_docs_explain_worker_scratch_directory():
-    assert "worker scratch directory" in _text()
+def test_docs_explain_disposable_worker_sandbox():
+    assert "disposable sandbox" in _text()
 
 
-def test_docs_explain_no_root_scratch_instruction():
-    assert "not to write root scratch" in _text() or "Do not write scratch/check/validation files" in _text()
+def test_docs_explain_all_non_allowlisted_outputs_are_debris():
+    text = _text().lower()
+    assert "all in-sandbox" in text
+    assert "non-allowlisted outputs are sandbox debris" in text
 
 
-def test_docs_explain_root_scratch_sweep():
-    assert "root scratch sweep" in _text()
+def test_docs_explain_debris_is_inventoried():
+    assert "inventoried" in _text()
 
 
-def test_docs_explain_role_based_quarantine():
-    assert "role-based" in _text()
+def test_docs_explain_debris_is_discarded():
+    assert "discarded" in _text()
 
 
-def test_docs_explain_random_txt_not_automatically_allowed():
+def test_docs_explain_names_do_not_grant_authority():
     text = _text()
-    assert "random root .txt" in text or "random .txt" in text
-    assert "not automatically allowed" in text
+    assert "filenames" in text or "name" in text
+    assert "authority" in text or "authoritative" in text
 
 
-def test_docs_explain_product_files_still_rejected():
-    text = _text()
-    assert "product/runtime files" in text
-    assert "rejected" in text
+def test_docs_explain_only_allowlisted_product_files_are_reconstructed():
+    text = _text().lower()
+    assert "only valid allowlisted" in text or "only allowlisted" in text
+    assert "reconstruct" in text
 
 
-def test_docs_explain_diff_recomputed_after_quarantine():
-    assert "diff is recomputed after quarantine" in _text()
+def test_docs_explain_containment_remains_blocking():
+    assert "containment escape remains blocking" in _text()

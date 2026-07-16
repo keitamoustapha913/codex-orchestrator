@@ -18,7 +18,7 @@ from codex_orchestrator.stages.init import init_workflow
 from codex_orchestrator.stages.normalize import normalize_master_prompt
 from codex_orchestrator.stages.run_patchlet import run_next_patchlet
 from codex_orchestrator.target_repo import resolve_target_repo
-from codex_orchestrator.worktree import cleanup_patchlet_worktree, create_patchlet_worktree
+from codex_orchestrator.worker_capsule import build_worker_capsule
 
 
 def _compiled_ctx(git_repo: Path):
@@ -134,3 +134,26 @@ def test_run_manifest_references_worker_capsule_manifest_when_available(git_repo
 
     run = read_json(ctx.paths.run_manifest)["runs"][-1]
     assert run["worker_capsule_manifest"].endswith("worker_capsule.json")
+
+
+def test_worker_capsule_requires_work_slice_id(git_repo: Path):
+    ctx = _compiled_ctx(git_repo)
+    patchlet = read_json(ctx.paths.patchlet_index)["patchlets"][0]
+    patchlet.pop("work_slice_id")
+    run_ctx = build_patchlet_run_context(
+        ctx,
+        patchlet=patchlet,
+        run_id="P0001_attempt1",
+    )
+
+    with pytest.raises(ValueError, match="work_slice_id"):
+        build_worker_capsule(run_ctx, patchlet)
+
+
+def test_worker_prompt_never_emits_legacy_invariant_slice():
+    import codex_orchestrator.stages.run_patchlet as run_patchlet_module
+    import codex_orchestrator.worker_capsule as worker_capsule_module
+
+    source = Path(worker_capsule_module.__file__).read_text(encoding="utf-8")
+    source += Path(run_patchlet_module.__file__).read_text(encoding="utf-8")
+    assert "legacy-" + "invariant-slice" not in source

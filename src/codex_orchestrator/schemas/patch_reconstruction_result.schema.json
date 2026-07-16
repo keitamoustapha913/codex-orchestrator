@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "patch_reconstruction_result",
+  "type": "object",
+  "required": ["candidate_scope", "schema_version", "kind", "patchlet_id", "attempt_id", "base_checkpoint", "base_tree", "patch_sha256", "verification_root", "apply_check_returncode", "apply_returncode", "reconstructed_changed_paths", "proposal_reconstructed_equality", "unexpected_paths", "clean_before", "clean_after_relative_to_proposal", "accepted", "errors"],
+  "properties": {
+    "candidate_scope": {"const": "clean_reconstruction"},
+    "schema_version": {"const": "1.0"},
+    "kind": {"const": "patch_reconstruction_result"},
+    "patchlet_id": {"type": "string"},
+    "attempt_id": {"type": "string"},
+    "base_checkpoint": {"type": "string"},
+    "base_tree": {"type": ["string", "null"]},
+    "patch_sha256": {"type": ["string", "null"]},
+    "verification_root": {"type": "string"},
+    "apply_check_returncode": {"type": ["integer", "null"]},
+    "apply_returncode": {"type": ["integer", "null"]},
+    "reconstructed_changed_paths": {"type": "array", "items": {"type": "string"}},
+    "reconstructed_diff_sha256": {"type": ["string", "null"]},
+    "proposal_reconstructed_equality": {"type": "boolean"},
+    "unexpected_paths": {"type": "array", "items": {"type": "string"}},
+    "clean_before": {"type": "boolean"},
+    "clean_after_relative_to_proposal": {"type": "boolean"},
+    "accepted": {"type": "boolean"},
+    "errors": {"type": "array", "items": {"type": "string"}}
+  },
+  "additionalProperties": false
+}

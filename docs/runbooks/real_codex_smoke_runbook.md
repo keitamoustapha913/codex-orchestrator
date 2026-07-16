@@ -164,41 +164,16 @@ trusted, and raw worker metadata is preserved for audit. Unsafe paths, missing
 files, patchlet mismatches, and product files remain rejected; do not treat a
 worker hash as proof.
 
-For scratch artifacts, inspect
-`.codex-orchestrator/runs/<attempt>/gates/scratch_artifact_quarantine_result.json`.
-Recognized real-Codex scratch files are quarantined, not silently deleted. The
-artifact preserves content hashes and records why the path was scratch. The
-diff guard then rechecks product/runtime paths. Unknown root product files,
-second product files, executable root files, and slice-boundary violations
-remain failures.
+Inspect `.codex-orchestrator/runs/<attempt>/gates/worker_sandbox_hygiene_result.json`
+for the deterministic worker-output ledger. Every write-capable worker uses a
+disposable sandbox, and the deterministic allowlist is the only product
+boundary. All in-sandbox non-allowlisted outputs are sandbox debris.
 
-Each attempt has a worker scratch directory:
-`.codex-orchestrator/runs/<attempt>/worker_scratch/`. The prompt tells Codex:
-Do not write scratch/check/validation files in the target repository root. A
-root scratch sweep runs after worker exit, writes `root_scratch_sweep_result.json`,
-and uses role-based quarantine for report/probe validation outputs. Only
-role-shaped untracked worker scratch directories are eligible for quarantine.
-Not all directories are allowed. Not all scratch directories are allowed.
-Tracked `worker_scratch` content is rejected. Executable scratch content is
-rejected. Changed peer product files remain rejected. Directory quarantine
-preserves hashes and metadata, and changed paths are recomputed after
-quarantine.
-
-Patchlet-prefixed report formatting scratch is quarantined only when it is safe:
-untracked, non-executable, text/JSON-like, patchlet-prefixed, report-role
-shaped, and formatting/check/output-role shaped. Not all JSON files are allowed.
-Not all pretty files are allowed. Product/runtime files remain rejected, changed
-peer product files remain rejected, quarantine preserves content and hash
-metadata, and the diff is recomputed after quarantine.
-
-When inspecting Scenario 2-style multi-file targets, remember that the guard
-uses actual changed/untracked paths, not file presence. Unchanged peer product
-files are ignored because presence is not a change. Changed peer product files
-are rejected. `validate_report.out` is role-shaped validation scratch, but
-`random.out` is not automatically scratch.
-The allowed file from the patchlet plan is authoritative, not filename
-convention; non-scenario names such as `control.plan`, `rollout.table`, and
-`verify_result.log` use the same policy.
+Debris is informational: verify `promotion_blocked=false`, confirm it is absent
+from `patch_proposal.patch`, and confirm independent proof uses the clean
+reconstruction. Do not infer authority from filenames, extensions, hidden
+status, tracking state, report references, or content. Containment escape and
+allowlisted-path violations remain blocking security/product failures.
 
 The final Markdown report has a separate wrapper gate. It must contain a
 standalone canonical marker line: `FINAL_STATUS: PASS`,
@@ -361,3 +336,18 @@ remain targetable when explicitly planned, but they must not inherit unrelated
 goals or proof obligations. For same-file work, multiple patchlets may target
 one file, with one goal, one proof obligation, and one probe per independently
 provable slice. Treat unresolved or ambiguous mappings as safe pre-worker stops.
+
+## Worker Scratch Contract Checks
+
+For each real-Codex attempt, confirm the generated worker prompt names
+`$CXOR_WORKER_SCRATCH_DIR` and instructs the worker to keep temporary
+validation output, formatter output, command transcripts, intermediate JSON,
+caches, and disposable artifacts beneath that directory. The launcher also
+routes `TMPDIR`, `TMP`, `TEMP`, `XDG_CACHE_HOME`, and `PYTHONPYCACHEPREFIX`
+under the scratch root.
+
+Do not treat root-level hidden files, JSON-looking files, small files, or
+validation-output-looking files as product output. They are ordinary debris
+when they remain inside the sandbox. Repair guidance applies only to a genuine
+allowlisted-path, reconstruction, proof, coverage, semantic, or containment
+failure and must preserve the original patchlet boundary.

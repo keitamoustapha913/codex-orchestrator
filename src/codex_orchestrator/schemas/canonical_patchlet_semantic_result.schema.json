@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "canonical_patchlet_semantic_result",
+  "type": "object",
+  "required": ["schema_version", "kind", "candidate_scope", "patchlet_id", "attempt_id", "goal_item_ids", "proof_obligation_ids", "probe_ids", "allowed_product_file", "current_boundary", "future_boundaries", "canonical_patch_sha256", "clean_candidate_commit", "clean_candidate_tree", "effective_source_manifest_ref", "independent_proof_result_ref", "goal_coverage_result_ref", "worker_report_integrity_ref", "worker_report_semantic_quality_ref", "worker_report_semantic_status", "current_obligation_proven", "future_obligations_advanced", "accepted", "errors"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "kind": {"const": "canonical_patchlet_semantic_result"},
+    "candidate_scope": {"const": "clean_reconstruction"},
+    "patchlet_id": {"type": "string"},
+    "attempt_id": {"type": "string"},
+    "goal_item_ids": {"type": "array"},
+    "proof_obligation_ids": {"type": "array"},
+    "probe_ids": {"type": "array"},
+    "allowed_product_file": {"type": "string"},
+    "current_boundary": {"type": "object"},
+    "future_boundaries": {"type": "array"},
+    "canonical_patch_sha256": {"type": "string"},
+    "clean_candidate_commit": {"type": "string"},
+    "clean_candidate_tree": {"type": "string"},
+    "effective_source_manifest_ref": {"type": "object"},
+    "independent_proof_result_ref": {"type": "object"},
+    "goal_coverage_result_ref": {"type": "object"},
+    "worker_report_integrity_ref": {"type": "object"},
+    "worker_report_semantic_quality_ref": {"type": "object"},
+    "worker_report_semantic_status": {"enum": ["COMPLETE", "INCOMPLETE", "CONTRADICTORY", "OVERCLAIMED"]},
+    "current_obligation_proven": {"type": "boolean"},
+    "future_obligations_advanced": {"type": "array"},
+    "accepted": {"type": "boolean"},
+    "errors": {"type": "array"}
+  },
+  "additionalProperties": false
+}

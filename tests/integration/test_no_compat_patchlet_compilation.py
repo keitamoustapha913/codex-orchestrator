@@ -62,6 +62,7 @@ def test_compile_patchlets_from_patchlet_plan(git_repo: Path):
                 "allowed_product_runtime_files": ["service.txt"],
                 "goal_item_ids": ["GI001"],
                 "proof_obligation_ids": ["PO001"],
+                "probe_ids": ["GP001"],
                 "dependency_patchlet_ids": [],
                 "downstream_patchlet_ids": [],
                 "time_budget_seconds": 600,
@@ -100,6 +101,7 @@ def test_multiple_patchlets_same_allowed_file_is_valid(git_repo: Path):
         "allowed_product_runtime_files": ["service.txt"],
         "goal_item_ids": ["GI001"],
         "proof_obligation_ids": ["PO001"],
+        "probe_ids": ["GP001"],
         "time_budget_seconds": 600,
         "prompt_budget_policy": {"must_fit_within_timeout": True, "avoid_memory_compacting": True, "max_product_runtime_edit_files": 1},
     }
@@ -113,3 +115,28 @@ def test_multiple_patchlets_same_allowed_file_is_valid(git_repo: Path):
     index = compile_patchlets(ctx)
     assert [p["allowed_product_runtime_file"] for p in index["patchlets"]] == ["service.txt", "service.txt"]
     assert index["patchlets"][1]["dependency_patchlet_ids"] == ["P0001"]
+
+
+def test_explicit_empty_probe_ids_safe_fail_before_worker_invocation(git_repo: Path):
+    ctx = _ctx(git_repo)
+    _write_decomposition(
+        ctx,
+        [{
+            "patchlet_id": "P0001",
+            "work_slice_id": "WS001",
+            "allowed_product_runtime_file": "service.txt",
+            "allowed_product_runtime_files": ["service.txt"],
+            "goal_item_ids": ["GI001"],
+            "proof_obligation_ids": ["PO001"],
+            "probe_ids": [],
+            "dependency_patchlet_ids": [],
+            "downstream_patchlet_ids": [],
+            "time_budget_seconds": 600,
+            "prompt_budget_policy": {"must_fit_within_timeout": True, "avoid_memory_compacting": True, "max_product_runtime_edit_files": 1},
+        }],
+    )
+    index = compile_patchlets(ctx)
+    failure = read_json(ctx.paths.workflow_dir / "decomposition/patchlet_probe_mapping_failure.json")
+    assert index["patchlets"] == []
+    assert failure["failure_signature"] == "MISSING_PATCHLET_PROBE_MAPPING"
+    assert not list(ctx.paths.runs_dir.glob("*"))

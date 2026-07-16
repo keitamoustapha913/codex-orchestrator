@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import shutil
+import hashlib
 from pathlib import Path
 from typing import Any
 
@@ -8,12 +9,33 @@ from codex_orchestrator.jsonio import read_json, write_json
 from codex_orchestrator.operator_events import append_operator_event
 from codex_orchestrator.probe_artifact_refs import normalize_probe_artifact_refs
 from codex_orchestrator.report_validation_errors import errors_artifact
+from codex_orchestrator.report_contract import RawReportError, classify_fields, contract_fingerprint, parse_raw_report
+from codex_orchestrator.report_reorganization import launch_report_reorganization_worker
 from codex_orchestrator.semantic_result_normalization import normalize_semantic_goal_results
 from codex_orchestrator.target_repo import TargetRepoContext
 from codex_orchestrator.validators.report_validator import validate_patchlet_report_structured
 
 
 ALLOWED_ACCEPTANCE_STATUS_FORMS = ["pass", "pass: ...", "fail", "fail: ...", "blocked", "blocked: ..."]
+
+
+def _sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _raw_report_error(exc: RawReportError) -> dict[str, Any]:
+    # Preserve the established downstream probe-path signature while retaining
+    # the new envelope failure code as the authoritative raw-boundary code.
+    signature = "probe_artifact_refs_unsafe_path" if "probe_artifact_refs" in str(exc) else exc.code
+    return {
+        "field": "raw_worker_report",
+        "json_pointer": "",
+        "schema_path": "",
+        "message": str(exc),
+        "normalized_signature": signature,
+        "raw_envelope_failure_code": exc.code,
+        "repair_hint": "Produce a bounded UTF-8 JSON object without unsafe references.",
+    }
 
 
 def _rel(ctx: TargetRepoContext, path: Path | None) -> str | None:
@@ -204,7 +226,61 @@ def ingest_patchlet_report(
             shutil.copyfile(report_path, raw_report_path)
         else:
             raw_report_path = report_path
-    raw_report = read_json(raw_report_path)
+    try:
+        envelope = parse_raw_report(raw_report_path)
+    except RawReportError as exc:
+        error = _raw_report_error(exc)
+        write_json(errors_path, errors_artifact(
+            attempt_id=attempt_id, patchlet_id=patchlet_id,
+            report_path=_rel(ctx, raw_report_path), canonical_report_path=None,
+            valid=False, errors=[error],
+        ))
+        result = {
+            "schema_version": "1.0", "kind": "report_ingestion_result", "accepted": False,
+            "attempt_id": attempt_id, "patchlet_id": patchlet_id,
+            "raw_report_path": _rel(ctx, raw_report_path), "canonical_report_path": None,
+            "raw_report_sha256": _sha256(raw_report_path),
+            "contract_fingerprint": contract_fingerprint(),
+            "raw_report_byte_size": raw_report_path.stat().st_size,
+            "raw_envelope": {"parseable": False, "failure_code": exc.code, "contract_fingerprint": contract_fingerprint()},
+            "normalization_applied": False, "normalization_kinds": [],
+            "raw_probe_artifact_refs": [], "canonical_probe_artifact_refs": [],
+            "validation": {"valid": False, "error_count": 1, "errors_path": _rel(ctx, errors_path)},
+            "normalized_failure_signature": error["normalized_signature"],
+            "raw_envelope_failure_code": exc.code, "operator_summary": str(exc),
+        }
+        write_json(ingestion_path, result)
+        append_operator_event(ctx.root, event_type="report_ingestion_failed", severity="error",
+            stage="PATCHLET_EXECUTION_IN_PROGRESS", summary=f"{error['normalized_signature']}: {exc}",
+            artifact_paths=[_rel(ctx, raw_report_path) or "", _rel(ctx, errors_path) or ""],
+            patchlet_id=patchlet_id, attempt_id=attempt_id,
+            details={"failure_signature": error["normalized_signature"], "raw_envelope_failure_code": exc.code})
+        return result
+    raw_report = envelope.value
+    known_fields, unknown_fields = classify_fields(raw_report)
+    reorganization_result = None
+    reorganization_used = bool(unknown_fields)
+    if reorganization_used:
+        reorganization_dir = gates_dir / "report_reorganization_worker"
+        append_operator_event(ctx.root, event_type="report_reorganization_started", severity="info",
+            stage="PATCHLET_EXECUTION_IN_PROGRESS", summary=f"Report reorganization started for {patchlet_id}.",
+            artifact_paths=[_rel(ctx, raw_report_path) or ""], patchlet_id=patchlet_id, attempt_id=attempt_id)
+        reorganization_result = launch_report_reorganization_worker(raw_report_path,
+            source_report_sha256=envelope.sha256, patchlet_id=patchlet_id, attempt_id=attempt_id,
+            output_dir=reorganization_dir)
+        if not reorganization_result.get("accepted"):
+            append_operator_event(ctx.root, event_type="report_reorganization_failed", severity="error",
+                stage="PATCHLET_EXECUTION_IN_PROGRESS", summary=f"Report reorganization failed for {patchlet_id}.",
+                artifact_paths=[_rel(ctx, reorganization_dir / "report_reorganization_candidate.json") or ""],
+                patchlet_id=patchlet_id, attempt_id=attempt_id,
+                details={"failure_code": reorganization_result.get("failure_code"), "errors": reorganization_result.get("errors", [])})
+        else:
+            append_operator_event(ctx.root, event_type="report_reorganization_completed", severity="info",
+                stage="PATCHLET_EXECUTION_IN_PROGRESS", summary=f"Report reorganization completed for {patchlet_id}.",
+                artifact_paths=[_rel(ctx, reorganization_dir / name) or "" for name in (
+                    "report_reorganization_candidate.json", "report_reorganization_trace.json", "report_reorganization_worker_result.json")],
+                patchlet_id=patchlet_id, attempt_id=attempt_id,
+                details={"unknown_field_count": len(unknown_fields), "non_authoritative": True})
     raw_refs = raw_report.get("probe_artifact_refs") or []
     normalization = normalize_probe_artifact_refs(raw_refs, target_repo_root=ctx.root, patchlet_id=patchlet_id)
     probe_artifact_refs_normalization_result = {
@@ -267,6 +343,7 @@ def ingest_patchlet_report(
             canonical_report["semantic_goal_results_raw"] = raw_report.get("semantic_goal_results", [])
             canonical_report["semantic_goal_results"] = semantic_normalization_result.get("canonical_results_from_worker", [])
             canonical_report["worker_semantic_claims"] = semantic_normalization_result.get("accepted_raw_claims", [])
+            canonical_report["worker_semantic_quality_warnings"] = semantic_normalization_result.get("semantic_quality_warnings", [])
             if semantic_normalization_result.get("accepted_raw_claims"):
                 append_operator_event(
                     ctx.root,
@@ -291,6 +368,18 @@ def ingest_patchlet_report(
                     artifact_paths=[_rel(ctx, semantic_normalization_path) or ""],
                     patchlet_id=patchlet_id,
                     attempt_id=attempt_id,
+                )
+            if semantic_normalization_result.get("semantic_quality_warnings"):
+                append_operator_event(
+                    ctx.root,
+                    event_type="worker_report_semantic_warning",
+                    severity="warning",
+                    stage="PATCHLET_EXECUTION_IN_PROGRESS",
+                    summary=f"worker semantic prose warning recorded for {patchlet_id}.",
+                    artifact_paths=[_rel(ctx, semantic_normalization_path) or ""],
+                    patchlet_id=patchlet_id,
+                    attempt_id=attempt_id,
+                    details={"warnings": semantic_normalization_result.get("semantic_quality_warnings", [])},
                 )
             if semantic_normalization_result.get("rejected_raw_claims"):
                 append_operator_event(
@@ -342,6 +431,19 @@ def ingest_patchlet_report(
         "attempt_id": attempt_id,
         "patchlet_id": patchlet_id,
         "raw_report_path": _rel(ctx, raw_report_path),
+        "raw_report_sha256": envelope.sha256,
+        "contract_fingerprint": contract_fingerprint(),
+        "raw_report_byte_size": envelope.byte_size,
+        "raw_envelope": {
+            "parseable": True, "utf8_valid": True, "json_object": True,
+            "contract_fingerprint": contract_fingerprint(),
+            "top_level_field_count": envelope.top_level_field_count,
+            "maximum_nesting_depth": envelope.max_depth,
+        },
+        "unknown_fields": [row["field_name"] for row in unknown_fields],
+        "unknown_field_status": "WARNING" if unknown_fields else "NONE",
+        "report_reorganization_used": reorganization_used,
+        "report_reorganization_result": ("ACCEPTED" if reorganization_result and reorganization_result.get("accepted") else "FAILED") if reorganization_result else "NOT_REQUIRED",
         "canonical_report_path": _rel(ctx, canonical_report_path) if accepted else None,
         "normalization_applied": normalization.normalization_applied or acceptance_normalized or bool(probe_commands_normalization_result),
         "normalization_kinds": (
@@ -351,6 +453,7 @@ def ingest_patchlet_report(
             + (["deterministic_run_counts_objects_to_strings"] if run_counts_normalized else [])
             + (["probe_commands_objects_to_strings"] if probe_commands_normalization_result and probe_commands_normalization_result.get("raw_probe_command_items") else [])
             + (["semantic_goal_results_shorthand_to_worker_claims"] if semantic_normalization_result and semantic_normalization_result.get("accepted_raw_claims") else [])
+            + (["worker_report_semantic_quality_warnings"] if semantic_normalization_result and semantic_normalization_result.get("semantic_quality_warnings") else [])
         ),
         "acceptance_criteria_result_normalization": acceptance_normalization,
         "raw_probe_artifact_refs": normalization.raw_string_refs,
@@ -359,6 +462,7 @@ def ingest_patchlet_report(
         "semantic_goal_results_normalization_result_path": _rel(ctx, semantic_normalization_path) if semantic_normalization_result else None,
         "probe_commands_normalization_result_path": _rel(ctx, probe_commands_normalization_path) if probe_commands_normalization_result else None,
         "worker_semantic_claim_count": len((semantic_normalization_result or {}).get("accepted_raw_claims", [])),
+        "worker_semantic_warning_count": len((semantic_normalization_result or {}).get("semantic_quality_warnings", [])),
         "validation": {
             "valid": validation_valid,
             "error_count": len(validation_errors),
@@ -373,6 +477,11 @@ def ingest_patchlet_report(
         ),
     }
     write_json(ingestion_path, result)
+    if unknown_fields:
+        append_operator_event(ctx.root, event_type="report_reorganization_warning", severity="warning",
+            stage="PATCHLET_EXECUTION_IN_PROGRESS", summary=f"Unknown worker report fields recorded for {patchlet_id}.",
+            artifact_paths=[_rel(ctx, ingestion_path) or ""], patchlet_id=patchlet_id, attempt_id=attempt_id,
+            details={"unknown_fields": [row["field_name"] for row in unknown_fields], "blocking": False})
     if normalization.normalization_applied:
         append_operator_event(
             ctx.root,

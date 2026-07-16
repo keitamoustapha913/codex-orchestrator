@@ -1,0 +1,17 @@
+{
+  "schema_version": "2.0",
+  "kind": "worker_patchlet_report",
+  "patchlet_id": "P0005",
+  "status": "VERIFIED_NO_CHANGE_NEEDED",
+  "changed_product_runtime_file": null,
+  "changed_artifact_files": [],
+  "probe_commands": ["<independent probe command>"],
+  "deterministic_run_counts": {},
+  "root_cause_classification": {},
+  "before_after_state": [],
+  "row_ledger": [],
+  "trace_ledger": [],
+  "cleanup_proof": "<worker cleanup observation>",
+  "probe_artifact_refs": [],
+  "semantic_goal_results": []
+}

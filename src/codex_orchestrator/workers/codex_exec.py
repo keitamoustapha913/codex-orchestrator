@@ -39,6 +39,48 @@ from codex_orchestrator.worker_capsule import (
 from .base import Worker, WorkerResult, ensure_run_context
 
 
+def _worker_scratch_environment(worker_scratch_dir: Path) -> tuple[dict[str, str], dict[str, object]]:
+    scratch_root = worker_scratch_dir.resolve()
+    tmpdir = scratch_root / "tmp"
+    tmp = scratch_root / "tmp"
+    temp = scratch_root / "tmp"
+    xdg_cache_home = scratch_root / "xdg-cache"
+    python_pycache_prefix = scratch_root / "python-pycache"
+    paths = {
+        "scratch_root": scratch_root,
+        "tmpdir": tmpdir,
+        "tmp": tmp,
+        "temp": temp,
+        "xdg_cache_home": xdg_cache_home,
+        "python_pycache_prefix": python_pycache_prefix,
+    }
+    for path in paths.values():
+        path.mkdir(parents=True, exist_ok=True)
+    contained = all(
+        path == scratch_root or scratch_root in path.parents
+        for path in paths.values()
+    )
+    absolute = all(path.is_absolute() for path in paths.values())
+    artifact = {
+        "schema_version": "1.0",
+        "kind": "worker_scratch_environment",
+        **{key: str(path) for key, path in paths.items()},
+        "all_paths_absolute": absolute,
+        "all_paths_inside_scratch_root": contained,
+        "directories_created": all(path.exists() and path.is_dir() for path in paths.values()),
+    }
+    env = {
+        "CXOR_WORKER_SCRATCH_DIR": str(scratch_root),
+        "TMPDIR": str(tmpdir),
+        "TMP": str(tmp),
+        "TEMP": str(temp),
+        "XDG_CACHE_HOME": str(xdg_cache_home),
+        "PYTHONPYCACHEPREFIX": str(python_pycache_prefix),
+        "PYTHONDONTWRITEBYTECODE": "1",
+    }
+    return env, artifact
+
+
 class CodexExecWorker(Worker):
     def __init__(self, codex_binary: str | None = None) -> None:
         self.codex_binary = codex_binary or os.environ.get("CXOR_CODEX_BINARY", "codex")
@@ -73,6 +115,7 @@ class CodexExecWorker(Worker):
         report_contract_path = run_dir / "worker_memory" / "REPORT_SCHEMA_CONTRACT.md"
         final_report_contract_path = run_dir / "worker_memory" / "FINAL_REPORT_CONTRACT.md"
         runtime_contract_path = run_dir / "worker_memory" / "RUNTIME_SIDE_EFFECT_CONTRACT.md"
+        evidence_contract_path = run_dir / "gates" / "worker_evidence_contract.json"
         live_memory_md_path = run_dir / "worker_memory" / "LIVE_MEMORY.md"
         write_these_files_path = run_dir / "worker_memory" / "WRITE_THESE_FILES.md"
         worker_stage_dir = run_dir / "worker_stage"
@@ -81,6 +124,7 @@ class CodexExecWorker(Worker):
         gates_dir = run_dir / "gates"
         diagnostics_dir = run_dir / "diagnostics"
         worker_scratch_dir = run_ctx.attempt_scratch_dir
+        worker_evidence_dir = run_ctx.worker_evidence_dir
         quarantine_dir = run_ctx.quarantine_dir
         preflight_stage_path = run_dir / "worker_stage" / "00_preflight.md"
         final_report_stage_path = run_dir / "worker_stage" / "05_final_report.md"
@@ -93,6 +137,7 @@ class CodexExecWorker(Worker):
             f"- {report_contract_path}\n"
             f"- {final_report_contract_path}\n"
             f"- {runtime_contract_path}\n"
+            f"- {evidence_contract_path}\n"
             f"- {live_memory_md_path}\n"
             f"- {write_these_files_path}\n\n"
             "Use explicit Worker Capsule paths from the environment:\n"
@@ -103,12 +148,21 @@ class CodexExecWorker(Worker):
             f"- CXOR_DIAGNOSTICS_DIR={diagnostics_dir}\n"
             f"- CXOR_ATTEMPT_ROOT={run_dir}\n"
             f"- CXOR_WORKER_SCRATCH_DIR={worker_scratch_dir}\n"
+            f"- CXOR_WORKER_EVIDENCE_DIR={worker_evidence_dir}\n"
+            f"- CXOR_WORKER_EVIDENCE_CONTRACT={evidence_contract_path}\n"
             f"- CXOR_QUARANTINE_DIR={quarantine_dir}\n"
             f"- CXOR_PREFLIGHT_PATH={preflight_stage_path}\n"
             f"- CXOR_FINAL_REPORT_PATH={final_report_stage_path}\n\n"
+            "Product source edits: write only to the assigned product file in the Git checkout.\n"
+            "Temporary files: write only beneath `$CXOR_WORKER_SCRATCH_DIR`.\n"
+            "Probe and diagnostic evidence: write only beneath `$CXOR_WORKER_EVIDENCE_DIR`.\n"
             "Do not write scratch/check/validation files in the target repository root.\n"
             "Write any temporary validation, report-checking, grep output, jq output, scratch notes, or intermediate verification output under:\n"
             f"- $CXOR_WORKER_SCRATCH_DIR ({worker_scratch_dir})\n\n"
+            "Write probe and diagnostic evidence only beneath:\n"
+            f"- $CXOR_WORKER_EVIDENCE_DIR ({worker_evidence_dir})\n\n"
+            "Do not create .artifacts/probes inside the Git checkout.\n"
+            "Do not modify verifiers, tests, support files, Git state, workflow state, or files outside the assigned product boundary.\n\n"
             "Then write the preflight only to:\n"
             f"- $CXOR_PREFLIGHT_PATH ({preflight_stage_path})\n\n"
             "Before final response, write the final report only to:\n"
@@ -158,11 +212,17 @@ class CodexExecWorker(Worker):
         ])
         patchlet_id = patchlet["patchlet_id"]
         report_path = run_ctx.required_report_path(patchlet_id)
-        probe_root = run_ctx.required_probe_artifact_root(patchlet_id)
-        worker_scratch_dir.mkdir(parents=True, exist_ok=True)
+        mapped_probe_ids = sorted(set(patchlet.get("probe_ids") or []))
+        mapped_probe_id = mapped_probe_ids[0] if mapped_probe_ids else patchlet_id
+        probe_root = worker_evidence_dir / mapped_probe_id
+        scratch_env, scratch_env_artifact = _worker_scratch_environment(worker_scratch_dir)
+        worker_evidence_dir.mkdir(parents=True, exist_ok=True)
+        (run_dir / "worker_scratch_environment.json").write_text(
+            json.dumps(scratch_env_artifact, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
         quarantine_dir.mkdir(parents=True, exist_ok=True)
         report_path.parent.mkdir(parents=True, exist_ok=True)
-        probe_root.mkdir(parents=True, exist_ok=True)
         allowed_file = patchlet.get("allowed_product_runtime_file", "")
         live_progress = LiveProgressReporter(self.live_progress_policy, attempt_id=run_dir.name)
         attempt_prompt_text = (
@@ -170,8 +230,8 @@ class CodexExecWorker(Worker):
             + "\n\n## Concrete execution-root edit contract\n\n"
             + f"Allowed product/runtime edit path: $CXOR_EXECUTION_ROOT/{allowed_file} ({run_ctx.execution_root / allowed_file})\n"
             + f"Forbidden product/runtime edit path: $CXOR_TARGET_ROOT/{allowed_file} ({run_ctx.target_root / allowed_file})\n"
-            + "Product/runtime files under target root are read-only to the worker. "
-            + "Target-root artifact directories remain writable only under .codex-orchestrator/ and .artifacts/probes/.\n\n"
+            + "Product/runtime files and durable workflow evidence under target root are read-only to the worker. "
+            + f"Write mapped probe evidence only beneath $CXOR_WORKER_EVIDENCE_DIR ({worker_evidence_dir}).\n\n"
             + "## Embedded report schema contract\n\n"
             + report_schema_contract_text(
                 patchlet_id=patchlet_id,
@@ -280,42 +340,44 @@ class CodexExecWorker(Worker):
             "source": "runner",
         })
         live_progress.emit("process.started", 0, force=True)
+        worker_env = {
+            "CXOR_TARGET_ROOT": str(run_ctx.target_root),
+            "CXOR_TARGET_REPO_ROOT": str(run_ctx.target_root),
+            "CXOR_EXECUTION_ROOT": str(run_ctx.execution_root),
+            "CXOR_ARTIFACT_ROOT": str(run_ctx.artifact_root),
+            "CXOR_WORKFLOW_DIR": str(run_ctx.workflow_dir),
+            "CXOR_PROBE_DIR": str(worker_evidence_dir),
+            "CXOR_REPORTS_DIR": str(run_ctx.reports_dir),
+            "CXOR_RUNS_DIR": str(run_ctx.runs_dir),
+            "CXOR_RUN_DIR": str(run_dir),
+            "CXOR_ATTEMPT_ROOT": str(run_dir),
+            "CXOR_WORKER_STAGE_DIR": str(worker_stage_dir),
+            "CXOR_WORKER_MEMORY_DIR": str(worker_memory_dir),
+            "CXOR_WORKER_HOOKS_DIR": str(worker_hooks_dir),
+            "CXOR_GATES_DIR": str(gates_dir),
+            "CXOR_DIAGNOSTICS_DIR": str(diagnostics_dir),
+            "CXOR_REQUIRED_REPORT_PATH": str(report_path),
+            "CXOR_REQUIRED_PROBE_ARTIFACT_ROOT": str(probe_root),
+            "CXOR_WORKER_EVIDENCE_DIR": str(worker_evidence_dir),
+            "CXOR_WORKER_EVIDENCE_CONTRACT": str(evidence_contract_path),
+            "CXOR_QUARANTINE_DIR": str(quarantine_dir),
+            "CXOR_PREFLIGHT_PATH": str(preflight_stage_path),
+            "CXOR_FINAL_REPORT_PATH": str(final_report_stage_path),
+            "CXOR_PATCHLET_ID": patchlet_id,
+            "CXOR_ATTEMPT_ID": run_dir.name,
+            "CXOR_TIMEOUT_SECONDS": str(self.timeout_seconds),
+            "CXOR_SOFT_DEADLINE_SECONDS": str(self.soft_deadline_seconds),
+            "CXOR_ALLOWED_PRODUCT_RUNTIME_FILE": patchlet.get("allowed_product_runtime_file", ""),
+            "CXOR_REPORT_PATH": str(report_path),
+            "CXOR_PROBE_ROOT": str(probe_root),
+            **scratch_env,
+        }
         result = CommandRunner().run(
             args,
             cwd=run_ctx.execution_root,
             input_text=attempt_prompt_text,
             timeout_seconds=self.timeout_seconds,
-            env={
-                "CXOR_TARGET_ROOT": str(run_ctx.target_root),
-                "CXOR_TARGET_REPO_ROOT": str(run_ctx.target_root),
-                "CXOR_EXECUTION_ROOT": str(run_ctx.execution_root),
-                "CXOR_ARTIFACT_ROOT": str(run_ctx.artifact_root),
-                "CXOR_WORKFLOW_DIR": str(run_ctx.workflow_dir),
-                "CXOR_PROBE_DIR": str(run_ctx.probe_dir),
-                "CXOR_REPORTS_DIR": str(run_ctx.reports_dir),
-                "CXOR_RUNS_DIR": str(run_ctx.runs_dir),
-                "CXOR_RUN_DIR": str(run_dir),
-                "CXOR_ATTEMPT_ROOT": str(run_dir),
-                "CXOR_WORKER_STAGE_DIR": str(worker_stage_dir),
-                "CXOR_WORKER_MEMORY_DIR": str(worker_memory_dir),
-                "CXOR_WORKER_HOOKS_DIR": str(worker_hooks_dir),
-                "CXOR_GATES_DIR": str(gates_dir),
-                "CXOR_DIAGNOSTICS_DIR": str(diagnostics_dir),
-                "CXOR_REQUIRED_REPORT_PATH": str(report_path),
-                "CXOR_REQUIRED_PROBE_ARTIFACT_ROOT": str(probe_root),
-                "CXOR_WORKER_SCRATCH_DIR": str(worker_scratch_dir),
-                "CXOR_QUARANTINE_DIR": str(quarantine_dir),
-                "CXOR_PREFLIGHT_PATH": str(preflight_stage_path),
-                "CXOR_FINAL_REPORT_PATH": str(final_report_stage_path),
-                "CXOR_PATCHLET_ID": patchlet_id,
-                "CXOR_ATTEMPT_ID": run_dir.name,
-                "CXOR_TIMEOUT_SECONDS": str(self.timeout_seconds),
-                "CXOR_SOFT_DEADLINE_SECONDS": str(self.soft_deadline_seconds),
-                "CXOR_ALLOWED_PRODUCT_RUNTIME_FILE": patchlet.get("allowed_product_runtime_file", ""),
-                "CXOR_REPORT_PATH": str(report_path),
-                "CXOR_PROBE_ROOT": str(probe_root),
-                "PYTHONDONTWRITEBYTECODE": "1",
-            },
+            env=worker_env,
             stdout_path=run_dir / "stdout.txt",
             stderr_path=run_dir / "stderr.txt",
             stdout_line_callback=record_progress,
@@ -348,6 +410,7 @@ class CodexExecWorker(Worker):
             "report_path": str(report_path),
             "probe_root": str(probe_root),
             "attempt_scratch_dir": str(worker_scratch_dir),
+            "worker_evidence_dir": str(worker_evidence_dir),
             "quarantine_dir": str(quarantine_dir),
             "progress_path": str(progress_path),
             "repo_sha_before": repo_sha_before,
@@ -363,9 +426,10 @@ class CodexExecWorker(Worker):
                 "CXOR_ATTEMPT_ROOT": str(run_dir),
                 "CXOR_REQUIRED_REPORT_PATH": str(report_path),
                 "CXOR_REQUIRED_PROBE_ARTIFACT_ROOT": str(probe_root),
-                "CXOR_WORKER_SCRATCH_DIR": str(worker_scratch_dir),
+                "CXOR_WORKER_EVIDENCE_DIR": str(worker_evidence_dir),
+                "CXOR_WORKER_EVIDENCE_CONTRACT": str(evidence_contract_path),
                 "CXOR_QUARANTINE_DIR": str(quarantine_dir),
-                "PYTHONDONTWRITEBYTECODE": "1",
+                **scratch_env,
             },
         }, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         (run_dir / "output.jsonl").write_text(json.dumps({
@@ -423,9 +487,6 @@ class CodexExecWorker(Worker):
         if not report_path.exists() and execution_report_path.exists():
             report_path.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(execution_report_path, report_path)
-        execution_probe_root = run_ctx.execution_root / ".artifacts" / "probes" / patchlet_id
-        if execution_probe_root.exists() and execution_probe_root.resolve() != probe_root.resolve():
-            shutil.copytree(execution_probe_root, probe_root, dirs_exist_ok=True)
         if not report_path.exists():
             raise WorkerExecutionError(f"codex worker did not produce report: {report_path}")
         return WorkerResult(

@@ -8,10 +8,12 @@ from pathlib import Path
 from codex_orchestrator.codex_execution_policy import resolve_patchlet_timeout_seconds, soft_deadline_seconds
 from codex_orchestrator.jsonio import write_json
 from codex_orchestrator.patchlet_run_context import PatchletRunContext
+from codex_orchestrator.report_contract import contract_fingerprint, required_field_list
 from codex_orchestrator.paths import relative_to_repo
 from codex_orchestrator.state import now_iso
 from codex_orchestrator.target_repo import TargetRepoContext
 from codex_orchestrator.validators.schema_validator import validate_json_file
+from codex_orchestrator.worker_evidence import render_worker_evidence_prompt_contract
 
 
 @dataclass(frozen=True)
@@ -74,6 +76,9 @@ REQUIRED_STAGE_FILES = (
 
 
 def build_worker_capsule(run_context: PatchletRunContext, patchlet: dict) -> WorkerCapsule:
+    work_slice_id = patchlet.get("work_slice_id")
+    if not isinstance(work_slice_id, str) or not work_slice_id.strip():
+        raise ValueError("invalid compiled patchlet: work_slice_id is required")
     patchlet_id = patchlet["patchlet_id"]
     attempt_id = run_context.run_dir.name
     run_dir = run_context.run_dir.resolve()
@@ -93,8 +98,8 @@ def build_worker_capsule(run_context: PatchletRunContext, patchlet: dict) -> Wor
 def _minimal_report_skeleton(patchlet_id: str) -> str:
     return json.dumps(
         {
-            "schema_version": "1.0",
-            "kind": "patchlet_report",
+            "schema_version": "2.0",
+            "kind": "worker_patchlet_report",
             "patchlet_id": patchlet_id,
             "status": "VERIFIED_NO_CHANGE_NEEDED",
             "final_status_marker": "FINAL_STATUS: PASS",
@@ -136,7 +141,6 @@ def _minimal_report_skeleton(patchlet_id: str) -> str:
                 }
             ],
             "semantic_goal_results": [],
-            "acceptance_criteria_result": "pass",
         },
         indent=2,
     )
@@ -181,6 +185,7 @@ def _semantic_contract_report_section(patchlet: dict | None = None) -> str:
 def report_schema_contract_text(*, patchlet_id: str, report_path: str, patchlet: dict | None = None) -> str:
     allowed = "\n".join(f"- {status}" for status in ALLOWED_REPORT_STATUSES)
     forbidden = "\n".join(f"- {status}" for status in FORBIDDEN_REPORT_STATUSES)
+    required_fields = "\n".join(f"- {field}" for field in required_field_list())
     return (
         "# REPORT SCHEMA CONTRACT\n\n"
         "## Required report path\n\n"
@@ -190,23 +195,12 @@ def report_schema_contract_text(*, patchlet_id: str, report_path: str, patchlet:
         "## Forbidden status values\n\n"
         f"{forbidden}\n\n"
         "Never invent new statuses. Never use `FIXED`.\n\n"
+        "## WorkerPatchletReportV2 contract fingerprint\n\n"
+        f"`{contract_fingerprint()}`\n\n"
         "## Required top-level fields\n\n"
-        "- schema_version\n"
-        "- kind\n"
-        "- patchlet_id\n"
-        "- status\n"
-        "- final_status_marker\n"
-        "- changed_product_runtime_file\n"
-        "- changed_artifact_files\n"
-        "- probe_commands\n"
-        "- deterministic_run_counts\n"
-        "- root_cause_classification\n"
-        "- before_after_state\n"
-        "- row_ledger\n"
-        "- trace_ledger\n"
-        "- cleanup_proof\n"
-        "- probe_artifact_refs\n"
-        "- acceptance_criteria_result\n\n"
+        f"{required_fields}\n\n"
+        "`final_status_marker` belongs to the final Markdown wrapper, not the JSON contract.\n"
+        "`acceptance_criteria_result` is not a V2 authority field; if present, preserve it as an unrecognized extension.\n\n"
         "## Required type reminders\n\n"
         "- `cleanup_proof` must be a string, not an object.\n"
         "- `changed_product_runtime_file` must be present and must be a string or null.\n"
@@ -217,6 +211,17 @@ def report_schema_contract_text(*, patchlet_id: str, report_path: str, patchlet:
         "- `row_ledger` must be present.\n"
         "- `trace_ledger` must be present.\n"
         "- `probe_artifact_refs` entries must be objects, never string-only paths.\n\n"
+        "## Evidence report paths are bounded relative references\n\n"
+        "The filesystem location in `$CXOR_WORKER_EVIDENCE_DIR` is only for writing files.\n"
+        "Never copy that absolute filesystem path into the JSON report.\n"
+        "All `changed_artifact_files`, `probe_artifact_refs.probe_root`, and\n"
+        "`probe_artifact_refs.files[].path` values must be bounded, POSIX-style,\n"
+        "relative logical references rooted at `.artifacts/probes/<patchlet-id>/`.\n"
+        "Use `.artifacts/probes/{patchlet_id}/run_001/before_state.json`, not\n"
+        "`$CXOR_WORKER_EVIDENCE_DIR/{probe-id}/run_001/before_state.json` and not\n"
+        "any `/tmp/...` absolute path. Do not use `~`, `..`, backslashes, or\n"
+        "checkout/sandbox paths in report references. The orchestrator maps these\n"
+        "logical references to preserved evidence after validating the staged files.\n\n"
         "## probe_artifact_refs MUST be object entries\n\n"
         "Do not write probe_artifact_refs as strings.\n\n"
         "Invalid:\n\n"
@@ -299,13 +304,13 @@ def report_schema_contract_text(*, patchlet_id: str, report_path: str, patchlet:
         "- trace_ledger\n"
         "- cleanup_proof\n"
         "- probe_artifact_refs\n"
-        "- acceptance_criteria_result\n\n"
+        "- unknown extension fields are preserved but are not authoritative\n\n"
         "Verify:\n"
         "- status is one of COMPLETE, VERIFIED_NO_CHANGE_NEEDED, BLOCKED_WITH_EVIDENCE, FAILED_WITH_EVIDENCE\n"
         "- status is not FIXED\n"
         "- cleanup_proof is a string\n"
         "- changed_product_runtime_file exists and is a string or null\n"
-        "- JSON parses with python -m json.tool\n"
+        "- JSON parses with python -m json.tool; redirect any validation output to `$CXOR_WORKER_SCRATCH_DIR/json_validation.out`, never to the execution-root top level\n"
     )
 
 
@@ -360,17 +365,40 @@ def final_report_contract_text(*, patchlet_id: str, attempt_id: str, final_repor
 def runtime_side_effect_contract_text() -> str:
     return (
         "# RUNTIME SIDE EFFECT CONTRACT\n\n"
+        "## Mandatory scratch root\n\n"
+        "A dedicated writable scratch directory is provided in `$CXOR_WORKER_SCRATCH_DIR`.\n"
+        "All temporary files, validation output, formatter output, caches, intermediate JSON, command transcripts, generated manifests, and disposable artifacts must be written beneath that directory.\n\n"
+        "Safe setup:\n\n"
+        "```bash\n"
+        "scratch=\"${CXOR_WORKER_SCRATCH_DIR:?CXOR_WORKER_SCRATCH_DIR is required}\"\n"
+        "mkdir -p \"${scratch}\"\n"
+        "```\n\n"
+        "Safe validation redirection:\n\n"
+        "```bash\n"
+        "python3 -m json.tool input.json >\"${scratch}/json_validation.out\"\n"
+        "command >\"${scratch}/command.stdout.txt\" 2>\"${scratch}/command.stderr.txt\"\n"
+        "```\n\n"
+        "Forbidden execution-root temporary outputs include `./.validation.out`, `./result.tmp`, `./report.json.tmp`, and `$CXOR_EXECUTION_ROOT/.validation.out`.\n\n"
         "- Do not create language-runtime cache or build byproduct files under $CXOR_TARGET_ROOT.\n"
         "- Do not write scratch/check/validation files in the target repository root.\n"
         "- Do not create scratch/check files at the execution-root or target-root top level.\n"
-        "- Put temporary validation scratch files under `$CXOR_WORKER_SCRATCH_DIR`; put durable evidence only under `.artifacts/probes/<patchlet_id>/`.\n"
+        "- Put temporary validation scratch files under `$CXOR_WORKER_SCRATCH_DIR`; put probe and diagnostic evidence only under `$CXOR_WORKER_EVIDENCE_DIR`.\n"
         "- Run probes in a way that avoids writing transient runtime artifacts into the target root.\n"
         "- Do not load target-root product/runtime files in a way that mutates the target root.\n"
         "- If comparing target-root and execution-root behavior, keep transient outputs outside the target root.\n"
-        "- Durable evidence belongs under .artifacts/probes/ and .codex-orchestrator/ only.\n"
+        "- Do not write directly to durable `.artifacts/probes/` or `.codex-orchestrator/` evidence locations; the orchestrator preserves validated staged evidence.\n"
         "- Root-level scratch files are swept after worker exit; role-shaped scratch is quarantined, but product/runtime files are still rejected.\n"
         "- Never leave runtime cache directories or compiled byproducts under target root.\n"
         "- If a runtime byproduct appears, report it explicitly in the probe evidence instead of hiding it.\n"
+        "\n## Final pre-report root-scratch check\n\n"
+        "Before submitting the final report:\n"
+        "1. Inspect the execution-root top level.\n"
+        "2. Confirm no undeclared temporary file was created there.\n"
+        "3. Move or delete only accidental temporary files that you created.\n"
+        "4. Do not move or delete baseline, product, support, verification, orchestrator, or Git files.\n"
+        "5. Leave temporary output beneath `$CXOR_WORKER_SCRATCH_DIR` and probe evidence beneath `$CXOR_WORKER_EVIDENCE_DIR`.\n"
+        "6. Report the scratch directory used.\n"
+        "unknown root files fail the attempt; unknown undeclared root files are not accepted or automatically quarantined.\n"
     )
 
 
@@ -388,7 +416,7 @@ def _execution_root_contract_text(run_context: PatchletRunContext, allowed_file:
         f"Allowed product/runtime file: `{allowed_file}`\n"
         f"Allowed product/runtime edit path: `$CXOR_EXECUTION_ROOT/{allowed_file}` (`{run_context.execution_root / allowed_file}`)\n"
         f"Forbidden product/runtime edit path: `$CXOR_TARGET_ROOT/{allowed_file}` (`{run_context.target_root / allowed_file}`)\n"
-        "Target-root artifact directories remain writable only for orchestrator evidence under `.codex-orchestrator/` and `.artifacts/probes/`.\n"
+        "Do not write target-root workflow state or `.artifacts/probes/`; staged evidence belongs under `$CXOR_WORKER_EVIDENCE_DIR`.\n"
     )
 
 
@@ -415,6 +443,28 @@ def slice_boundary_contract_text(patchlet: dict) -> str:
         + "\n"
         f"- Future proof obligations not owned by this patchlet: {future_obligations}\n"
         "- Future slice changes are rejected even when they are inside the same allowed product/runtime file.\n"
+    )
+
+
+def semantic_report_template_text(patchlet: dict) -> str:
+    allowed_file = patchlet.get("allowed_product_runtime_file") or ""
+    boundary = patchlet.get("current_slice_boundary") or patchlet.get("slice_change_boundary") or {}
+    expected = patchlet.get("expected_observation") or (patchlet.get("expected_behavior") or {}).get("expected_value") or ""
+    goals = ", ".join(patchlet.get("goal_item_ids", [])) or "none"
+    obligations = ", ".join(patchlet.get("proof_obligation_ids", [])) or "none"
+    probes = ", ".join(patchlet.get("probe_ids", [])) or "none"
+    boundary_label = boundary.get("boundary_id") or boundary.get("symbol") or boundary.get("section") or "current boundary"
+    return (
+        "## Worker semantic report template\n\n"
+        f"Product file: `{allowed_file}`\n"
+        f"Current boundary: `{json.dumps(boundary, sort_keys=True)}`\n"
+        f"Expected observation: `{expected}`\n"
+        f"Mapped goal: `{goals}`\n"
+        f"Mapped proof obligation: `{obligations}`\n"
+        f"Mapped independent probe: `{probes}`\n"
+        "Required semantic result form:\n"
+        f"`{allowed_file}::{boundary_label} satisfies {expected}; verified by {probes}.`\n\n"
+        "This precise prose is diagnostic. The orchestrator still decides acceptance from the canonical patch, clean candidate, independent proof, and coverage gates.\n"
     )
 
 
@@ -459,6 +509,9 @@ def _task_contract_text(
     soft_deadline = soft_deadline_seconds(timeout_seconds)
     worker_stage_dir = run_context.run_dir / "worker_stage"
     worker_scratch_dir = run_context.attempt_scratch_dir
+    worker_evidence_dir = run_context.worker_evidence_dir
+    probe_ids = sorted(set(patchlet.get("probe_ids") or []))
+    example_probe = probe_ids[0] if probe_ids else "<mapped-probe-id>"
     quarantine_dir = run_context.quarantine_dir
     preflight_path = worker_stage_dir / "00_preflight.md"
     final_report_path = worker_stage_dir / "05_final_report.md"
@@ -469,10 +522,16 @@ def _task_contract_text(
     work_slice_contract_path = run_context.run_dir / "worker_memory" / "WORK_SLICE_CONTRACT.md"
     work_slice_id = patchlet.get("work_slice_id")
     dependency_patchlets = patchlet.get("dependency_patchlet_ids") or patchlet.get("depends_on", [])
+    evidence_contract = render_worker_evidence_prompt_contract(
+        patchlet=patchlet,
+        attempt_id=f"run_{int(attempt_id.rsplit('_attempt', 1)[-1]):03d}",
+        evidence_dir="$CXOR_WORKER_EVIDENCE_DIR",
+        scratch_dir="$CXOR_WORKER_SCRATCH_DIR",
+    )
     return (
         "# TASK CONTRACT\n\n"
         f"- patchlet id: `{patchlet_id}`\n"
-        f"- work slice id: `{work_slice_id or 'legacy-invariant-slice'}`\n"
+        f"- work slice id: `{work_slice_id}`\n"
         f"- attempt id: `{attempt_id}`\n"
         f"- worker mode: `{worker_mode}`\n"
         f"- target root: `{run_context.target_root}`\n"
@@ -488,34 +547,48 @@ def _task_contract_text(
         f"- report schema contract: `{report_contract_path}`\n"
         f"- final report contract: `{final_report_contract_path}`\n"
         f"- runtime side-effect contract: `{runtime_contract_path}`\n"
-        f"- required probe root: `.artifacts/probes/{patchlet_id}`\n"
+        f"- report probe-reference root (orchestrator-populated): `.artifacts/probes/{patchlet_id}`\n"
         f"- attempt root env: `$CXOR_ATTEMPT_ROOT` = `{run_context.run_dir}`\n"
         f"- required report path env: `$CXOR_REQUIRED_REPORT_PATH` = `{run_context.required_report_path(patchlet_id)}`\n"
-        f"- required probe artifact root env: `$CXOR_REQUIRED_PROBE_ARTIFACT_ROOT` = `{run_context.required_probe_artifact_root(patchlet_id)}`\n"
+        f"- staged probe artifact root env: `$CXOR_REQUIRED_PROBE_ARTIFACT_ROOT` = `{worker_evidence_dir / example_probe}`\n"
         f"- worker scratch dir env: `$CXOR_WORKER_SCRATCH_DIR` = `{worker_scratch_dir}`\n"
+        f"- worker evidence dir env: `$CXOR_WORKER_EVIDENCE_DIR` = `{worker_evidence_dir}`\n"
+        f"- worker evidence contract: `$CXOR_WORKER_EVIDENCE_CONTRACT` = `{run_context.run_dir / 'gates' / 'worker_evidence_contract.json'}`\n"
         f"- quarantine dir env: `$CXOR_QUARANTINE_DIR` = `{quarantine_dir}`\n"
         f"- worker stage dir env: `$CXOR_WORKER_STAGE_DIR` = `{worker_stage_dir}`\n"
         f"- required preflight stage file: `$CXOR_WORKER_STAGE_DIR/00_preflight.md` = `{preflight_path}`\n"
         f"- required final stage file: `$CXOR_WORKER_STAGE_DIR/05_final_report.md` = `{final_report_path}`\n"
         f"- forbidden target-root stage dir: `{target_root_worker_stage}/`\n"
+        f"{evidence_contract}"
         "- required final status marker: a standalone column-1 line: `FINAL_STATUS: PASS`, `FINAL_STATUS: BLOCKED`, or `FINAL_STATUS: FAILED`\n"
         f"- time budget: hard timeout of {timeout_seconds} seconds\n"
         f"- soft deadline: Aim to finish by {soft_deadline} seconds\n"
         "- if blocked near the budget, write `$CXOR_FINAL_REPORT_PATH` with explicit BLOCKED or FAILED status and preserve what you learned\n"
         "- Do not create target-root worker_stage/; all Worker Capsule stage files must stay under `$CXOR_WORKER_STAGE_DIR`\n"
-        "- Do not create execution-root or target-root top-level scratch files; use `$CXOR_WORKER_SCRATCH_DIR` for scratch checks and `.artifacts/probes/<patchlet_id>/` for durable evidence\n"
+        "- Product source edits: write only to the assigned product file in the Git checkout.\n"
+        "- Temporary files: write only beneath `$CXOR_WORKER_SCRATCH_DIR`.\n"
+        "- Probe and diagnostic evidence: write only beneath `$CXOR_WORKER_EVIDENCE_DIR`.\n"
+        "- Do not create `.artifacts/probes` inside the Git checkout.\n"
+        "- Do not modify verifiers, tests, support files, Git state, workflow state, or files outside the assigned product boundary.\n"
+        f"- Safe evidence example for {patchlet_id}/{attempt_id}/{example_probe}: `mkdir -p \"${{CXOR_WORKER_EVIDENCE_DIR}}/{example_probe}/run_{int(attempt_id.rsplit('_attempt', 1)[-1]):03d}\"`.\n"
+        f"- Safe evidence file: `${{CXOR_WORKER_EVIDENCE_DIR}}/{example_probe}/run_{int(attempt_id.rsplit('_attempt', 1)[-1]):03d}/before_state.json`.\n"
+        "- Use `scratch=\"${CXOR_WORKER_SCRATCH_DIR:?CXOR_WORKER_SCRATCH_DIR is required}\"` and redirect validation output such as `python3 -m json.tool input.json >\"${scratch}/json_validation.out\"`\n"
+        "- Before final report, inspect the execution-root top level and remove or relocate only accidental temporary files you created; unknown undeclared root files fail the attempt\n"
         "- forbidden edit paths: any product/runtime file other than the allowed file; do not edit orchestrator source paths\n\n"
         "This patchlet is a small bounded work unit.\n\n"
         "Do not attempt to solve unrelated work slices.\n\n"
         "Do not edit any product/runtime file except the single allowed file.\n\n"
         "Do not write scratch/check/validation files in the target repository root.\n\n"
-        f"Write temporary validation, report-checking, grep output, jq output, scratch notes, and intermediate verification output under `$CXOR_WORKER_SCRATCH_DIR` (`{worker_scratch_dir}`).\n\n"
+        f"Write temporary validation, report-checking, grep output, jq output, scratch notes, and intermediate verification output under `$CXOR_WORKER_SCRATCH_DIR` (`{worker_scratch_dir}`).\n"
+        "Example: `python3 -m json.tool input.json >\"${CXOR_WORKER_SCRATCH_DIR}/json_validation.out\"`.\n"
+        "Example: `command >\"${CXOR_WORKER_SCRATCH_DIR}/command.stdout.txt\" 2>\"${CXOR_WORKER_SCRATCH_DIR}/command.stderr.txt\"`.\n\n"
         "Do not compact memory by summarizing broad unrelated context.\n\n"
         "Finish within the patchlet time budget.\n\n"
         "## Execution-root edit contract\n\n"
         f"{_execution_root_contract_text(run_context, allowed_file)}\n"
         "## Slice-level allowed-change boundary\n\n"
         f"{slice_boundary_contract_text(patchlet)}\n"
+        f"{semantic_report_template_text(patchlet)}\n"
         "- root-cause/probe contract reminder: direct probe first, then minimal fix, then deterministic proof and negative controls\n"
         "- no blind retry rule: blind retry is not allowed\n"
         "- orchestrator owns gate results: Codex may not write or overwrite gate result files\n"
@@ -562,6 +635,7 @@ def _live_memory_json(run_context: PatchletRunContext, patchlet: dict) -> dict:
         "required_probe_root": f".artifacts/probes/{patchlet_id}",
         "attempt_root": str(run_context.run_dir),
         "attempt_scratch_dir": str(run_context.attempt_scratch_dir),
+        "worker_evidence_dir": str(run_context.worker_evidence_dir),
         "quarantine_dir": str(run_context.quarantine_dir),
         "required_report_path_absolute": str(run_context.required_report_path(patchlet_id)),
         "required_probe_artifact_root": str(run_context.required_probe_artifact_root(patchlet_id)),
@@ -582,8 +656,8 @@ def _allowed_paths_json(run_context: PatchletRunContext, patchlet: dict) -> dict
         "allowed_artifact_roots": [
             ".codex-orchestrator/reports",
             ".codex-orchestrator/runs",
-            ".artifacts/probes",
             str((run_context.attempt_scratch_dir).relative_to(run_context.target_root)),
+            str(run_context.worker_evidence_dir),
         ],
         "slice_change_boundary": patchlet.get("slice_change_boundary"),
         "forbidden_roots": [
@@ -638,7 +712,7 @@ def ensure_worker_memory(
     runtime_contract_path.write_text(runtime_side_effect_contract_text(), encoding="utf-8")
     work_slice_contract_path.write_text(
         "# WORK SLICE CONTRACT\n\n"
-        f"- Work slice ID: {patchlet.get('work_slice_id') or 'legacy-invariant-slice'}\n"
+        f"- Work slice ID: {patchlet['work_slice_id']}\n"
         f"- Patchlet ID: {patchlet['patchlet_id']}\n"
         f"- Allowed product/runtime file: {patchlet.get('allowed_product_runtime_file')}\n"
         f"- Time budget seconds: {patchlet.get('time_budget_seconds') or timeout_seconds}\n"
@@ -664,6 +738,7 @@ def ensure_worker_memory(
         f"- runtime side-effect contract: `{runtime_contract_path}`\n"
         f"- work slice contract: `{work_slice_contract_path}`\n"
         f"- probe root: `{live_memory['required_probe_root']}`\n"
+        f"- worker evidence staging directory: `{run_context.worker_evidence_dir}`\n"
         f"- worker scratch directory: `{run_context.attempt_scratch_dir}`\n"
         f"- quarantine directory: `{run_context.quarantine_dir}`\n",
         encoding="utf-8",
@@ -695,15 +770,21 @@ def ensure_worker_memory(
         f"- Read and obey `{final_report_contract_path}` before writing the final Markdown report.\n"
         f"- Read and obey `{runtime_contract_path}` before running runtime probes.\n"
         f"- Read and obey `{work_slice_contract_path}` before editing product/runtime code.\n"
-        f"- `.artifacts/probes/{patchlet['patchlet_id']}/...`\n"
+        f"- `$CXOR_WORKER_EVIDENCE_DIR/...` (`{run_context.worker_evidence_dir}`) for probe and diagnostic evidence only\n"
         f"- `$CXOR_WORKER_SCRATCH_DIR/...` (`{run_context.attempt_scratch_dir}`) for scratch/check/validation files only\n"
         + "\n"
         "Product/runtime edits must happen only under `$CXOR_EXECUTION_ROOT`. "
         f"Do not edit `$CXOR_TARGET_ROOT/{patchlet.get('allowed_product_runtime_file')}`.\n\n"
         f"Do not create target-root worker_stage/ at `{ctx.root}/worker_stage/`. "
         "All Worker Capsule stage artifacts must be written under `$CXOR_WORKER_STAGE_DIR`.\n\n"
+        "Do not create execution-root or target-root top-level scratch files. "
         "Do not write scratch/check/validation files in the target repository root. "
-        "Use `$CXOR_WORKER_SCRATCH_DIR` for temporary validation, report-checking, grep output, jq output, scratch notes, and intermediate verification output.\n\n"
+        "Use `$CXOR_WORKER_SCRATCH_DIR` for temporary validation, report-checking, grep output, jq output, scratch notes, and intermediate verification output. "
+        "Use `$CXOR_WORKER_EVIDENCE_DIR/<mapped-probe-id>/run_<attempt>/...` for probe evidence. "
+        "Do not create `.artifacts/probes` inside the Git checkout. "
+        "Safe examples: `python3 -m json.tool input.json >\"${CXOR_WORKER_SCRATCH_DIR}/json_validation.out\"` and "
+        "`command >\"${CXOR_WORKER_SCRATCH_DIR}/command.stdout.txt\" 2>\"${CXOR_WORKER_SCRATCH_DIR}/command.stderr.txt\"`. "
+        "Before final report, inspect the execution-root top level and remove or relocate only accidental temporary files you created; unknown undeclared root files fail the attempt.\n\n"
         f"Time budget: hard timeout of {timeout_seconds} seconds; aim to finish by {soft_deadline} seconds. "
         "If you cannot complete, stop before the hard timeout and write "
         "`$CXOR_FINAL_REPORT_PATH` with explicit BLOCKED or FAILED status. "
@@ -720,7 +801,13 @@ def ensure_worker_stage_templates(
     allowed_file = patchlet.get("allowed_product_runtime_file", "")
     patchlet_id = patchlet["patchlet_id"]
     report_path = f".codex-orchestrator/reports/{patchlet_id}.json"
-    probe_root = f".artifacts/probes/{patchlet_id}"
+    probe_root = str(run_context.worker_evidence_dir)
+    evidence_contract = render_worker_evidence_prompt_contract(
+        patchlet=patchlet,
+        attempt_id=f"run_{int(run_context.run_dir.name.rsplit('_attempt', 1)[-1]):03d}",
+        evidence_dir="$CXOR_WORKER_EVIDENCE_DIR",
+        scratch_dir="$CXOR_WORKER_SCRATCH_DIR",
+    )
 
     templates = {
         "00_preflight.md": (
@@ -730,6 +817,7 @@ def ensure_worker_stage_templates(
             "- Forbidden files: any product/runtime file outside the allowed boundary\n"
             f"- Report path: `{report_path}`\n"
             f"- Probe path: `{probe_root}`\n"
+            f"\n{evidence_contract}"
             f"- Current state: `{run_context.run_dir.name}` started\n"
             f"- Patchlet goal: `{patchlet_id}` must satisfy its scoped invariant slice\n"
             "- Required validators: diff guard, report validation, durable probe validation, wrapper gate\n"
@@ -866,6 +954,13 @@ def write_wrapper_gate_result(
     report_valid: bool | None,
     probe_valid: bool | None,
     semantic_goal_valid: bool | None = None,
+    report_semantic_quality_status: str | None = None,
+    patch_gate_valid: bool | None = None,
+    clean_boundary_gate_valid: bool | None = None,
+    independent_proof_valid: bool | None = None,
+    goal_coverage_valid: bool | None = None,
+    canonical_semantic_valid: bool | None = None,
+    durable_promotion_valid: bool | None = None,
     next_state: str,
     report_path: Path | None = None,
     reasons: list[str] | None = None,
@@ -916,14 +1011,41 @@ def write_wrapper_gate_result(
         "attempt_id": capsule.attempt_id,
         "worker_mode": worker_mode,
         "execution_mode": "worktree" if run_context.is_worktree else "direct",
-        "accepted": bool(worker_exit_ok and artifact_gate == "pass" and memory_gate == "pass" and stage_gate == "pass" and diff_allowed is not False and report_valid is not False and probe_valid is not False and semantic_goal_valid is not False),
+        "accepted": bool(
+            worker_exit_ok
+            and artifact_gate == "pass"
+            and memory_gate == "pass"
+            and stage_gate == "pass"
+            and diff_allowed is not False
+            and report_valid is not False
+            and probe_valid is not False
+            and semantic_goal_valid is not False
+            and patch_gate_valid is not False
+            and clean_boundary_gate_valid is not False
+            and independent_proof_valid is not False
+            and goal_coverage_valid is not False
+            and canonical_semantic_valid is not False
+            and durable_promotion_valid is not False
+        ),
         "worker_exit_gate": "pass" if worker_exit_ok else "fail",
         "artifact_gate": artifact_gate,
         "memory_gate": memory_gate,
         "stage_gate": stage_gate,
         "diff_gate": "pass" if diff_allowed is True else ("fail" if diff_allowed is False else "not_run"),
         "report_gate": "pass" if report_valid is True else ("fail" if report_valid is False else "not_run"),
+        "report_integrity_gate": "pass" if report_valid is True else ("fail" if report_valid is False else "not_run"),
+        "report_semantic_quality": {
+            "status": report_semantic_quality_status,
+            "gate": "warning" if report_semantic_quality_status in {"INCOMPLETE", "CONTRADICTORY", "OVERCLAIMED"} else ("pass" if report_semantic_quality_status == "COMPLETE" else "not_run"),
+            "blocking": False,
+        },
         "probe_gate": "pass" if probe_valid is True else ("fail" if probe_valid is False else "not_run"),
+        "patch_gate": "pass" if patch_gate_valid is True else ("fail" if patch_gate_valid is False else "not_run"),
+        "clean_boundary_gate": "pass" if clean_boundary_gate_valid is True else ("fail" if clean_boundary_gate_valid is False else "not_run"),
+        "independent_proof_gate": "pass" if independent_proof_valid is True else ("fail" if independent_proof_valid is False else "not_run"),
+        "goal_coverage_gate": "pass" if goal_coverage_valid is True else ("fail" if goal_coverage_valid is False else "not_run"),
+        "canonical_semantic_gate": "pass" if canonical_semantic_valid is True else ("fail" if canonical_semantic_valid is False else "not_run"),
+        "durable_promotion_gate": "pass" if durable_promotion_valid is True else ("fail" if durable_promotion_valid is False else "not_run"),
         "semantic_goal_gate": "pass" if semantic_goal_valid is True else ("fail" if semantic_goal_valid is False else "not_run"),
         "final_status_gate": final_status_gate,
         "final_status_claim": final_status_claim,

@@ -70,16 +70,9 @@
           },
           {
             "type": "object",
-            "required": ["result"],
-            "anyOf": [
-              {"required": ["goal_item"]},
-              {"required": ["goal_item_id"]},
-              {"required": ["goal"]}
-            ],
+            "required": ["goal_item_id", "result"],
             "properties": {
-              "goal_item": {"type": "string"},
               "goal_item_id": {"type": "string"},
-              "goal": {"type": "string"},
               "result": {"type": "string", "minLength": 1}
             },
             "additionalProperties": true

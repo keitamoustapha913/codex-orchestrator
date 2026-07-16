@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "worker_scratch_environment",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "kind",
+    "scratch_root",
+    "tmpdir",
+    "tmp",
+    "temp",
+    "xdg_cache_home",
+    "python_pycache_prefix",
+    "all_paths_absolute",
+    "all_paths_inside_scratch_root",
+    "directories_created"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "kind": {"const": "worker_scratch_environment"},
+    "scratch_root": {"type": "string", "minLength": 1},
+    "tmpdir": {"type": "string", "minLength": 1},
+    "tmp": {"type": "string", "minLength": 1},
+    "temp": {"type": "string", "minLength": 1},
+    "xdg_cache_home": {"type": "string", "minLength": 1},
+    "python_pycache_prefix": {"type": "string", "minLength": 1},
+    "all_paths_absolute": {"type": "boolean"},
+    "all_paths_inside_scratch_root": {"type": "boolean"},
+    "directories_created": {"type": "boolean"}
+  },
+  "additionalProperties": false
+}

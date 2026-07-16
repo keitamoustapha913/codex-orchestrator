@@ -69,7 +69,7 @@ def test_report_schema_contract_contains_forbidden_statuses(git_repo: Path):
 def test_report_schema_contract_contains_minimal_json_skeleton(git_repo: Path):
     text = _contract_text(git_repo)
 
-    assert '"kind": "patchlet_report"' in text
+    assert '"kind": "worker_patchlet_report"' in text
     assert '"status": "VERIFIED_NO_CHANGE_NEEDED"' in text
     assert '"cleanup_proof": "cleanup passed; no transient files remain"' in text
 

@@ -18,7 +18,7 @@ def _probe_plan():
 
 def _normalization():
     return normalize_semantic_goal_results(
-        raw_items=[{"goal_item": "GI001", "result": "status=ready-no-compat"}],
+        raw_items=[{"goal_item_id": "GI001", "result": "status=ready-no-compat"}],
         patchlet_id="P0001",
         work_slice_id="WS001",
         selected_goal_item_ids=["GI001"],
@@ -94,7 +94,7 @@ def test_canonical_result_links_patchlet_id_and_work_slice_id():
 
 
 def test_canonical_result_preserves_raw_worker_result():
-    assert _canonicalize()["canonical_results"][0]["raw_worker_result"] == {"goal_item": "GI001", "result": "status=ready-no-compat"}
+    assert _canonicalize()["canonical_results"][0]["raw_worker_result"] == {"goal_item_id": "GI001", "result": "status=ready-no-compat"}
 
 
 def test_canonicalization_not_allowed_without_independent_probe_result():

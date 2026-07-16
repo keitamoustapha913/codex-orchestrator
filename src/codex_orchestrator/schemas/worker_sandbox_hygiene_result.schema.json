@@ -1,0 +1,110 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "worker_sandbox_hygiene_result",
+  "type": "object",
+  "required": [
+    "candidate_scope",
+    "schema_version",
+    "kind",
+    "patchlet_id",
+    "attempt_id",
+    "sandbox_root",
+    "accepted_checkpoint",
+    "status",
+    "entries",
+    "debris_entries",
+    "allowed_path_violations",
+    "containment_violations",
+    "inspection_complete",
+    "inspection_limits",
+    "promotion_blocked",
+    "include_paths",
+    "change_classification_ledger",
+    "sandbox_debris_count",
+    "allowed_product_change_count",
+    "allowed_path_violation_count",
+    "containment_violation_count",
+    "inventory_truncated",
+    "errors"
+  ],
+  "properties": {
+    "candidate_scope": {"const": "raw_worker_sandbox"},
+    "schema_version": {"const": "1.0"},
+    "kind": {"const": "worker_sandbox_hygiene_result"},
+    "patchlet_id": {"type": "string"},
+    "attempt_id": {"type": "string"},
+    "sandbox_root": {"type": "string"},
+    "accepted_checkpoint": {"type": ["string", "null"]},
+    "status": {
+      "enum": [
+        "CLEAN",
+        "DEBRIS_PRESENT",
+        "ALLOWED_PATH_VIOLATION",
+        "CONTAINMENT_VIOLATION"
+      ]
+    },
+    "entries": {"type": "array", "items": {"type": "object"}},
+    "debris_entries": {"type": "array", "items": {"type": "object"}},
+    "allowed_path_violations": {"type": "array", "items": {"type": "object"}},
+    "containment_violations": {"type": "array", "items": {"type": "object"}},
+    "inspection_complete": {"type": "boolean"},
+    "inspection_limits": {"type": "object"},
+    "promotion_blocked": {"type": "boolean"},
+    "include_paths": {"type": "array", "items": {"type": "string"}},
+    "change_classification_ledger": {"type": "array", "items": {"type": "object"}},
+    "sandbox_debris_count": {"type": "integer", "minimum": 0},
+    "allowed_product_change_count": {"type": "integer", "minimum": 0},
+    "allowed_path_violation_count": {"type": "integer", "minimum": 0},
+    "containment_violation_count": {"type": "integer", "minimum": 0},
+    "inventory_truncated": {"type": "boolean"},
+    "worker_evidence_inventory": {"type": "string"},
+    "worker_evidence_preservation_result": {"type": "string"},
+    "errors": {"type": "array", "items": {"type": "string"}}
+  },
+  "allOf": [
+    {
+      "if": {
+        "anyOf": [
+          {"properties": {"allowed_path_violation_count": {"minimum": 1}}},
+          {"properties": {"containment_violation_count": {"minimum": 1}}}
+        ]
+      },
+      "then": {"properties": {"promotion_blocked": {"const": true}}},
+      "else": {"properties": {"promotion_blocked": {"const": false}}}
+    },
+    {
+      "if": {"properties": {"status": {"const": "CLEAN"}}},
+      "then": {
+        "properties": {
+          "sandbox_debris_count": {"const": 0},
+          "allowed_path_violation_count": {"const": 0},
+          "containment_violation_count": {"const": 0}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"status": {"const": "DEBRIS_PRESENT"}}},
+      "then": {
+        "properties": {
+          "sandbox_debris_count": {"minimum": 1},
+          "allowed_path_violation_count": {"const": 0},
+          "containment_violation_count": {"const": 0}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"status": {"const": "ALLOWED_PATH_VIOLATION"}}},
+      "then": {
+        "properties": {
+          "allowed_path_violation_count": {"minimum": 1},
+          "containment_violation_count": {"const": 0}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"status": {"const": "CONTAINMENT_VIOLATION"}}},
+      "then": {"properties": {"containment_violation_count": {"minimum": 1}}}
+    }
+  ],
+  "additionalProperties": false
+}

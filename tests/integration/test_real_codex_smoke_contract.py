@@ -1510,7 +1510,7 @@ raise SystemExit(17)
     assert diagnosis["evidence_paths"]["prompt_artifact"].endswith(".md")
 
 
-def test_real_codex_auto_worktree_smoke_preserves_target_on_unauthorized_fake_codex_diff(
+def test_real_codex_auto_worktree_smoke_discards_peer_debris_and_preserves_target(
     git_repo: Path,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -1606,12 +1606,13 @@ report_path.write_text(json.dumps({
         allow_real_codex=True,
         codex_binary="codex",
         max_iterations=25,
-        until="FAILURE_CLASSIFICATION_REQUIRED",
+        until="DONE",
     )
 
-    assert result["state_stage"] == "FAILURE_CLASSIFICATION_REQUIRED"
-    assert (ctx.paths.failures_dir / "F0001.json").exists()
+    assert result["state_stage"] == "DONE"
+    assert not (ctx.paths.failures_dir / "F0001.json").exists()
     assert (ctx.paths.runs_dir / "P0001_attempt1" / "diff.patch").exists()
+    assert "other.py" not in (ctx.paths.runs_dir / "P0001_attempt1" / "diff.patch").read_text(encoding="utf-8")
     assert (git_repo / "app.py").read_text(encoding="utf-8") == app_hash_before
     assert other.read_text(encoding="utf-8") == other_hash_before
 
@@ -1715,12 +1716,14 @@ def test_real_codex_smoke_uses_diff_and_report_validation(git_repo: Path, monkey
         fake_codex,
         """#!/usr/bin/env python3
 import json
+import os
 from pathlib import Path
 
 repo = Path.cwd()
-report_path = repo / ".codex-orchestrator" / "reports" / "P0001.json"
+artifact_root = Path(os.environ["CXOR_ARTIFACT_ROOT"])
+report_path = artifact_root / ".codex-orchestrator" / "reports" / "P0001.json"
 report_path.parent.mkdir(parents=True, exist_ok=True)
-probe_root = repo / ".artifacts" / "probes" / "P0001"
+probe_root = artifact_root / ".artifacts" / "probes" / "P0001"
 (probe_root / "run_001").mkdir(parents=True, exist_ok=True)
 (probe_root / "probe.py").write_text("print('probe')\\n", encoding="utf-8")
 (probe_root / "run_001" / "row_ledger.jsonl").write_text(json.dumps({"row": 1}) + "\\n", encoding="utf-8")
@@ -1799,7 +1802,7 @@ print("fake codex stderr", file=__import__("sys").stderr)
     assert command_path.exists()
     assert output_jsonl_path.exists()
     assert validate_json_file(report_path, "patchlet_report.schema.json") == []
-    assert str(git_repo) in stdout_path.read_text(encoding="utf-8")
+    assert stdout_path.read_text(encoding="utf-8").strip()
     assert "fake codex stderr" in stderr_path.read_text(encoding="utf-8")
     index = read_json(ctx.paths.patchlet_index)
     assert index["patchlets"][0]["patchlet_id"] == "P0001"

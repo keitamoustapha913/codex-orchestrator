@@ -18,6 +18,7 @@ def _ctx(git_repo: Path):
 def _patchlet() -> dict:
     return {
         "patchlet_id": "P0001",
+        "work_slice_id": "WS001",
         "allowed_product_runtime_file": "app.py",
     }
 

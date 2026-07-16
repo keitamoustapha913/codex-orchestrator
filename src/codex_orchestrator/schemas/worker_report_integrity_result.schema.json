@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "worker_report_integrity_result",
+  "type": "object",
+  "required": ["schema_version", "kind", "candidate_scope", "patchlet_id", "attempt_id", "accepted", "blocking_errors"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "kind": {"const": "worker_report_integrity_result"},
+    "candidate_scope": {"const": "raw_worker_sandbox"},
+    "patchlet_id": {"type": "string"},
+    "attempt_id": {"type": "string"},
+    "accepted": {"type": "boolean"},
+    "report_exists": {"type": "boolean"},
+    "report_parsed": {"type": "boolean"},
+    "schema_valid": {"type": "boolean"},
+    "required_structural_fields_present": {"type": "boolean"},
+    "declared_artifact_references_valid": {"type": "boolean"},
+    "excluded_debris_references_rejected": {"type": "boolean"},
+    "required_evidence_references_valid": {"type": "boolean"},
+    "raw_report_sha256": {"type": ["string", "null"]},
+    "contract_fingerprint": {"type": ["string", "null"]},
+    "required_fields_present": {"type": "boolean"},
+    "known_fields_valid": {"type": "boolean"},
+    "unknown_fields": {"type": "array", "items": {"type": "string"}},
+    "unknown_field_status": {"enum": ["NONE", "WARNING"]},
+    "report_reorganization_used": {"type": "boolean"},
+    "report_reorganization_result": {"enum": ["NOT_REQUIRED", "ACCEPTED", "FAILED"]},
+    "blocking_errors": {"type": "array"}
+  },
+  "additionalProperties": false
+}

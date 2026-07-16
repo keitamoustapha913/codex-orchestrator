@@ -10,7 +10,6 @@ from codex_orchestrator.boundary_evidence import (
 )
 
 
-GOAL_ITEM_ALIASES = ("goal_item", "goal_item_id", "goal")
 WORKER_PROOF_FIELDS = {"criterion_id", "expected_value", "actual_value", "passed", "verification_source"}
 
 
@@ -19,10 +18,9 @@ def _norm_text(value: str) -> str:
 
 
 def _goal_item_from(raw_item: dict[str, Any]) -> str | None:
-    for alias in GOAL_ITEM_ALIASES:
-        value = raw_item.get(alias)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
+    value = raw_item.get("goal_item_id")
+    if isinstance(value, str) and value.strip():
+        return value.strip()
     return None
 
 
@@ -58,6 +56,15 @@ def _reject(raw_item: Any, *, index: int, code: str, message: str, goal_item_id:
     }
 
 
+def _quality_warning(raw_item: Any, *, index: int, code: str, message: str, goal_item_id: str | None = None) -> dict[str, Any]:
+    row = _reject(raw_item, index=index, code=code, message=message, goal_item_id=goal_item_id)
+    row["severity"] = "WARNING"
+    row["blocking"] = False
+    if code == "CURRENT_BOUNDARY_NOT_MENTIONED":
+        row["warning_code"] = "WORKER_REPORT_SEMANTIC_EVIDENCE_INCOMPLETE"
+    return row
+
+
 def normalize_semantic_goal_results(
     *,
     raw_items: list[dict[str, Any]],
@@ -73,6 +80,7 @@ def normalize_semantic_goal_results(
 ) -> dict[str, Any]:
     accepted: list[dict[str, Any]] = []
     rejected: list[dict[str, Any]] = []
+    quality_warnings: list[dict[str, Any]] = []
     canonical_results: list[dict[str, Any]] = []
     selected_goals = set(selected_goal_item_ids)
     future_goals = set((slice_change_boundary or {}).get("forbidden_future_goal_item_ids", []))
@@ -94,22 +102,22 @@ def normalize_semantic_goal_results(
         goal_item_id = _goal_item_from(raw_item)
         result_text = raw_item.get("result")
         if not goal_item_id:
-            rejected.append(_reject(raw_item, index=index, code="MISSING_GOAL_ITEM", message="shorthand semantic result requires goal_item, goal_item_id, or goal"))
+            rejected.append(_reject(raw_item, index=index, code="MISSING_GOAL_ITEM", message="shorthand semantic result requires goal_item_id"))
             continue
         if goal_item_id in future_goals:
-            rejected.append(_reject(raw_item, index=index, code="FUTURE_GOAL_ITEM", message="shorthand semantic result references a future goal item", goal_item_id=goal_item_id))
+            quality_warnings.append(_quality_warning(raw_item, index=index, code="FUTURE_GOAL_ITEM", message="shorthand semantic result references a future goal item", goal_item_id=goal_item_id))
             continue
         if goal_item_id not in selected_goals:
-            rejected.append(_reject(raw_item, index=index, code="UNLINKED_GOAL_ITEM", message="shorthand semantic result does not link to the current patchlet goal item", goal_item_id=goal_item_id))
+            quality_warnings.append(_quality_warning(raw_item, index=index, code="UNLINKED_GOAL_ITEM", message="shorthand semantic result does not link to the current patchlet goal item", goal_item_id=goal_item_id))
             continue
         if any(field in raw_item for field in WORKER_PROOF_FIELDS):
-            rejected.append(_reject(raw_item, index=index, code="WORKER_PROOF_CLAIM_NOT_ALLOWED", message="worker shorthand may not claim canonical proof fields", goal_item_id=goal_item_id))
+            quality_warnings.append(_quality_warning(raw_item, index=index, code="WORKER_PROOF_CLAIM_NOT_ALLOWED", message="worker shorthand may not claim canonical proof fields", goal_item_id=goal_item_id))
             continue
         if not isinstance(result_text, str) or not result_text.strip():
             rejected.append(_reject(raw_item, index=index, code="MISSING_RESULT_TEXT", message="shorthand semantic result requires non-empty result text", goal_item_id=goal_item_id))
             continue
         if is_vague_worker_claim(result_text):
-            rejected.append(_reject(raw_item, index=index, code="VAGUE_RESULT_TEXT", message="shorthand semantic result is too vague to link safely", goal_item_id=goal_item_id))
+            quality_warnings.append(_quality_warning(raw_item, index=index, code="VAGUE_RESULT_TEXT", message="shorthand semantic result is too vague to link safely", goal_item_id=goal_item_id))
             continue
         boundary_match = match_worker_claim_to_current_boundary(
             worker_text=result_text,
@@ -132,10 +140,10 @@ def normalize_semantic_goal_results(
             future_proof_obligation_ids=future_obligations,
             slice_change_boundary=slice_change_boundary,
         ):
-            rejected.append(_reject(raw_item, index=index, code="FUTURE_SLICE_CLAIM", message="shorthand semantic result claims future-slice completion", goal_item_id=goal_item_id))
+            quality_warnings.append(_quality_warning(raw_item, index=index, code="FUTURE_SLICE_CLAIM", message="shorthand semantic result claims future-slice completion", goal_item_id=goal_item_id))
             continue
         if not boundary_match.get("mentions_current_boundary"):
-            rejected.append(_reject(raw_item, index=index, code="CURRENT_BOUNDARY_NOT_MENTIONED", message="shorthand semantic result does not mention the current slice boundary", goal_item_id=goal_item_id))
+            quality_warnings.append(_quality_warning(raw_item, index=index, code="CURRENT_BOUNDARY_NOT_MENTIONED", message="shorthand semantic result does not mention the current slice boundary", goal_item_id=goal_item_id))
             continue
         matching_obligations = _proof_obligations_for_goal(
             goal_item_id=goal_item_id,
@@ -187,6 +195,7 @@ def normalize_semantic_goal_results(
         "accepted": not rejected,
         "accepted_raw_claims": accepted,
         "rejected_raw_claims": rejected,
+        "semantic_quality_warnings": quality_warnings,
         "canonical_results_from_worker": canonical_results,
         "boundary_evidence_matches": boundary_match_results,
         "proof_not_claimed_here": True,

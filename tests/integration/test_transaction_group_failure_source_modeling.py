@@ -98,10 +98,13 @@ def test_patchlet_failure_record_still_uses_patchlet_source_type(git_repo: Path)
     build_inventory(ctx)
     extract_invariants(ctx)
     compile_patchlets(ctx)
+    patchlet_index = read_json(ctx.paths.patchlet_index)
+    patchlet_index["patchlets"][0]["required_allowed_product_change"] = True
+    write_json(ctx.paths.patchlet_index, patchlet_index)
     mock_dir = ctx.paths.workflow_dir / "mock"
     mock_dir.mkdir(parents=True, exist_ok=True)
     (mock_dir / "next_patchlet_result.json").write_text(
-        json.dumps({"unauthorized_files": {"other.py": "bad = True\n"}, "status": "COMPLETE"}),
+        json.dumps({"status": "COMPLETE"}),
         encoding="utf-8",
     )
 

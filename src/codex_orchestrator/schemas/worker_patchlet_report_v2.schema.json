@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "WorkerPatchletReportV2",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "kind",
+    "patchlet_id",
+    "status",
+    "changed_product_runtime_file",
+    "changed_artifact_files",
+    "probe_commands",
+    "deterministic_run_counts",
+    "root_cause_classification",
+    "before_after_state",
+    "row_ledger",
+    "trace_ledger",
+    "cleanup_proof"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "2.0",
+      "description": "WorkerPatchletReportV2 version."
+    },
+    "kind": {
+      "const": "worker_patchlet_report",
+      "description": "Canonical worker report kind."
+    },
+    "patchlet_id": {
+      "type": "string",
+      "description": "Orchestrator-assigned patchlet identity."
+    },
+    "status": {
+      "type": "string",
+      "description": "Worker lifecycle status; not proof.",
+      "enum": [
+        "COMPLETE",
+        "VERIFIED_NO_CHANGE_NEEDED",
+        "BLOCKED_WITH_EVIDENCE",
+        "FAILED_WITH_EVIDENCE"
+      ]
+    },
+    "changed_product_runtime_file": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Reported product file; boundary gates remain authoritative."
+    },
+    "changed_artifact_files": {
+      "type": "array",
+      "description": "Reported evidence artifacts."
+    },
+    "probe_commands": {
+      "type": "array",
+      "description": "Worker-described probes; independent proof remains authoritative."
+    },
+    "deterministic_run_counts": {
+      "type": "object",
+      "description": "Declared run counts; not independent proof."
+    },
+    "root_cause_classification": {
+      "type": "object",
+      "description": "Structured worker diagnosis."
+    },
+    "before_after_state": {
+      "type": "array",
+      "description": "Worker state observations."
+    },
+    "row_ledger": {
+      "type": "array",
+      "description": "Worker evidence ledger."
+    },
+    "trace_ledger": {
+      "type": "array",
+      "description": "Worker trace ledger."
+    },
+    "cleanup_proof": {
+      "type": "string",
+      "description": "Worker cleanup observation; hygiene gates remain authoritative."
+    },
+    "probe_artifact_refs": {
+      "type": "array",
+      "description": "References to evidence under approved probe roots."
+    },
+    "semantic_goal_results": {
+      "type": "array",
+      "description": "Worker semantic observations pending independent proof."
+    },
+    "worker_semantic_claims": {
+      "type": "array",
+      "description": "Normalized worker claims; non-authoritative."
+    }
+  },
+  "additionalProperties": true
+}

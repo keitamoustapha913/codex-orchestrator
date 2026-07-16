@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "worker_evidence_inventory",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "kind",
+    "patchlet_id",
+    "attempt_id",
+    "staging_root",
+    "entries",
+    "captured_file_count",
+    "skipped_file_count",
+    "inventory_truncated",
+    "inventory_complete",
+    "authoritative_proof",
+    "promotion_blocked",
+    "errors"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "kind": {"const": "worker_evidence_inventory"},
+    "patchlet_id": {"type": "string"},
+    "attempt_id": {"type": "string"},
+    "staging_root": {"type": "string", "pattern": "^/"},
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "relative_path",
+          "object_type",
+          "size",
+          "mode",
+          "sha256",
+          "patchlet_id",
+          "attempt_id",
+          "probe_id",
+          "schema_or_media_type",
+          "classification",
+          "diagnostic_role",
+          "capture_status",
+          "source_kind",
+          "authoritative"
+        ],
+        "properties": {
+          "classification": {"const": "SANDBOX_DEBRIS"},
+          "diagnostic_role": {"const": "PROBE_EVIDENCE"},
+          "capture_status": {
+            "enum": ["CAPTURED", "SKIPPED_LIMIT", "SKIPPED_UNSAFE_OBJECT"]
+          },
+          "source_kind": {"const": "staged"},
+          "authoritative": {"const": false}
+        },
+        "additionalProperties": true
+      }
+    },
+    "captured_file_count": {"type": "integer", "minimum": 0},
+    "skipped_file_count": {"type": "integer", "minimum": 0},
+    "inventory_truncated": {"type": "boolean"},
+    "inventory_complete": {"type": "boolean"},
+    "authoritative_proof": {"const": false},
+    "promotion_blocked": {"const": false},
+    "errors": {"type": "array", "items": {"type": "string"}}
+  },
+  "additionalProperties": false
+}

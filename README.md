@@ -130,45 +130,26 @@ cxor run-next --repo /path/to/target-repo --worker-mode mock --use-worktree
 cxor auto --repo /path/to/target-repo --master /path/to/master_prompt.md --until DONE --worker-mode mock --use-worktree
 ```
 
-The target repo must be clean apart from volatile workflow artifacts before worktree execution starts.
-Worktree execution writes reports, runs, and durable probe artifacts to the target repo artifact root, validates the worktree diff, validates the report, and only then applies a validated merge back to the target product/runtime file.
-Unauthorized worktree diffs are isolated as failure evidence and do not mutate target product/runtime files.
+The target repo must be clean apart from volatile workflow artifacts before a
+write-capable worker starts. Every write-capable worker runs in a disposable
+sandbox; direct execution cannot be selected, even when the CLI flag is false
+or omitted.
 
-Real Codex may create root-level scratch artifacts while checking reports,
-probes, or validation. Recognized scratch artifacts are quarantined, not
-silently deleted, under `.codex-orchestrator/runs/<attempt>/quarantined_scratch/`.
-The quarantine preserves content and hash metadata in
-`scratch_artifact_quarantine_result.json`, then the product diff is rechecked.
-Product/runtime files remain restricted by the one-file rule and same-file
-slice boundary; unknown root product files are rejected.
+### Deterministic worker-output boundary
 
-Each attempt also exposes a worker scratch directory at
-`.codex-orchestrator/runs/<attempt>/worker_scratch/`. Worker prompts say: Do not
-write scratch/check/validation files in the target repository root. After worker
-exit, a root scratch sweep classifies leftovers with role-based quarantine.
-Only role-shaped untracked worker scratch directories are eligible for
-quarantine. Not all directories are allowed. Not all scratch directories are
-allowed. Tracked `worker_scratch` content is rejected. Executable scratch
-content is rejected. Changed peer product files remain rejected. Directory
-quarantine preserves hashes and metadata, writes `root_scratch_sweep_result.json`,
-and changed paths are recomputed after quarantine before the diff guard runs.
+The deterministic allowlist is the only product boundary. All in-sandbox
+non-allowlisted outputs are sandbox debris, including tracked peer edits,
+hidden files, caches, and checkout-local artifacts. Sandbox debris never blocks
+promotion: it is inventoried, excluded from the canonical patch, and discarded.
 
-Patchlet-prefixed report formatting scratch is quarantined only when every
-safety condition is met: the root file is untracked, non-executable,
-text/JSON-like, patchlet-prefixed, report-role shaped, and
-formatting/check/output-role shaped. Not all JSON files are allowed. Not all
-pretty files are allowed. Product/runtime files remain rejected, changed peer
-product files remain rejected, quarantine preserves content and hash metadata,
-and the diff is recomputed after quarantine.
+Only valid allowlisted changes enter the canonical patch. Independent proof,
+coverage, and canonical semantic acceptance run against a clean reconstruction
+of that patch. Containment escape remains blocking, as do invalid allowlisted
+objects, missing required allowlisted changes, slice-boundary violations, clean
+reconstruction failures, and downstream proof failures.
 
-The diff guard uses actual changed/untracked paths, not file presence. In an
-execution worktree, unchanged peer product files are ignored because presence is
-not a change. Changed peer product files are rejected, and role-shaped validation
-scratch such as `validate_report.out` is quarantined only after scratch safety
-checks pass.
-The allowed file comes from the patchlet plan, not filename convention; the same
-logic applies to arbitrary names such as `control.plan`, `rollout.table`, and
-role-shaped scratch like `verify_result.log`.
+`--use-worktree` remains accepted by the CLI, but every write-capable worker
+already uses the disposable sandbox boundary.
 
 No source is copied into the target repo beyond durable workflow artifacts and validated target-file edits.
 
@@ -593,3 +574,35 @@ legitimate supplemental probes. Multiple patchlets may target one file when
 multiple independent slices share that file. Unresolved or ambiguous mappings
 are surfaced as safe pre-worker evidence instead of being fanned out to every
 candidate file.
+
+## RC6M Worker Scratch Contract
+
+Every real worker receives an absolute `$CXOR_WORKER_SCRATCH_DIR` for temporary
+validation output, cache files, command transcripts, intermediate JSON, and
+disposable artifacts. Common temporary/cache variables (`TMPDIR`, `TMP`,
+`TEMP`, `XDG_CACHE_HOME`, and `PYTHONPYCACHEPREFIX`) are routed beneath that
+scratch root before the worker starts.
+
+Unknown regular files in the raw disposable worker sandbox are not trusted or
+promoted. When they are untracked, bounded, unreferenced, and outside protected
+paths, they are recorded as worker hygiene warnings and excluded from the
+canonical patch. Hidden names, JSON-looking names, small files, and
+validation-output-looking contents do not make them trusted evidence. Unsafe
+path types, tracked/protected changes, support or verification changes, and
+report/probe references to excluded debris remain hard failures.
+
+## RC6M Patch-Only Promotion
+
+Worker sandboxes are disposable and untrusted. The orchestrator does not promote
+the raw worker filesystem, worker Git index, worker commit, caches, or temporary
+output. After worker completion, cxor inspects the sandbox, records hygiene
+metadata, and constructs a canonical patch proposal from explicitly allowed
+product/runtime paths only.
+
+The candidate state is reconstructed from the accepted integration checkpoint in
+a fresh clean verification worktree. The canonical patch is applied exactly,
+without fuzzy matching or three-way merge. Diff, current/future slice,
+report, hygiene, independent proof, and goal-coverage gates run against that
+clean reconstructed candidate. Only the clean verified candidate advances the
+integration ref and therefore `apply-results`. Worker scratch routing remains
+defense in depth; patch-only reconstruction is the trust boundary.

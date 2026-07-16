@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "independent_proof_effective_source_manifest",
+  "type": "object",
+  "required": ["schema_version", "kind", "candidate_scope", "patchlet_id", "attempt_id", "base_checkpoint_commit", "base_checkpoint_tree", "patch_sha256", "verification_root", "probe_id", "probe_command", "probe_cwd", "effective_sources", "manifest_sha256"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "kind": {"const": "independent_proof_effective_source_manifest"},
+    "candidate_scope": {"const": "clean_reconstruction"},
+    "patchlet_id": {"type": "string"},
+    "attempt_id": {"type": "string"},
+    "base_checkpoint_commit": {"type": "string"},
+    "base_checkpoint_tree": {"type": "string"},
+    "patch_sha256": {"type": "string"},
+    "verification_root": {"type": "string"},
+    "probe_id": {"type": ["string", "null"]},
+    "probe_command": {"type": ["string", "array", "null"]},
+    "probe_cwd": {"type": "string"},
+    "effective_sources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "blob_sha256", "git_blob_id", "mode"],
+        "properties": {
+          "path": {"type": "string"},
+          "blob_sha256": {"type": "string"},
+          "git_blob_id": {"type": ["string", "null"]},
+          "mode": {"type": ["string", "null"]}
+        },
+        "additionalProperties": false
+      }
+    },
+    "manifest_sha256": {"type": "string"}
+  },
+  "additionalProperties": false
+}

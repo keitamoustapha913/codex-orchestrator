@@ -44,7 +44,7 @@ def _compiled_ctx(git_repo: Path):
     return ctx
 
 
-def test_run_auto_accepts_use_worktree_false_and_preserves_existing_direct_flow(git_repo: Path):
+def test_run_auto_false_flag_still_uses_disposable_worktree(git_repo: Path):
     ctx = _ctx(git_repo)
 
     result = run_auto(
@@ -61,8 +61,8 @@ def test_run_auto_accepts_use_worktree_false_and_preserves_existing_direct_flow(
 
     assert result.stage == "DONE"
     assert patchlet_runs
-    assert all(run.get("execution_mode") == "direct" for run in patchlet_runs)
-    assert all(run.get("worktree", {}).get("enabled") is False for run in patchlet_runs)
+    assert all(run.get("execution_mode") == "worktree" for run in patchlet_runs)
+    assert all(run.get("worktree", {}).get("enabled") is True for run in patchlet_runs)
 
 
 def test_run_auto_use_worktree_executes_pending_patchlet_with_worktree_metadata(git_repo: Path):
@@ -148,7 +148,7 @@ def test_run_auto_use_worktree_validates_transaction_group_and_global_verificati
     assert final["transaction_group_results"][0]["status"] == "PASSED"
 
 
-def test_run_auto_use_worktree_unauthorized_diff_preserves_target_product_files(git_repo: Path):
+def test_run_auto_peer_debris_preserves_target_product_files(git_repo: Path):
     ctx = _compiled_ctx(git_repo)
     other = ctx.root / "other.py"
     other.write_text("value = 1\n", encoding="utf-8")
@@ -172,18 +172,18 @@ def test_run_auto_use_worktree_unauthorized_diff_preserves_target_product_files(
     result = run_auto(
         ctx,
         resume=True,
-        until="FAILURE_CLASSIFICATION_REQUIRED",
+        until="DONE",
         worker_mode="mock",
         use_worktree=True,
         max_iterations=25,
     )
 
-    assert result.stage == "FAILURE_CLASSIFICATION_REQUIRED"
+    assert result.stage == "DONE"
     assert sha256_file(ctx.root / "app.py") == app_hash_before
     assert sha256_file(other) == other_hash_before
 
 
-def test_run_auto_use_worktree_unauthorized_diff_creates_failure_record_and_diff_artifact(git_repo: Path):
+def test_run_auto_peer_debris_creates_no_failure_and_is_excluded_from_diff(git_repo: Path):
     ctx = _compiled_ctx(git_repo)
     other = ctx.root / "other.py"
     other.write_text("value = 1\n", encoding="utf-8")
@@ -205,19 +205,19 @@ def test_run_auto_use_worktree_unauthorized_diff_creates_failure_record_and_diff
     run_auto(
         ctx,
         resume=True,
-        until="FAILURE_CLASSIFICATION_REQUIRED",
+        until="DONE",
         worker_mode="mock",
         use_worktree=True,
         max_iterations=25,
     )
 
     diff_path = ctx.paths.runs_dir / "P0001_attempt1" / "diff.patch"
-    assert (ctx.paths.failures_dir / "F0001.json").exists()
+    assert not (ctx.paths.failures_dir / "F0001.json").exists()
     assert diff_path.exists()
-    assert "other.py" in diff_path.read_text(encoding="utf-8")
+    assert "other.py" not in diff_path.read_text(encoding="utf-8")
 
 
-def test_run_auto_use_worktree_unauthorized_diff_can_continue_repair_loop_to_done(git_repo: Path):
+def test_run_auto_peer_debris_reaches_done_without_repair_loop(git_repo: Path):
     ctx = _compiled_ctx(git_repo)
     other = ctx.root / "other.py"
     other.write_text("value = 1\n", encoding="utf-8")
@@ -254,10 +254,10 @@ def test_run_auto_use_worktree_unauthorized_diff_can_continue_repair_loop_to_don
     final = read_json(ctx.paths.final_verification_json)
     assert result.stage == "DONE"
     assert final["status"] == "DONE"
-    assert (ctx.paths.failures_dir / "F0001.json").exists()
-    assert (ctx.paths.repair_plans_dir / "RP0001.json").exists()
-    assert (ctx.paths.repair_plans_dir / "RP0001_application.json").exists()
-    assert (ctx.paths.reports_dir / "P0002.json").exists()
+    assert not (ctx.paths.failures_dir / "F0001.json").exists()
+    assert not (ctx.paths.repair_plans_dir / "RP0001.json").exists()
+    assert not (ctx.paths.repair_plans_dir / "RP0001_application.json").exists()
+    assert not (ctx.paths.reports_dir / "P0002.json").exists()
     assert sha256_file(ctx.root / "app.py") == app_hash_before
     assert sha256_file(other) == other_hash_before
 
@@ -379,7 +379,7 @@ def test_run_auto_accepts_use_worktree_true_parameter_without_breaking_initializ
     assert ctx.paths.state.exists()
 
 
-def test_run_auto_default_does_not_use_worktree_metadata(git_repo: Path):
+def test_run_auto_default_uses_worktree_metadata(git_repo: Path):
     ctx = _ctx(git_repo)
 
     result = run_auto(
@@ -395,5 +395,5 @@ def test_run_auto_default_does_not_use_worktree_metadata(git_repo: Path):
 
     assert result.stage == "DONE"
     assert patchlet_runs
-    assert all(run.get("execution_mode") == "direct" for run in patchlet_runs)
-    assert all(run.get("worktree", {}).get("enabled") is False for run in patchlet_runs)
+    assert all(run.get("execution_mode") == "worktree" for run in patchlet_runs)
+    assert all(run.get("worktree", {}).get("enabled") is True for run in patchlet_runs)

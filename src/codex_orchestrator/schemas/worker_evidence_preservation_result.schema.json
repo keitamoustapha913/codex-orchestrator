@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "worker_evidence_preservation_result",
+  "type": "object",
+  "required": ["schema_version", "kind", "patchlet_id", "attempt_id", "source_staging_root", "preserved_root", "files", "source_hashes_verified", "preservation_complete", "authoritative_proof", "promotion_blocked", "errors"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "kind": {"const": "worker_evidence_preservation_result"},
+    "patchlet_id": {"type": "string"},
+    "attempt_id": {"type": "string"},
+    "source_staging_root": {"type": "string", "pattern": "^/"},
+    "preserved_root": {"type": "string", "pattern": "^\\.codex-orchestrator/runs/"},
+    "files": {"type": "array", "items": {"type": "object", "required": ["evidence_reference", "classification", "diagnostic_role", "capture_status", "preserved_path", "source_sha256", "preserved_sha256", "probe_id", "authoritative"], "properties": {"classification": {"const": "SANDBOX_DEBRIS"}, "diagnostic_role": {"const": "PROBE_EVIDENCE"}, "capture_status": {"const": "CAPTURED"}, "authoritative": {"const": false}}, "additionalProperties": true}},
+    "source_hashes_verified": {"type": "boolean"},
+    "preservation_complete": {"type": "boolean"},
+    "authoritative_proof": {"const": false},
+    "promotion_blocked": {"const": false},
+    "errors": {"type": "array", "items": {"type": "string"}}
+  },
+  "additionalProperties": false
+}

@@ -119,6 +119,16 @@ def _slice_boundary_violations(*, diff_text: str | None, patchlet: dict, allowed
                     "actual": {"old": old_value, "new": new_value},
                 }
             )
+    for key, expected in sorted(allowed_expected.items()):
+        if key not in changed:
+            violations.append(
+                {
+                    "path": allowed_product_file,
+                    "key": key,
+                    "reason": "required_slice_change_absent",
+                    "expected": {"old": expected[0], "new": expected[1]},
+                }
+            )
     return violations
 
 

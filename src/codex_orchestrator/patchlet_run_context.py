@@ -18,6 +18,7 @@ class PatchletRunContext:
     run_dir: Path
     is_worktree: bool
     worktree_path: Path | None
+    execution_boundary_root: Path | None = None
 
     @property
     def attempt_scratch_dir(self) -> Path:
@@ -26,6 +27,17 @@ class PatchletRunContext:
     @property
     def quarantine_dir(self) -> Path:
         return self.run_dir / "quarantined_scratch"
+
+    @property
+    def worker_evidence_dir(self) -> Path:
+        boundary = self.execution_boundary_root
+        if boundary is None and self.worktree_path is not None:
+            boundary = self.worktree_path.parent
+        return (boundary / "evidence") if boundary is not None else (self.run_dir / "worker_evidence_staging")
+
+    @property
+    def preserved_worker_evidence_dir(self) -> Path:
+        return self.run_dir / "worker_evidence"
 
     def required_report_path(self, patchlet_id: str) -> Path:
         return self.reports_dir / f"{patchlet_id}.json"
@@ -43,6 +55,7 @@ def build_patchlet_run_context(
     artifact_root: Path | None = None,
     is_worktree: bool = False,
     worktree_path: Path | None = None,
+    execution_boundary_root: Path | None = None,
 ) -> PatchletRunContext:
     del patchlet
     target_root = ctx.root
@@ -59,4 +72,5 @@ def build_patchlet_run_context(
         run_dir=ctx.paths.runs_dir / run_id,
         is_worktree=is_worktree,
         worktree_path=worktree_path.resolve() if worktree_path is not None else None,
+        execution_boundary_root=execution_boundary_root.resolve() if execution_boundary_root is not None else None,
     )

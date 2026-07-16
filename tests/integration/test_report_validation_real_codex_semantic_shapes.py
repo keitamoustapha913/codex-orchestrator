@@ -52,9 +52,9 @@ def test_report_validation_accepts_canonical_semantic_goal_result():
 
 
 def test_report_validation_accepts_safe_shorthand_semantic_goal_result():
-    errors = validate_json(_base_report([{"goal_item": "GI001", "result": "status=ready-no-compat"}]), "patchlet_report.schema.json")
+    errors = validate_json(_base_report([{"goal_item_id": "GI001", "result": "status=ready-no-compat"}]), "patchlet_report.schema.json")
     assert errors == []
-    assert _normalization([{"goal_item": "GI001", "result": "status=ready-no-compat"}])["accepted"] is True
+    assert _normalization([{"goal_item_id": "GI001", "result": "status=ready-no-compat"}])["accepted"] is True
 
 
 def test_report_validation_rejects_shorthand_without_goal_item():
@@ -62,30 +62,33 @@ def test_report_validation_rejects_shorthand_without_goal_item():
 
 
 def test_report_validation_rejects_shorthand_without_result_text():
-    assert validate_json(_base_report([{"goal_item": "GI001"}]), "patchlet_report.schema.json")
+    assert validate_json(_base_report([{"goal_item_id": "GI001"}]), "patchlet_report.schema.json")
 
 
-def test_report_validation_rejects_shorthand_with_unknown_extra_proof_claim():
-    result = _normalization([{"goal_item": "GI001", "result": "status=ready-no-compat", "passed": True}])
-    assert result["accepted"] is False
-    assert result["rejected_raw_claims"][0]["error_code"] == "WORKER_PROOF_CLAIM_NOT_ALLOWED"
+def test_report_validation_warns_for_shorthand_with_unknown_extra_proof_claim():
+    result = _normalization([{"goal_item_id": "GI001", "result": "status=ready-no-compat", "passed": True}])
+    assert result["accepted"] is True
+    assert result["semantic_quality_warnings"][0]["error_code"] == "WORKER_PROOF_CLAIM_NOT_ALLOWED"
 
 
-def test_report_validation_rejects_shorthand_claiming_all_future_work_done():
-    result = _normalization([{"goal_item": "GI001", "result": "all future work complete and all five settings updated"}])
-    assert result["accepted"] is False
-    assert result["rejected_raw_claims"][0]["error_code"] == "FUTURE_SLICE_CLAIM"
+def test_report_validation_warns_for_shorthand_claiming_all_future_work_done():
+    result = _normalization([{"goal_item_id": "GI001", "result": "all future work complete and all five settings updated"}])
+    assert result["accepted"] is True
+    assert result["semantic_quality_warnings"][0]["error_code"] == "FUTURE_SLICE_CLAIM"
 
 
 def test_report_validation_reports_structured_error_for_unlinked_shorthand():
-    result = _normalization([{"goal_item": "GI999", "result": "status=ready-no-compat"}])
-    assert result["rejected_raw_claims"][0]["error_code"] == "UNLINKED_GOAL_ITEM"
+    result = _normalization([{"goal_item_id": "GI999", "result": "status=ready-no-compat"}])
+    assert result["semantic_quality_warnings"][0]["error_code"] == "UNLINKED_GOAL_ITEM"
 
 
 def test_report_validation_reports_structured_error_for_vague_shorthand():
-    result = _normalization([{"goal_item": "GI001", "result": "ok"}])
-    assert result["rejected_raw_claims"][0]["error_code"] == "VAGUE_RESULT_TEXT"
+    result = _normalization([{"goal_item_id": "GI001", "result": "ok"}])
+    assert result["semantic_quality_warnings"][0]["error_code"] == "VAGUE_RESULT_TEXT"
 
 
-def test_patchlet_report_schema_allows_canonical_or_safe_shorthand_union():
-    assert validate_json(_base_report([{"goal": "GI001", "result": "status=ready-no-compat"}]), "patchlet_report.schema.json") == []
+def test_patchlet_report_schema_requires_canonical_goal_item_id():
+    assert validate_json(
+        _base_report([{"goal": "GI001", "result": "status=ready-no-compat"}]),
+        "patchlet_report.schema.json",
+    )

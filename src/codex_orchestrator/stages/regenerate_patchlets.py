@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import re
 from pathlib import Path
@@ -115,8 +116,6 @@ def _report_shape_repair_guidance(failure: dict) -> str:
             }
         ],
     }
-    import json
-
     return (
         "\n## Report-shape-only correction\n\n"
         "The previous report failed only because `probe_artifact_refs` contained string path entries.\n"
@@ -212,12 +211,23 @@ def regenerate_patchlets(ctx: TargetRepoContext, *, from_repair_plan: str = "lat
             "schema_version": "1.0",
             "kind": "patchlet",
             "patchlet_id": patchlet_id,
+            "work_slice_id": f"{source_patchlet['work_slice_id']}-repair-{repair_plan_id}",
             "subprompt_path": subprompt_rel,
             "master_goal_ids": source_patchlet.get("master_goal_ids", []),
             "invariant_ids": source_patchlet.get("invariant_ids", []),
             "evidence_ids": source_patchlet.get("evidence_ids", []),
             "graph_node_ids": source_patchlet.get("graph_node_ids", []),
             "allowed_product_runtime_file": source_patchlet["allowed_product_runtime_file"],
+            "allowed_product_runtime_files": source_patchlet.get(
+                "allowed_product_runtime_files",
+                [source_patchlet["allowed_product_runtime_file"]],
+            ),
+            "goal_item_ids": source_patchlet.get("goal_item_ids", []),
+            "proof_obligation_ids": source_patchlet.get("proof_obligation_ids", []),
+            "probe_ids": source_patchlet.get("probe_ids", []),
+            "slice_change_boundary": source_patchlet.get("slice_change_boundary"),
+            "current_slice_boundary": source_patchlet.get("current_slice_boundary"),
+            "future_slice_boundaries": source_patchlet.get("future_slice_boundaries", []),
             "allowed_artifact_dirs": [
                 ".artifacts/probes/",
                 ".codex-orchestrator/reports/",
@@ -252,7 +262,7 @@ def regenerate_patchlets(ctx: TargetRepoContext, *, from_repair_plan: str = "lat
             "2. Target root: `$CXOR_TARGET_ROOT`. Product/runtime files in this root are read-only to the worker.\n\n"
             f"Allowed product/runtime edit path: `$CXOR_EXECUTION_ROOT/{source_patchlet['allowed_product_runtime_file']}`\n"
             f"Forbidden product/runtime edit path: `$CXOR_TARGET_ROOT/{source_patchlet['allowed_product_runtime_file']}`\n"
-            "Target-root artifact directories remain writable only for evidence under `.codex-orchestrator/` and `.artifacts/probes/`.\n\n"
+            "Do not write target-root workflow state or `.artifacts/probes/`; write probe evidence only beneath `$CXOR_WORKER_EVIDENCE_DIR`.\n\n"
             "This repair patchlet addresses an unauthorized diff that crossed the allowed-file boundary.\n"
             "Do not blind retry.\n\n"
             "## ROOT-CAUSE PROBE-ONLY INVESTIGATION\n\n"

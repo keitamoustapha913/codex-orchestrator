@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "patch_proposal_validation_result",
+  "type": "object",
+  "required": ["candidate_scope", "schema_version", "kind", "patchlet_id", "attempt_id", "schema_valid", "allowed_file_validation", "current_boundary_validation", "future_boundary_validation", "support_file_validation", "verification_file_validation", "binary_patch_validation", "accepted", "errors"],
+  "properties": {
+    "candidate_scope": {"const": "patch_proposal"},
+    "schema_version": {"const": "1.0"},
+    "kind": {"const": "patch_proposal_validation_result"},
+    "patchlet_id": {"type": "string"},
+    "attempt_id": {"type": "string"},
+    "schema_valid": {"type": "boolean"},
+    "allowed_file_validation": {"type": "boolean"},
+    "current_boundary_validation": {"type": "boolean"},
+    "future_boundary_validation": {"type": "boolean"},
+    "support_file_validation": {"type": "boolean"},
+    "verification_file_validation": {"type": "boolean"},
+    "allowed_path_validation": {"type": "boolean"},
+    "containment_validation": {"type": "boolean"},
+    "binary_patch_validation": {"type": "boolean"},
+    "product_classification_invariant": {"type": "boolean"},
+    "accepted": {"type": "boolean"},
+    "errors": {"type": "array", "items": {"type": "string"}}
+  },
+  "additionalProperties": false
+}

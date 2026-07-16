@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "worker_change_classification_ledger",
+  "type": "object",
+  "required": ["schema_version", "kind", "patchlet_id", "attempt_id", "entries", "every_path_classified_once", "promotion_blocked"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "kind": {"const": "worker_change_classification_ledger"},
+    "patchlet_id": {"type": "string"},
+    "attempt_id": {"type": "string"},
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "path",
+          "classification",
+          "inside_execution_boundary",
+          "allowed_product_match",
+          "promotion_eligible",
+          "excluded_from_promotion",
+          "blocking"
+        ],
+        "properties": {
+          "path": {"type": "string"},
+          "classification": {
+            "enum": [
+              "ALLOWED_PRODUCT_CHANGE",
+              "SANDBOX_DEBRIS",
+              "ALLOWED_PRODUCT_PATH_VIOLATION",
+              "SANDBOX_CONTAINMENT_VIOLATION"
+            ]
+          },
+          "inside_execution_boundary": {"type": "boolean"},
+          "allowed_product_match": {"type": "boolean"},
+          "promotion_eligible": {"type": "boolean"},
+          "excluded_from_promotion": {"type": "boolean"},
+          "blocking": {"type": "boolean"}
+        },
+        "allOf": [
+          {
+            "if": {"properties": {"classification": {"const": "ALLOWED_PRODUCT_CHANGE"}}},
+            "then": {
+              "properties": {
+                "inside_execution_boundary": {"const": true},
+                "allowed_product_match": {"const": true},
+                "promotion_eligible": {"const": true},
+                "excluded_from_promotion": {"const": false},
+                "blocking": {"const": false}
+              }
+            }
+          },
+          {
+            "if": {"properties": {"classification": {"const": "SANDBOX_DEBRIS"}}},
+            "then": {
+              "properties": {
+                "inside_execution_boundary": {"const": true},
+                "allowed_product_match": {"const": false},
+                "promotion_eligible": {"const": false},
+                "excluded_from_promotion": {"const": true},
+                "blocking": {"const": false}
+              }
+            }
+          },
+          {
+            "if": {"properties": {"classification": {"const": "ALLOWED_PRODUCT_PATH_VIOLATION"}}},
+            "then": {
+              "properties": {
+                "inside_execution_boundary": {"const": true},
+                "allowed_product_match": {"const": true},
+                "promotion_eligible": {"const": false},
+                "excluded_from_promotion": {"const": true},
+                "blocking": {"const": true}
+              }
+            }
+          },
+          {
+            "if": {"properties": {"classification": {"const": "SANDBOX_CONTAINMENT_VIOLATION"}}},
+            "then": {
+              "properties": {
+                "inside_execution_boundary": {"const": false},
+                "promotion_eligible": {"const": false},
+                "excluded_from_promotion": {"const": true},
+                "blocking": {"const": true}
+              }
+            }
+          }
+        ],
+        "additionalProperties": true
+      }
+    },
+    "every_path_classified_once": {"const": true},
+    "promotion_blocked": {"type": "boolean"}
+  },
+  "additionalProperties": false
+}

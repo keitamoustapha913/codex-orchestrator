@@ -97,7 +97,7 @@ def test_worktree_run_writes_reports_and_probes_to_target_artifact_root(git_repo
     assert validate_json_file(ctx.paths.reports_dir / "P0001.json", "patchlet_report.schema.json") == []
 
 
-def test_patchlet_worktree_unauthorized_diff_does_not_mutate_target_repo(git_repo: Path):
+def test_patchlet_worktree_peer_debris_does_not_mutate_target_repo(git_repo: Path):
     ctx = _compiled_ctx(git_repo)
     other = ctx.root / "other.py"
     other.write_text("value = 1\n", encoding="utf-8")
@@ -114,13 +114,13 @@ def test_patchlet_worktree_unauthorized_diff_does_not_mutate_target_repo(git_rep
 
     result = run_next_patchlet(ctx, worker_mode="mock", use_worktree=True)
 
-    assert result.status == "FAILED_WITH_EVIDENCE"
+    assert result.status == "COMPLETE"
     assert sha256_file(ctx.root / "app.py") == app_hash_before
     assert sha256_file(other) == other_hash_before
-    assert load_state(ctx).stage == "FAILURE_CLASSIFICATION_REQUIRED"
+    assert load_state(ctx).stage == "PATCHLET_EXECUTION_COMPLETE"
 
 
-def test_patchlet_worktree_unauthorized_diff_saves_failed_diff_artifact(git_repo: Path):
+def test_patchlet_worktree_peer_debris_is_excluded_from_canonical_diff(git_repo: Path):
     ctx = _compiled_ctx(git_repo)
     other = ctx.root / "other.py"
     other.write_text("value = 1\n", encoding="utf-8")
@@ -137,10 +137,10 @@ def test_patchlet_worktree_unauthorized_diff_saves_failed_diff_artifact(git_repo
 
     diff_path = ctx.paths.runs_dir / "P0001_attempt1" / "diff.patch"
     assert diff_path.exists()
-    assert "other.py" in diff_path.read_text(encoding="utf-8")
+    assert "other.py" not in diff_path.read_text(encoding="utf-8")
 
 
-def test_patchlet_worktree_unauthorized_diff_creates_failure_record(git_repo: Path):
+def test_patchlet_worktree_peer_debris_creates_no_failure_record(git_repo: Path):
     ctx = _compiled_ctx(git_repo)
     other = ctx.root / "other.py"
     other.write_text("value = 1\n", encoding="utf-8")
@@ -155,10 +155,7 @@ def test_patchlet_worktree_unauthorized_diff_creates_failure_record(git_repo: Pa
 
     run_next_patchlet(ctx, worker_mode="mock", use_worktree=True)
 
-    assert (ctx.paths.failures_dir / "F0001.json").exists()
-    failure = read_json(ctx.paths.failures_dir / "F0001.json")
-    assert failure["source_id"] == "P0001"
-    assert "other.py" in failure["observed_failure"]
+    assert not (ctx.paths.failures_dir / "F0001.json").exists()
 
 
 def test_worktree_run_manifest_records_diff_validation_result(git_repo: Path):
@@ -217,7 +214,7 @@ def test_cli_run_next_use_worktree_valid_diff(git_repo: Path, tmp_path: Path):
     assert "P0001" in result.stdout
 
 
-def test_cli_run_next_use_worktree_unauthorized_diff(git_repo: Path, tmp_path: Path):
+def test_cli_run_next_discards_peer_debris(git_repo: Path, tmp_path: Path):
     ctx = _compiled_ctx(git_repo)
     other = ctx.root / "other.py"
     other.write_text("value = 1\n", encoding="utf-8")
@@ -242,5 +239,5 @@ def test_cli_run_next_use_worktree_unauthorized_diff(git_repo: Path, tmp_path: P
         check=False,
     )
 
-    assert result.returncode == 1
-    assert "FAILED_WITH_EVIDENCE" in result.stdout
+    assert result.returncode == 0
+    assert '"status": "COMPLETE"' in result.stdout

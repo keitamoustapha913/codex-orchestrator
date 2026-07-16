@@ -14,6 +14,7 @@ from codex_orchestrator.stages.extract_invariants import extract_invariants
 from codex_orchestrator.stages.init import init_workflow
 from codex_orchestrator.stages.normalize import normalize_master_prompt
 from codex_orchestrator.target_repo import resolve_target_repo
+from codex_orchestrator.validators.schema_validator import validate_json_file
 from codex_orchestrator.workers.codex_exec import CodexExecWorker
 
 
@@ -122,10 +123,13 @@ def test_codex_worker_exposes_patchlet_attempt_report_and_probe_paths(
     assert env_dump["CXOR_ATTEMPT_ID"] == "P0001_attempt1"
     assert env_dump["CXOR_REPORTS_DIR"] == str(ctx.paths.reports_dir)
     assert env_dump["CXOR_REPORT_PATH"] == str(ctx.paths.reports_dir / "P0001.json")
-    assert env_dump["CXOR_PROBE_ROOT"] == str(ctx.paths.probe_dir / "P0001")
+    assert env_dump["CXOR_PROBE_ROOT"] == str(Path(env_dump["CXOR_WORKER_EVIDENCE_DIR"]) / patchlet["probe_ids"][0])
     assert env_dump["CXOR_RUNS_DIR"] == str(ctx.paths.runs_dir)
     assert env_dump["CXOR_RUN_DIR"] == str(ctx.paths.runs_dir / "P0001_attempt1")
     assert env_dump["CXOR_ALLOWED_PRODUCT_RUNTIME_FILE"] == "app.py"
+    assert Path(env_dump["CXOR_WORKER_EVIDENCE_DIR"]).is_absolute()
+    assert env_dump["CXOR_WORKER_EVIDENCE_DIR"] != env_dump["CXOR_WORKER_SCRATCH_DIR"]
+    assert env_dump["CXOR_WORKER_EVIDENCE_CONTRACT"].endswith("/gates/worker_evidence_contract.json")
 
 
 def test_codex_worker_environment_paths_point_to_target_artifact_root_in_worktree_mode(
@@ -152,8 +156,9 @@ def test_codex_worker_environment_paths_point_to_target_artifact_root_in_worktre
     assert env_dump["CXOR_EXECUTION_ROOT"] == str(execution_root)
     assert env_dump["CXOR_ARTIFACT_ROOT"] == str(ctx.root)
     assert env_dump["CXOR_REPORT_PATH"] == str(ctx.paths.reports_dir / "P0001.json")
-    assert env_dump["CXOR_PROBE_ROOT"] == str(ctx.paths.probe_dir / "P0001")
+    assert env_dump["CXOR_PROBE_ROOT"] == str(Path(env_dump["CXOR_WORKER_EVIDENCE_DIR"]) / patchlet["probe_ids"][0])
     assert env_dump["CXOR_RUN_DIR"] == str(ctx.paths.runs_dir / "P0001_attempt1")
+    assert not env_dump["CXOR_WORKER_EVIDENCE_DIR"].startswith(str(execution_root) + os.sep)
 
 
 def test_codex_worker_environment_does_not_point_artifacts_to_worktree_in_worktree_mode(
@@ -258,3 +263,88 @@ def test_codex_worker_env_capsule_paths_are_under_target_run_dir_not_worktree(
     assert not env_dump["CXOR_WORKER_STAGE_DIR"].startswith(str(execution_root))
     assert not env_dump["CXOR_PREFLIGHT_PATH"].startswith(str(execution_root))
     assert not env_dump["CXOR_FINAL_REPORT_PATH"].startswith(str(execution_root))
+
+
+def test_real_worker_environment_exports_cxor_worker_scratch_dir(
+    git_repo: Path,
+    tmp_path: Path,
+    monkeypatch,
+):
+    ctx, patchlet = _setup_patchlet_ctx(git_repo)
+    fake_codex = tmp_path / "codex"
+    _write_fake_codex(fake_codex)
+    monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ.get('PATH', '')}")
+
+    env_dump = _env_dump(ctx, patchlet, execution_root=ctx.root, artifact_root=ctx.root)
+
+    scratch = Path(env_dump["CXOR_WORKER_SCRATCH_DIR"])
+    assert scratch.is_absolute()
+    assert scratch == ctx.paths.runs_dir / "P0001_attempt1" / "worker_scratch"
+    assert scratch.exists()
+
+
+def test_real_worker_environment_routes_temp_and_cache_paths_to_worker_scratch(
+    git_repo: Path,
+    tmp_path: Path,
+    monkeypatch,
+):
+    ctx, patchlet = _setup_patchlet_ctx(git_repo)
+    fake_codex = tmp_path / "codex"
+    _write_fake_codex(fake_codex)
+    monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ.get('PATH', '')}")
+
+    env_dump = _env_dump(ctx, patchlet, execution_root=ctx.root, artifact_root=ctx.root)
+
+    scratch = Path(env_dump["CXOR_WORKER_SCRATCH_DIR"])
+    for name in ["TMPDIR", "TMP", "TEMP", "XDG_CACHE_HOME", "PYTHONPYCACHEPREFIX"]:
+        value = Path(env_dump[name])
+        assert value.is_absolute()
+        assert value == scratch or scratch in value.parents
+        assert value.exists()
+
+
+def test_python_bytecode_cache_is_routed_outside_execution_root(
+    git_repo: Path,
+    tmp_path: Path,
+    monkeypatch,
+):
+    ctx, patchlet = _setup_patchlet_ctx(git_repo)
+    fake_codex = tmp_path / "codex"
+    _write_fake_codex(fake_codex)
+    monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ.get('PATH', '')}")
+    execution_root = tmp_path / "execution-root"
+    shutil.copytree(ctx.root, execution_root)
+
+    env_dump = _env_dump(
+        ctx,
+        patchlet,
+        execution_root=execution_root,
+        artifact_root=ctx.root,
+        worktree_path=execution_root,
+    )
+
+    pycache_prefix = Path(env_dump["PYTHONPYCACHEPREFIX"])
+    assert pycache_prefix.is_absolute()
+    assert execution_root not in pycache_prefix.parents
+    assert Path(env_dump["CXOR_WORKER_SCRATCH_DIR"]) in pycache_prefix.parents
+    assert env_dump["PYTHONDONTWRITEBYTECODE"] == "1"
+
+
+def test_worker_scratch_environment_artifact_validates(
+    git_repo: Path,
+    tmp_path: Path,
+    monkeypatch,
+):
+    ctx, patchlet = _setup_patchlet_ctx(git_repo)
+    fake_codex = tmp_path / "codex"
+    _write_fake_codex(fake_codex)
+    monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ.get('PATH', '')}")
+
+    _env_dump(ctx, patchlet, execution_root=ctx.root, artifact_root=ctx.root)
+
+    artifact_path = ctx.paths.runs_dir / "P0001_attempt1" / "worker_scratch_environment.json"
+    assert validate_json_file(artifact_path, "worker_scratch_environment.schema.json") == []
+    artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
+    assert artifact["all_paths_absolute"] is True
+    assert artifact["all_paths_inside_scratch_root"] is True
+    assert artifact["directories_created"] is True

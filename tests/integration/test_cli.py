@@ -39,10 +39,13 @@ def setup_repair_plan_ready_repo(git_repo: Path) -> Path:
     build_inventory(ctx)
     extract_invariants(ctx)
     compile_patchlets(ctx)
+    patchlet_index = json.loads(ctx.paths.patchlet_index.read_text(encoding="utf-8"))
+    patchlet_index["patchlets"][0]["required_allowed_product_change"] = True
+    ctx.paths.patchlet_index.write_text(json.dumps(patchlet_index), encoding="utf-8")
     mock_dir = ctx.paths.workflow_dir / "mock"
     mock_dir.mkdir(parents=True)
     (mock_dir / "next_patchlet_result.json").write_text(
-        '{"unauthorized_files":{"other.py":"bad = True\\n"},"status":"COMPLETE"}',
+        '{"status":"COMPLETE"}',
         encoding="utf-8",
     )
     run_next_patchlet(ctx, worker_mode="mock")
@@ -66,10 +69,13 @@ def setup_done_repo(git_repo: Path) -> Path:
     build_inventory(ctx)
     extract_invariants(ctx)
     compile_patchlets(ctx)
+    patchlet_index = json.loads(ctx.paths.patchlet_index.read_text(encoding="utf-8"))
+    patchlet_index["patchlets"][0]["required_allowed_product_change"] = True
+    ctx.paths.patchlet_index.write_text(json.dumps(patchlet_index), encoding="utf-8")
     mock_dir = ctx.paths.workflow_dir / "mock"
     mock_dir.mkdir(parents=True, exist_ok=True)
     (mock_dir / "next_patchlet_result.json").write_text(
-        '{"unauthorized_files":{"other.py":"bad = True\\n"},"status":"COMPLETE","consume_after_run":true}',
+        '{"status":"COMPLETE","consume_after_run":true}',
         encoding="utf-8",
     )
     result = run_auto(ctx, until="DONE", worker_mode="mock", max_iterations=50)

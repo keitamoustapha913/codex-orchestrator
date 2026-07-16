@@ -65,6 +65,25 @@ def test_report_schema_contract_forbids_string_probe_refs(git_repo: Path):
     assert "Do not write probe_artifact_refs as strings" in text
 
 
+def test_report_schema_contract_requires_bounded_relative_evidence_paths(git_repo: Path):
+    ctx = _ctx(git_repo)
+    run_next_patchlet(ctx, worker_mode="mock", use_worktree=True)
+    text = (ctx.paths.runs_dir / "P0001_attempt1/worker_memory/REPORT_SCHEMA_CONTRACT.md").read_text(encoding="utf-8")
+    assert "bounded, POSIX-style" in text
+    assert "Never copy that absolute filesystem path" in text
+    assert "any `/tmp/...` absolute path" in text
+    assert ".artifacts/probes/P0001/run_001/before_state.json" in text
+
+
+def test_primary_worker_report_template_forbids_absolute_and_traversal_paths():
+    from codex_orchestrator.report_contract import render_primary_worker_report_template
+
+    text = render_primary_worker_report_template()
+    assert "never absolute filesystem paths" in text
+    assert "Never copy `$CXOR_WORKER_EVIDENCE_DIR`" in text
+    assert "`..`" in text
+
+
 def test_worker_prompt_includes_object_shaped_probe_ref_skeleton(git_repo: Path):
     ctx = _ctx(git_repo)
     run_next_patchlet(ctx, worker_mode="mock", use_worktree=True)

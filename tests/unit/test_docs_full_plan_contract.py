@@ -73,10 +73,10 @@ def test_docs_cover_ci_friendly_commands_that_exist():
     assert "--worker-mode ci_only" in text
 
 
-def test_docs_do_not_claim_worktrees_are_default():
+def test_docs_state_write_capable_workers_always_use_disposable_sandboxes():
     text = _docs_text().lower()
-    assert "worktrees are default" not in text
-    assert "worktree mode is optional" in text or "use-worktree" in text
+    assert "every write-capable worker" in text
+    assert "disposable sandbox" in text
 
 
 def test_docs_cover_auto_use_worktree_command():
@@ -85,11 +85,11 @@ def test_docs_cover_auto_use_worktree_command():
     assert "--use-worktree" in text
 
 
-def test_docs_state_worktrees_are_optional_not_default_for_auto():
+def test_docs_state_auto_worker_flag_cannot_select_direct_execution():
     text = _docs_text().lower()
     assert "auto --use-worktree" in text
-    assert "optional" in text
-    assert "not default" in text or "not the default" in text
+    assert "direct execution" in text
+    assert "cannot" in text
 
 
 def test_docs_cover_auto_worktree_clean_repo_precondition():
@@ -98,10 +98,57 @@ def test_docs_cover_auto_worktree_clean_repo_precondition():
     assert "auto --use-worktree" in text
 
 
-def test_docs_cover_auto_worktree_unauthorized_diff_isolation():
+def test_docs_cover_auto_worktree_non_allowlisted_debris_isolation():
     text = _docs_text().lower()
-    assert "unauthorized" in text
-    assert "do not mutate target product/runtime files" in text or "does not mutate target product/runtime files" in text
+    assert "sandbox debris" in text
+    assert "canonical patch" in text
+
+
+def _allowlist_boundary_docs_text() -> str:
+    repo = Path(__file__).resolve().parents[2]
+    paths = [
+        repo / "README.md",
+        repo / "IMPLEMENTATION_STATUS.md",
+        repo / "docs" / "general_work_decomposition.md",
+        repo / "docs" / "workflow_lifecycle.md",
+        repo / "docs" / "real_codex_smoke.md",
+        repo / "docs" / "runbooks" / "real_codex_smoke_runbook.md",
+        repo / "docs" / "report_contract.md",
+        repo / "docs" / "semantic_goal_satisfaction.md",
+    ]
+    return "\n".join(path.read_text(encoding="utf-8") for path in paths).lower()
+
+
+def test_docs_define_allowlist_as_only_product_boundary():
+    text = _allowlist_boundary_docs_text()
+    assert "deterministic allowlist is the only product boundary" in text
+
+
+def test_docs_define_all_non_allowlisted_sandbox_paths_as_debris():
+    text = _allowlist_boundary_docs_text()
+    assert "all in-sandbox non-allowlisted outputs are sandbox debris" in text
+
+
+def test_docs_state_debris_is_non_blocking():
+    text = _allowlist_boundary_docs_text()
+    assert "sandbox debris never blocks promotion" in text
+
+
+def test_docs_state_containment_escape_remains_blocking():
+    text = _allowlist_boundary_docs_text()
+    assert "containment escape remains blocking" in text
+
+
+def test_docs_contain_no_legacy_evidence_migration_contract():
+    text = _allowlist_boundary_docs_text()
+    assert "legacy evidence is migrated" not in text
+    assert "legacy evidence migration" not in text
+
+
+def test_docs_contain_no_root_scratch_compatibility_contract():
+    text = _allowlist_boundary_docs_text()
+    assert "root scratch sweep" not in text
+    assert "role-shaped" not in text
 
 
 def test_docs_cover_ci_only_read_only_with_auto():

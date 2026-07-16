@@ -29,6 +29,7 @@ The orchestrator provides these `CXOR_` paths and identifiers:
 - `CXOR_ALLOWED_PRODUCT_RUNTIME_FILE`
 - `CXOR_REPORT_PATH`
 - `CXOR_PROBE_ROOT`
+- `CXOR_WORKER_EVIDENCE_DIR`
 
 Treat `CXOR_EXECUTION_ROOT` as the only place where product/runtime file edits
 may occur. Treat `CXOR_ARTIFACT_ROOT` as the only place where orchestrator
@@ -56,7 +57,8 @@ Forbidden product/runtime edit path:
    `CXOR_TARGET_ROOT/CXOR_ALLOWED_PRODUCT_RUNTIME_FILE`
 
 Target-root artifact directories remain writable for evidence only under
-`.codex-orchestrator/` and `.artifacts/probes/`.
+the explicit Worker Capsule paths. Write probe evidence only beneath
+`$CXOR_WORKER_EVIDENCE_DIR`; do not create `.artifacts/probes` in the checkout.
 
 Do not write report or probe artifacts into the worktree if
 `CXOR_EXECUTION_ROOT` differs from `CXOR_ARTIFACT_ROOT`.
@@ -129,7 +131,6 @@ The report must include at least:
 - `trace_ledger`
 - `cleanup_proof`
 - `probe_artifact_refs`
-- `acceptance_criteria_result`
 
 `cleanup_proof` must be a string, not an object, if the current report schema
 requires a string.
@@ -141,8 +142,9 @@ when no product/runtime file changed.
 `deterministic_run_counts`, `before_after_state`, `row_ledger`, and
 `trace_ledger` must be present.
 
-`probe_artifact_refs` must reference the durable probe run written under
-`CXOR_PROBE_ROOT`.
+`probe_artifact_refs` must reference the eventual durable `.artifacts/probes`
+alias populated by the orchestrator after it validates staged files written
+under `CXOR_PROBE_ROOT`.
 
 ## Minimal Valid COMPLETE Example
 
@@ -192,13 +194,13 @@ Write the report JSON to `CXOR_REPORT_PATH`. A minimal valid shape is:
     "probe_root": ".artifacts/probes/P0001",
     "run_id": "run_001"
   }],
-  "acceptance_criteria_result": "pass"
 }
 ```
 
-## Required Durable Probe Files
+## Required Staged Probe Files
 
-Write these durable probe artifacts:
+Write these staged probe artifacts; the orchestrator validates and preserves
+them after worker exit:
 
 - `CXOR_PROBE_ROOT/probe.py`
 - `CXOR_PROBE_ROOT/run_001/row_ledger.jsonl`

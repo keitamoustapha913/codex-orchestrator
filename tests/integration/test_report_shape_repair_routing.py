@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 
 from conftest import read_json
@@ -96,12 +97,16 @@ def test_report_shape_unsafe_path_safe_fails_with_specific_evidence(git_repo: Pa
     assert "probe_artifact_refs_unsafe_path" in governor["blocked_reason"]
 
 
-def test_product_failure_still_routes_to_full_patchlet_repair(git_repo: Path):
+def test_non_allowlisted_peer_change_does_not_route_to_repair(git_repo: Path):
     ctx = _ctx(git_repo)
+    other = ctx.root / "other.py"
+    other.write_text("baseline = True\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(ctx.root), "add", "other.py"], check=True)
+    subprocess.run(["git", "-C", str(ctx.root), "commit", "-m", "add tracked unauthorized file"], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     _scenario(ctx, {"unauthorized_files": {"other.py": "x"}})
-    run_next_patchlet(ctx, worker_mode="mock", use_worktree=True)
-    failure = read_json(ctx.paths.failures_dir / "F0001.json")
-    assert failure["observed_failure"].startswith("Unauthorized diff")
+    result = run_next_patchlet(ctx, worker_mode="mock", use_worktree=True)
+    assert result.status in {"COMPLETE", "VERIFIED_NO_CHANGE_NEEDED"}
+    assert not (ctx.paths.failures_dir / "F0001.json").exists()
 
 
 def test_worker_timeout_still_routes_to_worker_failure_handling(git_repo: Path):

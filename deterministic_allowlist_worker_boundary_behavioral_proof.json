@@ -1,0 +1,38 @@
+{
+  "schema_version": "1.0",
+  "kind": "deterministic_allowlist_worker_boundary_behavioral_proof",
+  "date": "2026-07-16",
+  "target_language": "JavaScript",
+  "test": "tests/integration/test_five_patchlet_allowlist_behavioral_proof.py",
+  "test_result": "1 passed in 1.84s",
+  "initial_patchlet_count": 5,
+  "accepted_patchlet_count": 5,
+  "repair_patchlet_count": 0,
+  "canonical_patch_count": 5,
+  "clean_reconstruction_count": 5,
+  "independent_proof_count": 5,
+  "coverage": "5/5",
+  "canonical_semantic_accept_count": 5,
+  "durable_promotion_count": 5,
+  "master_prompt_satisfaction": "SATISFIED",
+  "debris_patchlet_ids": [
+    "P0002",
+    "P0004"
+  ],
+  "debris_paths_per_injecting_worker": [
+    ".codex/runtime/session.json",
+    ".agents/cache/trace.txt",
+    ".supervised-hidden",
+    "nested-cache/runtime/value.tmp",
+    "temporary-output.log"
+  ],
+  "debris_assertions": {
+    "classification": "SANDBOX_DEBRIS",
+    "promotion_blocked": false,
+    "canonical_patch_membership": false,
+    "clean_reconstruction_membership": false,
+    "promoted_tree_membership": false,
+    "repair_generated": false
+  },
+  "canonical_patch_rule": "Each canonical patch contains exactly its patchlet's one assigned allowlisted product file."
+}

@@ -16,9 +16,22 @@
     "stage_gate",
     "diff_gate",
     "report_gate",
+    "report_integrity_gate",
+    "report_semantic_quality",
     "probe_gate",
+    "patch_gate",
+    "clean_boundary_gate",
+    "independent_proof_gate",
+    "goal_coverage_gate",
+    "canonical_semantic_gate",
+    "durable_promotion_gate",
+    "semantic_goal_gate",
     "final_status_gate",
     "final_status_claim",
+    "final_status_marker",
+    "final_status_marker_canonical",
+    "final_status_marker_noncanonical",
+    "final_status_marker_error",
     "reasons",
     "next_state",
     "blind_retry_allowed",
@@ -39,9 +52,31 @@
     "stage_gate": {"type": "string"},
     "diff_gate": {"type": "string"},
     "report_gate": {"type": "string"},
+    "report_integrity_gate": {"type": "string"},
+    "report_semantic_quality": {
+      "type": "object",
+      "required": ["status", "gate", "blocking"],
+      "properties": {
+        "status": {"type": ["string", "null"]},
+        "gate": {"type": "string"},
+        "blocking": {"type": "boolean"}
+      },
+      "additionalProperties": false
+    },
     "probe_gate": {"type": "string"},
+    "patch_gate": {"type": "string"},
+    "clean_boundary_gate": {"type": "string"},
+    "independent_proof_gate": {"type": "string"},
+    "goal_coverage_gate": {"type": "string"},
+    "canonical_semantic_gate": {"type": "string"},
+    "durable_promotion_gate": {"type": "string"},
+    "semantic_goal_gate": {"type": "string"},
     "final_status_gate": {"type": "string"},
     "final_status_claim": {"type": ["string", "null"]},
+    "final_status_marker": {"type": ["string", "null"]},
+    "final_status_marker_canonical": {"type": ["boolean", "null"]},
+    "final_status_marker_noncanonical": {"type": ["boolean", "null"]},
+    "final_status_marker_error": {"type": ["string", "null"]},
     "reasons": {
       "type": "array",
       "items": {"type": "string"}
@@ -51,5 +86,5 @@
     "validator_weakening_allowed": {"type": "boolean"},
     "worker_capsule_manifest": {"type": "string"}
   },
-  "additionalProperties": true
+  "additionalProperties": false
 }

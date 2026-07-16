@@ -41,10 +41,13 @@ def _setup_compiled_ctx(git_repo: Path, monkeypatch):
 
 def _setup_repair_patchlet_ctx(git_repo: Path, monkeypatch):
     ctx, _ = _setup_compiled_ctx(git_repo, monkeypatch)
+    patchlet_index = json.loads(ctx.paths.patchlet_index.read_text(encoding="utf-8"))
+    patchlet_index["patchlets"][0]["required_allowed_product_change"] = True
+    ctx.paths.patchlet_index.write_text(json.dumps(patchlet_index), encoding="utf-8")
     mock_dir = ctx.paths.workflow_dir / "mock"
     mock_dir.mkdir(parents=True, exist_ok=True)
     (mock_dir / "next_patchlet_result.json").write_text(
-        json.dumps({"unauthorized_files": {"other.py": "bad = True\n"}, "status": "COMPLETE"}),
+        json.dumps({"status": "COMPLETE"}),
         encoding="utf-8",
     )
     result = run_next_patchlet(ctx, worker_mode="mock")
@@ -172,6 +175,21 @@ def test_generated_real_codex_prompt_says_required_ledgers_must_exist(git_repo: 
     assert "row_ledger" in prompt
     assert "trace_ledger" in prompt
     assert "must be present" in prompt
+
+
+def test_generated_real_codex_prompt_separates_product_scratch_and_evidence_paths(git_repo: Path, tmp_path: Path, monkeypatch):
+    ctx, patchlet = _setup_compiled_ctx(git_repo, monkeypatch)
+
+    prompt = _generated_prompt_for_patchlet(ctx, patchlet, tmp_path, monkeypatch)
+
+    assert "Product source edits: write only to the assigned product file in the Git checkout" in prompt
+    assert "Temporary files: write only beneath `$CXOR_WORKER_SCRATCH_DIR`" in prompt
+    assert "Probe and diagnostic evidence: write only beneath `$CXOR_WORKER_EVIDENCE_DIR`" in prompt
+    assert "Do not create `.artifacts/probes` inside the Git checkout" in prompt
+    assert "CXOR_WORKER_EVIDENCE_CONTRACT" in prompt
+    assert patchlet["patchlet_id"] in prompt
+    assert patchlet["probe_ids"][0] in prompt
+    assert "P0001_attempt1" in prompt
 
 
 def test_repair_patchlet_prompt_includes_same_report_contract_as_initial_patchlet(git_repo: Path, monkeypatch):

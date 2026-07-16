@@ -91,15 +91,32 @@ def _normalize_route(raw_items):
     return normalize_semantic_goal_results(raw_items=raw_items, **_route_ctx())
 
 
-def test_real_codex_goal_item_result_shorthand_is_accepted_as_raw_claim():
-    result = _normalize([{"goal_item": "GI001", "result": "status updated from pending to ready-no-compat without changing reserved keys"}])
+def test_canonical_goal_item_id_is_accepted():
+    result = _normalize([{"goal_item_id": "GI001", "result": "status updated from pending to ready-no-compat without changing reserved keys"}])
     assert result["accepted"] is True
     assert result["accepted_raw_claims"][0]["claim_status"] == "LINKED_PENDING_ORCHESTRATOR_PROOF"
 
 
-def test_shorthand_goal_item_alias_maps_to_goal_item_id():
+def test_goal_item_alias_is_not_normalized():
+    result = _normalize([{"goal_item": "GI001", "result": "status is ready-no-compat"}])
+    assert result["accepted"] is False
+    assert result["accepted_raw_claims"] == []
+    assert result["rejected_raw_claims"][0]["error_code"] == "MISSING_GOAL_ITEM"
+
+
+def test_goal_alias_is_not_normalized():
     result = _normalize([{"goal": "GI001", "result": "status is ready-no-compat"}])
-    assert result["accepted_raw_claims"][0]["goal_item_id"] == "GI001"
+    assert result["accepted"] is False
+    assert result["accepted_raw_claims"] == []
+    assert result["rejected_raw_claims"][0]["error_code"] == "MISSING_GOAL_ITEM"
+
+
+def test_noncanonical_semantic_result_remains_non_authoritative():
+    raw = {"goal_item": "GI001", "result": "status is ready-no-compat"}
+    result = _normalize([raw])
+    assert result["accepted_raw_claims"] == []
+    assert result["canonical_results_from_worker"] == []
+    assert result["rejected_raw_claims"][0]["raw_item"] == raw
 
 
 def test_shorthand_result_is_linked_to_current_patchlet_goal_and_obligation():
@@ -115,62 +132,62 @@ def test_shorthand_result_is_linked_to_current_patchlet_goal_and_obligation():
 
 
 def test_shorthand_result_preserves_raw_worker_output():
-    raw = {"goal_item": "GI001", "result": "status updated from pending to ready-no-compat without changing reserved keys"}
+    raw = {"goal_item_id": "GI001", "result": "status updated from pending to ready-no-compat without changing reserved keys"}
     result = _normalize([raw])
     assert result["accepted_raw_claims"][0]["raw_item"] == raw
 
 
 def test_shorthand_result_does_not_set_passed_true_before_independent_proof():
-    result = _normalize([{"goal_item": "GI001", "result": "status=ready-no-compat"}])
+    result = _normalize([{"goal_item_id": "GI001", "result": "status=ready-no-compat"}])
     assert "passed" not in result["accepted_raw_claims"][0]
     assert result["proof_not_claimed_here"] is True
 
 
-def test_shorthand_result_rejects_unknown_goal_item():
-    result = _normalize([{"goal_item": "GI999", "result": "status=ready-no-compat"}])
-    assert result["accepted"] is False
-    assert result["rejected_raw_claims"][0]["error_code"] == "UNLINKED_GOAL_ITEM"
+def test_shorthand_result_warns_for_unknown_goal_item():
+    result = _normalize([{"goal_item_id": "GI999", "result": "status=ready-no-compat"}])
+    assert result["accepted"] is True
+    assert result["semantic_quality_warnings"][0]["error_code"] == "UNLINKED_GOAL_ITEM"
 
 
-def test_shorthand_result_rejects_goal_item_not_selected_for_current_patchlet():
-    result = _normalize([{"goal_item": "GI002", "result": "mode=strict"}])
-    assert result["accepted"] is False
-    assert result["rejected_raw_claims"][0]["error_code"] == "FUTURE_GOAL_ITEM"
+def test_shorthand_result_warns_for_goal_item_not_selected_for_current_patchlet():
+    result = _normalize([{"goal_item_id": "GI002", "result": "mode=strict"}])
+    assert result["accepted"] is True
+    assert result["semantic_quality_warnings"][0]["error_code"] == "FUTURE_GOAL_ITEM"
 
 
-def test_shorthand_result_rejects_future_goal_item():
-    result = _normalize([{"goal": "GI002", "result": "mode changed to strict"}])
-    assert result["accepted"] is False
-    assert result["rejected_raw_claims"][0]["goal_item_id"] == "GI002"
+def test_shorthand_result_warns_for_future_goal_item():
+    result = _normalize([{"goal_item_id": "GI002", "result": "mode changed to strict"}])
+    assert result["accepted"] is True
+    assert result["semantic_quality_warnings"][0]["goal_item_id"] == "GI002"
 
 
-def test_shorthand_result_rejects_vague_result_text():
-    result = _normalize([{"goal_item": "GI001", "result": "done"}])
-    assert result["accepted"] is False
-    assert result["rejected_raw_claims"][0]["error_code"] == "VAGUE_RESULT_TEXT"
+def test_shorthand_result_warns_for_vague_result_text():
+    result = _normalize([{"goal_item_id": "GI001", "result": "done"}])
+    assert result["accepted"] is True
+    assert result["semantic_quality_warnings"][0]["error_code"] == "VAGUE_RESULT_TEXT"
 
 
-def test_shorthand_result_rejects_claim_that_future_slices_were_completed():
-    result = _normalize([{"goal_item": "GI001", "result": "all five settings updated"}])
-    assert result["accepted"] is False
-    assert result["rejected_raw_claims"][0]["error_code"] == "FUTURE_SLICE_CLAIM"
+def test_shorthand_result_warns_for_claim_that_future_slices_were_completed():
+    result = _normalize([{"goal_item_id": "GI001", "result": "all five settings updated"}])
+    assert result["accepted"] is True
+    assert result["semantic_quality_warnings"][0]["error_code"] == "FUTURE_SLICE_CLAIM"
 
 
 def test_shorthand_result_accepts_text_that_mentions_current_slice_boundary():
-    result = _normalize([{"goal_item": "GI001", "result": "status moved from pending to ready-no-compat"}])
+    result = _normalize([{"goal_item_id": "GI001", "result": "status moved from pending to ready-no-compat"}])
     assert result["accepted"] is True
     assert result["accepted_raw_claims"][0]["safety"]["mentions_current_boundary"] is True
 
 
 def test_shorthand_result_schema_validation_passes_after_normalization():
-    result = _normalize([{"goal_item": "GI001", "result": "status=ready-no-compat"}])
+    result = _normalize([{"goal_item_id": "GI001", "result": "status=ready-no-compat"}])
     assert result["kind"] == "semantic_goal_results_normalization_result"
     assert result["accepted"] is True
 
 
 def test_route_style_shorthand_mentions_current_boundary_by_file_route_and_target():
     result = _normalize_route([
-        {"goal_item": "GI001", "result": "Updated gateway.routes only; /health now routes to ready-health."}
+        {"goal_item_id": "GI001", "result": "Updated gateway.routes only; /health now routes to ready-health."}
     ])
     assert result["accepted"] is True
     match = result["accepted_raw_claims"][0]["boundary_evidence_match"]
@@ -179,32 +196,32 @@ def test_route_style_shorthand_mentions_current_boundary_by_file_route_and_targe
 
 def test_route_style_shorthand_mentions_current_boundary_by_route_and_target_without_exact_line():
     result = _normalize_route([
-        {"goal_item": "GI001", "result": "/health now routes to ready-health without touching other files."}
+        {"goal_item_id": "GI001", "result": "/health now routes to ready-health without touching other files."}
     ])
     assert result["accepted"] is True
 
 
 def test_route_style_shorthand_preserves_raw_worker_output():
-    raw = {"goal_item": "GI001", "result": "Updated gateway.routes only; /health now routes to ready-health."}
+    raw = {"goal_item_id": "GI001", "result": "Updated gateway.routes only; /health now routes to ready-health."}
     result = _normalize_route([raw])
     assert result["accepted_raw_claims"][0]["raw_item"] == raw
 
 
-def test_route_style_shorthand_rejects_vague_route_claim():
-    result = _normalize_route([{"goal_item": "GI001", "result": "fixed"}])
-    assert result["accepted"] is False
-    assert result["rejected_raw_claims"][0]["error_code"] == "VAGUE_RESULT_TEXT"
+def test_route_style_shorthand_warns_for_vague_route_claim():
+    result = _normalize_route([{"goal_item_id": "GI001", "result": "fixed"}])
+    assert result["accepted"] is True
+    assert result["semantic_quality_warnings"][0]["error_code"] == "VAGUE_RESULT_TEXT"
 
 
-def test_route_style_shorthand_rejects_future_file_claims():
+def test_route_style_shorthand_warns_for_future_file_claims():
     result = _normalize_route([
-        {"goal_item": "GI001", "result": "gateway.routes is done and policy.rules default_action=deny is also complete."}
+        {"goal_item_id": "GI001", "result": "gateway.routes is done and policy.rules default_action=deny is also complete."}
     ])
-    assert result["accepted"] is False
-    assert result["rejected_raw_claims"][0]["error_code"] == "FUTURE_SLICE_CLAIM"
+    assert result["accepted"] is True
+    assert result["semantic_quality_warnings"][0]["error_code"] == "FUTURE_SLICE_CLAIM"
 
 
-def test_route_style_shorthand_rejects_future_route_claims():
+def test_route_style_shorthand_warns_for_future_route_claims():
     ctx = _route_ctx()
     ctx["proof_obligations"]["obligations"].append(
         {
@@ -217,11 +234,11 @@ def test_route_style_shorthand_rejects_future_route_claims():
     )
     ctx["slice_change_boundary"] = {"forbidden_future_proof_obligation_ids": ["PO003"]}
     result = normalize_semantic_goal_results(
-        raw_items=[{"goal_item": "GI001", "result": "/health routes to ready-health and /api -> ready-api is complete."}],
+        raw_items=[{"goal_item_id": "GI001", "result": "/health routes to ready-health and /api -> ready-api is complete."}],
         **ctx,
     )
-    assert result["accepted"] is False
-    assert result["rejected_raw_claims"][0]["error_code"] == "FUTURE_SLICE_CLAIM"
+    assert result["accepted"] is True
+    assert result["semantic_quality_warnings"][0]["error_code"] == "FUTURE_SLICE_CLAIM"
 
 
 def test_section_style_shorthand_mentions_current_boundary():
@@ -235,7 +252,7 @@ def test_section_style_shorthand_mentions_current_boundary():
     ctx["proof_obligations"]["obligations"][0]["claim"] = "The accepted state has policy.bundle runtime mode strict."
     ctx["probe_plan"]["probes"][0]["expected_observation"]["value"] = "mode=strict"
     result = normalize_semantic_goal_results(
-        raw_items=[{"goal_item": "GI001", "result": "runtime mode is now strict in policy.bundle"}],
+        raw_items=[{"goal_item_id": "GI001", "result": "runtime mode is now strict in policy.bundle"}],
         **ctx,
     )
     assert result["accepted"] is True
@@ -251,7 +268,7 @@ def test_line_exact_shorthand_mentions_current_boundary():
     ctx["proof_obligations"]["obligations"][0]["claim"] = "The accepted state contains owner: platform."
     ctx["probe_plan"]["probes"][0]["expected_observation"]["value"] = "owner: platform"
     result = normalize_semantic_goal_results(
-        raw_items=[{"goal_item": "GI001", "result": "owner: platform is present in ownership.record"}],
+        raw_items=[{"goal_item_id": "GI001", "result": "owner: platform is present in ownership.record"}],
         **ctx,
     )
     assert result["accepted"] is True
@@ -259,7 +276,7 @@ def test_line_exact_shorthand_mentions_current_boundary():
 
 def test_boundary_matcher_uses_patchlet_plan_not_hardcoded_filename():
     result = normalize_semantic_goal_results(
-        raw_items=[{"goal_item": "GI001", "result": "control.plan has lane=open now"}],
+        raw_items=[{"goal_item_id": "GI001", "result": "control.plan has lane=open now"}],
         patchlet_id="P0101",
         work_slice_id="WS101",
         selected_goal_item_ids=["GI001"],
@@ -274,7 +291,7 @@ def test_boundary_matcher_uses_patchlet_plan_not_hardcoded_filename():
 
 def test_boundary_matcher_second_fixture_different_names_and_extensions():
     result = normalize_semantic_goal_results(
-        raw_items=[{"goal_item": "GI001", "result": "rollout.table now contains ring alpha"}],
+        raw_items=[{"goal_item_id": "GI001", "result": "rollout.table now contains ring alpha"}],
         patchlet_id="P0101",
         work_slice_id="WS101",
         selected_goal_item_ids=["GI001"],
@@ -342,7 +359,7 @@ def _scenario3_p0002_ctx():
 
 def _normalize_scenario3(text: str):
     return normalize_semantic_goal_results(
-        raw_items=[{"goal_item": "GI002", "result": text}],
+        raw_items=[{"goal_item_id": "GI002", "result": text}],
         **_scenario3_p0002_ctx(),
     )
 
@@ -376,14 +393,14 @@ def test_scenario3_p0002_strict_mode_claim_does_not_mention_future_boundary():
 
 def test_scenario3_future_event_logging_claim_is_rejected():
     result = _normalize_scenario3("policy.bundle event_logging=on is also complete")
-    assert result["accepted"] is False
-    assert result["rejected_raw_claims"][0]["error_code"] == "FUTURE_SLICE_CLAIM"
+    assert result["accepted"] is True
+    assert result["semantic_quality_warnings"][0]["error_code"] == "FUTURE_SLICE_CLAIM"
 
 
 def test_scenario3_vague_fixed_claim_is_rejected():
     result = _normalize_scenario3("fixed")
-    assert result["accepted"] is False
-    assert result["rejected_raw_claims"][0]["error_code"] == "VAGUE_RESULT_TEXT"
+    assert result["accepted"] is True
+    assert result["semantic_quality_warnings"][0]["error_code"] == "VAGUE_RESULT_TEXT"
 
 
 def test_short_future_value_on_regression_in_ingestion_path():

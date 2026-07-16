@@ -95,41 +95,16 @@ Workers edit product/runtime files only in `CXOR_EXECUTION_ROOT`.
 root remains writable only for `.codex-orchestrator/` and `.artifacts/probes/`
 evidence.
 
-Workers may leave root-level scratch artifacts such as `report_check.out` while
-checking reports. Recognized scratch artifacts are quarantined, not silently
-deleted, under the attempt run directory. The quarantine result records original
-path, quarantine path, sha256, size, content type, and reason. After quarantine,
-cxor recomputes the product diff before applying the one-file rule and
-slice-boundary guard. Unknown root product/runtime files and executable root
-files remain rejected.
+Every write-capable real-Codex worker runs in a disposable sandbox. The
+deterministic allowlist is the only product boundary. All in-sandbox
+non-allowlisted outputs are sandbox debris, including hidden runtime state,
+tracked peer changes, caches, temporary output, and checkout-local artifacts.
 
-Every real-Codex patchlet attempt exposes a worker scratch directory:
-`.codex-orchestrator/runs/<attempt>/worker_scratch/`. Prompt and memory artifacts
-say: Do not write scratch/check/validation files in the target repository root.
-The orchestrator still performs a root scratch sweep after worker exit, using
-role-based quarantine for report/probe validation-shaped files and writing
-`root_scratch_sweep_result.json`. Only role-shaped untracked worker scratch
-directories are eligible for quarantine. Not all directories are allowed. Not
-all scratch directories are allowed. Tracked `worker_scratch` content is
-rejected. Executable scratch content is rejected. Changed peer product files
-remain rejected. Directory quarantine preserves hashes and metadata, and
-changed paths are recomputed after quarantine.
-
-Patchlet-prefixed report formatting scratch is a narrow worker-scratch shape,
-not a broad filename exception. The root file must be untracked,
-non-executable, text/JSON-like, patchlet-prefixed, report-role shaped, and
-formatting/check/output-role shaped before quarantine. Not all JSON files are
-allowed. Not all pretty files are allowed. Product/runtime files remain
-rejected, changed peer product files remain rejected, quarantine preserves
-content and hash metadata, and the diff is recomputed after quarantine.
-
-The sweep and diff guard use actual changed/untracked paths, not file presence.
-Unchanged peer product files are ignored because presence is not a change.
-Changed peer product files are rejected, and role-shaped validation scratch such
-as `validate_report.out` is quarantined only after scratch safety checks pass.
-The allowed file from the patchlet plan is authoritative, not filename
-convention. Non-scenario names such as `control.plan`, `rollout.table`, and
-`verify_result.log` follow the same changed-path and scratch-role rules.
+Sandbox debris never blocks promotion. It is inventoried for diagnostics,
+excluded from the canonical patch, and discarded. Only valid allowlisted files
+are reconstructed for independent proof. Containment escape remains blocking,
+as do invalid allowlisted paths and failures in reconstruction, proof, coverage,
+or canonical semantic acceptance.
 
 The final Markdown report must contain a canonical `FINAL_STATUS` marker as a
 standalone line beginning at column 1. Accepted lines are `FINAL_STATUS: PASS`,
@@ -419,3 +394,16 @@ remain targetable only when explicitly planned, and each independently provable
 slice carries one goal, one proof obligation, and one probe. Multiple patchlets
 may target one file when the plan contains multiple independent same-file
 slices. Unresolved mappings are safe pre-worker failures.
+
+## Worker Scratch Contract
+
+Every real-Codex attempt receives an absolute `$CXOR_WORKER_SCRATCH_DIR`.
+Temporary validation output, formatter output, caches, intermediate JSON,
+command transcripts, generated manifests, and disposable files must stay under
+that directory. The worker environment routes `TMPDIR`, `TMP`, `TEMP`,
+`XDG_CACHE_HOME`, and `PYTHONPYCACHEPREFIX` beneath the scratch root.
+
+Scratch-directory guidance helps workers keep diagnostics organized, but it
+does not change acceptance. Any non-allowlisted path that remains inside the
+sandbox is non-authoritative debris. Boundary escapes are containment failures;
+independent proof still runs only against the clean canonical reconstruction.

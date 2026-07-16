@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 import subprocess
 from pathlib import Path
@@ -21,9 +20,9 @@ from codex_orchestrator.stages.plan_repair import plan_repair
 from codex_orchestrator.stages.regenerate_patchlets import regenerate_patchlets
 from codex_orchestrator.stages.run_patchlet import run_next_patchlet
 from codex_orchestrator.stages.verify_global import verify_global
-from codex_orchestrator.state import load_state
 from codex_orchestrator.target_repo import resolve_target_repo
 from codex_orchestrator.validators.integration_artifact_validator import validate_integration_artifacts
+from codex_orchestrator.operator_events import read_operator_events
 
 
 def _write_verified_no_change_codex(path: Path, *, canonical: bool) -> None:
@@ -201,6 +200,20 @@ def test_fake_codex_canonical_marker_valid_report_is_accepted(git_repo: Path, tm
 
     assert result.status == "VERIFIED_NO_CHANGE_NEEDED"
     assert gate["accepted"] is True
+
+
+def test_fake_codex_canonical_marker_preserves_staged_evidence_with_operator_events(git_repo: Path, tmp_path: Path, monkeypatch):
+    ctx = _setup_ctx(git_repo, tmp_path, monkeypatch, canonical=True)
+
+    run_next_patchlet(ctx, worker_mode="real_codex", use_worktree=True)
+
+    preservation = read_json(
+        ctx.paths.runs_dir / "P0001_attempt1" / "gates" / "worker_evidence_preservation_result.json"
+    )
+    event_types = {row["event_type"] for row in read_operator_events(ctx.root)}
+    assert preservation["preservation_complete"] is True
+    assert preservation["authoritative_proof"] is False
+    assert {"worker_evidence_detected", "worker_evidence_preserved"}.issubset(event_types)
 
 
 def test_fake_codex_canonical_marker_does_not_enter_tg_repair_regeneration(git_repo: Path, tmp_path: Path, monkeypatch):

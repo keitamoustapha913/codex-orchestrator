@@ -6,10 +6,11 @@ import hashlib
 
 from codex_orchestrator.jsonio import read_json
 from codex_orchestrator.report_validation_errors import detail_from_jsonschema_error, report_validation_error_detail
+from codex_orchestrator.report_contract import contract_drift_errors
 from codex_orchestrator.semantic_goals import load_semantic_goal_spec, required_structured_criteria
 
 from .probe_artifact_validator import validate_probe_artifact_run
-from .schema_validator import iter_jsonschema_errors, validate_json
+from .schema_validator import iter_jsonschema_errors
 
 
 class ReportValidationError(Exception):
@@ -174,9 +175,13 @@ def _semantic_goal_result_errors(report: dict, *, repo_root: Path | None) -> lis
 
 
 def validate_patchlet_report_structured(report: dict, patchlet: dict | None = None, *, repo_root: Path | None = None) -> dict[str, Any]:
+    contract_errors = contract_drift_errors()
+    if contract_errors:
+        errors = [_error("report_contract", message, signature="WORKER_REPORT_CONTRACT_DRIFT") for message in contract_errors]
+        return {"valid": False, "errors": errors, "message": "; ".join(error["message"] for error in errors)}
     structured = [
         detail_from_jsonschema_error(error, error_id=f"RVE{index:06d}", patchlet_id=report.get("patchlet_id") or (patchlet or {}).get("patchlet_id"))
-        for index, error in enumerate(iter_jsonschema_errors(report, "patchlet_report.schema.json"), start=1)
+        for index, error in enumerate(iter_jsonschema_errors(report, "worker_patchlet_report_v2.schema.json" if report.get("schema_version") == "2.0" else "patchlet_report.schema.json"), start=1)
     ]
     if structured:
         return {"valid": False, "errors": structured, "message": "; ".join(error["message"] for error in structured)}
@@ -211,7 +216,7 @@ def validate_patchlet_report_structured(report: dict, patchlet: dict | None = No
     if status == "COMPLETE":
         if not _nonempty(report.get("changed_product_runtime_file")):
             semantic_errors.append(_error("changed_product_runtime_file", "COMPLETE requires changed_product_runtime_file"))
-        if report.get("acceptance_criteria_result") != "pass":
+        if report.get("schema_version") != "2.0" and report.get("acceptance_criteria_result") != "pass":
             semantic_errors.append(_error("acceptance_criteria_result", "COMPLETE requires acceptance_criteria_result=pass"))
         if not _nonempty(run_counts.get("proof_of_fix")):
             semantic_errors.append(_error("deterministic_run_counts", "COMPLETE requires proof_of_fix deterministic run count"))
@@ -222,11 +227,11 @@ def validate_patchlet_report_structured(report: dict, patchlet: dict | None = No
     if status == "VERIFIED_NO_CHANGE_NEEDED":
         if report.get("changed_product_runtime_file") is not None:
             semantic_errors.append(_error("changed_product_runtime_file", "VERIFIED_NO_CHANGE_NEEDED cannot include a product/runtime diff"))
-        if report.get("acceptance_criteria_result") != "pass":
+        if report.get("schema_version") != "2.0" and report.get("acceptance_criteria_result") != "pass":
             semantic_errors.append(_error("acceptance_criteria_result", "VERIFIED_NO_CHANGE_NEEDED requires acceptance_criteria_result=pass"))
 
     if status == "BLOCKED_WITH_EVIDENCE":
-        if report.get("acceptance_criteria_result") != "blocked":
+        if report.get("schema_version") != "2.0" and report.get("acceptance_criteria_result") != "blocked":
             semantic_errors.append(_error("acceptance_criteria_result", "BLOCKED_WITH_EVIDENCE requires acceptance_criteria_result=blocked"))
         if not _nonempty(root.get("observed_failure")):
             semantic_errors.append(_error("root_cause_classification", "BLOCKED_WITH_EVIDENCE requires observed_failure evidence"))
@@ -234,7 +239,7 @@ def validate_patchlet_report_structured(report: dict, patchlet: dict | None = No
             semantic_errors.append(_error("blocking_boundary_reason", "BLOCKED_WITH_EVIDENCE requires blocking_boundary_reason"))
 
     if status == "FAILED_WITH_EVIDENCE":
-        if report.get("acceptance_criteria_result") != "fail":
+        if report.get("schema_version") != "2.0" and report.get("acceptance_criteria_result") != "fail":
             semantic_errors.append(_error("acceptance_criteria_result", "FAILED_WITH_EVIDENCE requires acceptance_criteria_result=fail"))
         if not _nonempty(root.get("observed_failure")):
             semantic_errors.append(_error("root_cause_classification", "FAILED_WITH_EVIDENCE requires observed_failure evidence"))

@@ -8,9 +8,11 @@ from codex_orchestrator.codex_execution_policy import resolve_patchlet_timeout_s
 from codex_orchestrator.jsonio import read_json, write_json
 from codex_orchestrator.operator_events import append_operator_event
 from codex_orchestrator.patchlet_planner import validate_patchlet_plan
+from codex_orchestrator.patchlet_probe_mapping import PatchletProbeMappingError, resolve_patchlet_probe_ids
 from codex_orchestrator.prompt_index import upsert_prompt_index_entry
 from codex_orchestrator.state import load_state, transition
 from codex_orchestrator.target_repo import TargetRepoContext
+from codex_orchestrator.worker_evidence import render_worker_evidence_prompt_contract
 
 
 def _slug(path: str) -> str:
@@ -191,6 +193,12 @@ def _write_patchlet_subprompt(
     work_slice_id = patchlet.get("work_slice_id")
     dependency_ids = patchlet.get("dependency_patchlet_ids", [])
     boundary_section = _slice_boundary_prompt_section(patchlet)
+    evidence_contract_section = render_worker_evidence_prompt_contract(
+        patchlet=patchlet,
+        attempt_id="run_001",
+        evidence_dir="$CXOR_WORKER_EVIDENCE_DIR",
+        scratch_dir="$CXOR_WORKER_SCRATCH_DIR",
+    )
     subprompt.write_text(
         f"# Root-Cause Patchlet {patchlet_id}\n\n"
         "This patchlet is a small bounded work unit.\n\n"
@@ -204,6 +212,7 @@ def _write_patchlet_subprompt(
         f"Goal items: {', '.join(patchlet.get('goal_item_ids', [])) or 'none'}\n\n"
         f"{boundary_section}"
         f"Scope statement: {patchlet.get('scope_statement') or 'Only perform this bounded slice.'}\n\n"
+        f"{evidence_contract_section}"
         "Do not attempt to solve unrelated work slices.\n\n"
         "Do not edit any product/runtime file except the single allowed file.\n\n"
         "Do not create root-level scratch/check files such as `.report_check.json`; use `/tmp` for scratch checks.\n\n"
@@ -212,11 +221,12 @@ def _write_patchlet_subprompt(
         "If blocked, write BLOCKED_WITH_EVIDENCE with the specific missing dependency or proof obstacle.\n\n"
         f"{semantic_section}"
         "## ROOT-CAUSE PROBE-ONLY INVESTIGATION\n\n"
-        f"First create and run a minimal direct runtime probe under `.artifacts/probes/{patchlet_id}/`. "
+        f"First create and run a minimal direct runtime probe with evidence under `$CXOR_WORKER_EVIDENCE_DIR/{patchlet['probe_ids'][0]}/run_001/`. "
         "Do not edit product/runtime code during this investigation gate.\n\n"
-        "## Durable probe artifacts\n\n"
-        f"Write durable probe artifacts under `.artifacts/probes/{patchlet_id}/run_001/`, including "
+        "## Staged probe evidence\n\n"
+        f"Write probe evidence under `$CXOR_WORKER_EVIDENCE_DIR/{patchlet['probe_ids'][0]}/run_001/`, including "
         "`row_ledger.jsonl`, `trace_ledger.jsonl`, `before_state.json`, `after_state.json`, and `cleanup_proof.json`.\n\n"
+        "Do not create `.artifacts/probes` inside the Git checkout; the orchestrator validates and preserves staged evidence.\n\n"
         "## TDD checklist\n\n"
         "1. Write or identify the failing test first.\n"
         "2. Run the focused red test before editing the allowed product/runtime file.\n"
@@ -296,6 +306,12 @@ def _compile_from_patchlet_plan(
             "downstream_patchlet_ids": list(planned.get("downstream_patchlet_ids", [])),
             "work_slice_id": planned.get("work_slice_id"),
             "proof_obligation_ids": list(planned.get("proof_obligation_ids", [])),
+            "probe_ids": resolve_patchlet_probe_ids(
+                planned,
+                probe_plan=read_json(ctx.paths.workflow_dir / "probe_plan.json")
+                if (ctx.paths.workflow_dir / "probe_plan.json").exists()
+                else None,
+            ),
             "goal_item_ids": list(planned.get("goal_item_ids", [])),
             "time_budget_seconds": planned.get("time_budget_seconds", timeout_seconds),
             "prompt_budget_policy": planned.get("prompt_budget_policy", {}),
@@ -423,16 +439,38 @@ def compile_patchlets(ctx: TargetRepoContext) -> dict:
         state.pending_patchlets = []
         transition(ctx, state, "FAILURE_CLASSIFICATION_REQUIRED", reason="decomposition_mapping_rejected")
         return index
-    patchlets, transaction_groups = _compile_from_patchlet_plan(
-        ctx,
-        patchlet_plan=patchlet_plan,
-        invariants=invariants,
-        existing_patchlets=existing_patchlets,
-        semantic_criteria=semantic_criteria,
-        timeout_seconds=timeout_seconds,
-        soft_deadline=soft_deadline,
-        real_codex_contract=real_codex_contract,
-    )
+    try:
+        patchlets, transaction_groups = _compile_from_patchlet_plan(
+            ctx,
+            patchlet_plan=patchlet_plan,
+            invariants=invariants,
+            existing_patchlets=existing_patchlets,
+            semantic_criteria=semantic_criteria,
+            timeout_seconds=timeout_seconds,
+            soft_deadline=soft_deadline,
+            real_codex_contract=real_codex_contract,
+        )
+    except PatchletProbeMappingError as exc:
+        append_operator_event(
+            ctx.root,
+            event_type="patchlet_probe_mapping_rejected",
+            severity="error",
+            stage="PATCHLET_COMPILATION_REQUIRED",
+            summary="Patchlet compilation blocked: no deterministic mapped probe is available.",
+            artifact_paths=[".codex-orchestrator/decomposition/patchlet_probe_mapping_failure.json"],
+            details=exc.details,
+        )
+        write_json(
+            _decomposition_dir(ctx) / "patchlet_probe_mapping_failure.json",
+            {"schema_version": "1.0", "kind": "patchlet_probe_mapping_failure", **exc.details},
+        )
+        index = {"schema_version": "1.0", "kind": "patchlet_index", "patchlets": []}
+        write_json(ctx.paths.patchlet_index, index)
+        write_json(ctx.paths.transaction_groups, {"schema_version": "1.0", "kind": "transaction_groups", "transaction_groups": []})
+        state = load_state(ctx)
+        state.pending_patchlets = []
+        transition(ctx, state, "FAILURE_CLASSIFICATION_REQUIRED", reason=exc.details["failure_signature"])
+        return index
 
     for patchlet_id, patchlet in existing_patchlets.items():
         if patchlet_id.startswith("P") and patchlet not in patchlets and patchlet.get("is_repair_patchlet"):

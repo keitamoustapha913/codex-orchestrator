@@ -6,7 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from codex_orchestrator.errors import WorkerExecutionError
+from codex_orchestrator.errors import WorkerExecutionError, WorkerPreconditionError
+from codex_orchestrator.jsonio import read_json, write_json
 from codex_orchestrator.stages.build_inventory import build_inventory
 from codex_orchestrator.stages.census import run_census
 from codex_orchestrator.stages.classify_evidence import classify_evidence
@@ -115,3 +116,30 @@ def test_worker_events_reference_capsule_manifest(git_repo: Path):
     events = _read_events(ctx.paths.runs_dir / "P0001_attempt1" / "worker_hooks" / "events.jsonl")
     assert events
     assert all(event["worker_capsule_manifest"] == ".codex-orchestrator/runs/P0001_attempt1/worker_capsule.json" for event in events)
+
+
+def test_patchlet_without_work_slice_id_fails_before_worker_launch(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    ctx = _compiled_ctx(git_repo)
+    index = read_json(ctx.paths.patchlet_index)
+    index["patchlets"][0].pop("work_slice_id")
+    write_json(ctx.paths.patchlet_index, index)
+    launched = False
+
+    class NeverLaunchWorker:
+        def run_patchlet(self, *_args, **_kwargs):
+            nonlocal launched
+            launched = True
+            raise AssertionError("worker must not launch")
+
+    monkeypatch.setattr(
+        "codex_orchestrator.stages.run_patchlet.worker_for_mode",
+        lambda _mode: NeverLaunchWorker(),
+    )
+
+    with pytest.raises(WorkerPreconditionError, match="work_slice_id"):
+        run_next_patchlet(ctx, worker_mode="mock", use_worktree=True)
+
+    assert launched is False

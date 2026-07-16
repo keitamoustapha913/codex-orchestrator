@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "worker_evidence_contract",
+  "type": "object",
+  "required": ["schema_version", "kind", "patchlet_id", "attempt_id", "staging_root", "allowed_probe_ids", "maximum_file_count", "maximum_total_bytes", "maximum_single_file_bytes", "maximum_depth", "allowed_object_types"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "kind": {"const": "worker_evidence_contract"},
+    "patchlet_id": {"type": "string", "minLength": 1},
+    "attempt_id": {"type": "string", "minLength": 1},
+    "staging_root": {"type": "string", "pattern": "^/"},
+    "allowed_probe_ids": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+    "maximum_file_count": {"type": "integer", "minimum": 1},
+    "maximum_total_bytes": {"type": "integer", "minimum": 1},
+    "maximum_single_file_bytes": {"type": "integer", "minimum": 1},
+    "maximum_depth": {"type": "integer", "minimum": 1},
+    "allowed_object_types": {"const": ["regular_file"]}
+  },
+  "additionalProperties": false
+}

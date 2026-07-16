@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "worker_sandbox_disposal_result",
+  "type": "object",
+  "required": ["candidate_scope", "schema_version", "kind", "patchlet_id", "attempt_id", "sandbox_root", "attempt_result", "promotion_result", "evidence_retained", "excluded_debris_metadata_retained", "sandbox_archived", "cleanup_attempted", "cleanup_succeeded", "remaining_path_exists", "errors"],
+  "properties": {
+    "candidate_scope": {"const": "raw_worker_sandbox"},
+    "schema_version": {"const": "1.0"},
+    "kind": {"const": "worker_sandbox_disposal_result"},
+    "patchlet_id": {"type": "string"},
+    "attempt_id": {"type": "string"},
+    "sandbox_root": {"type": ["string", "null"]},
+    "attempt_result": {"enum": ["accepted", "rejected"]},
+    "promotion_result": {"type": "boolean"},
+    "evidence_retained": {"type": "boolean"},
+    "excluded_debris_metadata_retained": {"type": "boolean"},
+    "sandbox_archived": {"type": "boolean"},
+    "cleanup_attempted": {"type": "boolean"},
+    "cleanup_succeeded": {"type": "boolean"},
+    "remaining_path_exists": {"type": "boolean"},
+    "errors": {"type": "array", "items": {"type": "string"}}
+  },
+  "additionalProperties": false
+}

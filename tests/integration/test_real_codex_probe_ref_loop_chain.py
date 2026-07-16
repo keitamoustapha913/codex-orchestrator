@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 
 from conftest import read_json
@@ -114,11 +115,15 @@ def test_fake_real_codex_repair_prompt_contains_object_ref_example(git_repo: Pat
     assert '"probe_root": ".artifacts/probes/P0001"' in (ctx.paths.runs_dir / "P0001_attempt1/worker_memory/REPORT_SCHEMA_CONTRACT.md").read_text(encoding="utf-8")
 
 
-def test_fake_real_codex_product_failure_still_routes_to_full_repair(git_repo: Path):
+def test_fake_real_codex_peer_debris_does_not_route_to_repair(git_repo: Path):
     ctx = _ctx(git_repo)
+    other = ctx.root / "other.py"
+    other.write_text("baseline = True\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(ctx.root), "add", "other.py"], check=True)
+    subprocess.run(["git", "-C", str(ctx.root), "commit", "-m", "add tracked unauthorized file"], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     p = ctx.paths.workflow_dir / "mock" / "next_patchlet_result.json"
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(json.dumps({"unauthorized_files": {"other.py": "x"}}), encoding="utf-8")
-    run_next_patchlet(ctx, worker_mode="mock", use_worktree=True)
-    failure = read_json(ctx.paths.failures_dir / "F0001.json")
-    assert "failure_signature" not in failure
+    result = run_next_patchlet(ctx, worker_mode="mock", use_worktree=True)
+    assert result.status in {"COMPLETE", "VERIFIED_NO_CHANGE_NEEDED"}
+    assert not (ctx.paths.failures_dir / "F0001.json").exists()

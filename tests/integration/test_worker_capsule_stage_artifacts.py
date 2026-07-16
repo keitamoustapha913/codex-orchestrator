@@ -51,7 +51,8 @@ def test_worker_stage_preflight_template_mentions_allowed_file_and_report_path(g
     text = (ctx.paths.runs_dir / "P0001_attempt1" / "worker_stage" / "00_preflight.md").read_text(encoding="utf-8")
     assert "app.py" in text
     assert ".codex-orchestrator/reports/P0001.json" in text
-    assert ".artifacts/probes/P0001" in text
+    assert "$CXOR_WORKER_EVIDENCE_DIR" in text
+    assert ".artifacts/probes/P0001" not in text
 
 
 def test_worker_stage_probe_plan_template_mentions_root_cause_requirements(git_repo: Path):

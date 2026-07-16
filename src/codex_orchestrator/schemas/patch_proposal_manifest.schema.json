@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "patch_proposal_manifest",
+  "type": "object",
+  "required": ["candidate_scope", "schema_version", "kind", "patchlet_id", "attempt_id", "accepted_checkpoint_commit", "accepted_checkpoint_tree", "patch_path", "patch_sha256", "patch_size_bytes", "changed_paths", "goal_item_ids", "proof_obligation_ids", "probe_ids", "excluded_sandbox_paths", "worker_hygiene_status"],
+  "properties": {
+    "candidate_scope": {"const": "patch_proposal"},
+    "schema_version": {"const": "1.0"},
+    "kind": {"const": "patch_proposal_manifest"},
+    "patchlet_id": {"type": "string"},
+    "attempt_id": {"type": "string"},
+    "accepted_checkpoint_commit": {"type": "string"},
+    "accepted_checkpoint_tree": {"type": "string"},
+    "patch_path": {"type": "string"},
+    "patch_sha256": {"type": "string"},
+    "patch_size_bytes": {"type": "integer", "minimum": 0},
+    "changed_paths": {"type": "array", "items": {"type": "object"}},
+    "goal_item_ids": {"type": "array", "items": {"type": "string"}},
+    "proof_obligation_ids": {"type": "array", "items": {"type": "string"}},
+    "probe_ids": {"type": "array", "items": {"type": "string"}},
+    "current_slice_boundary": {},
+    "future_slice_boundaries": {"type": "array"},
+    "excluded_sandbox_paths": {"type": "array", "items": {"type": "string"}},
+    "worker_hygiene_status": {"enum": ["CLEAN", "DEBRIS_PRESENT", "ALLOWED_PATH_VIOLATION", "CONTAINMENT_VIOLATION"]}
+    ,"canonical_patch_path_count": {"type": "integer", "minimum": 0}
+  },
+  "additionalProperties": false
+}

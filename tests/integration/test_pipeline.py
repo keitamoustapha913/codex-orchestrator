@@ -40,10 +40,12 @@ def setup_unauthorized_diff_failure_ctx(git_repo: Path):
     build_inventory(ctx)
     extract_invariants(ctx)
     compile_patchlets(ctx)
+    patchlet_index = read_json(ctx.paths.patchlet_index)
+    patchlet_index["patchlets"][0]["required_allowed_product_change"] = True
+    ctx.paths.patchlet_index.write_text(json.dumps(patchlet_index), encoding="utf-8")
     mock_dir = ctx.paths.workflow_dir / "mock"
     mock_dir.mkdir(parents=True)
     (mock_dir / "next_patchlet_result.json").write_text(json.dumps({
-        "unauthorized_files": {"other.py": "bad = True\n"},
         "status": "COMPLETE",
     }), encoding="utf-8")
     result = run_next_patchlet(ctx, worker_mode="mock")
@@ -87,10 +89,12 @@ def setup_compiled_patchlets_ctx(git_repo: Path):
 
 def setup_done_ctx(git_repo: Path):
     ctx = setup_compiled_patchlets_ctx(git_repo)
+    patchlet_index = read_json(ctx.paths.patchlet_index)
+    patchlet_index["patchlets"][0]["required_allowed_product_change"] = True
+    ctx.paths.patchlet_index.write_text(json.dumps(patchlet_index), encoding="utf-8")
     mock_dir = ctx.paths.workflow_dir / "mock"
     mock_dir.mkdir(parents=True, exist_ok=True)
     (mock_dir / "next_patchlet_result.json").write_text(json.dumps({
-        "unauthorized_files": {"other.py": "bad = True\n"},
         "status": "COMPLETE",
         "consume_after_run": True,
     }), encoding="utf-8")
