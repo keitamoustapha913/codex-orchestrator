@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from codex_orchestrator.jsonio import write_json
 from codex_orchestrator.report_contract import contract_fingerprint
 from codex_orchestrator.report_production import (
@@ -12,6 +14,7 @@ from codex_orchestrator.report_production import (
     validate_task_completion_handoff,
     verify_report_production_output_boundary,
 )
+from codex_orchestrator.worker_capsule import task_completion_handoff_contract_text
 
 
 def _handoff(path: Path, **overrides) -> Path:
@@ -56,10 +59,44 @@ def _context(handoff: Path) -> dict:
         "patchlet_id": "P0001",
         "attempt_id": "P0001_attempt1",
         "allowed_product_runtime_file": "profile.awk",
+        "target_repo_root": str(handoff.parent),
         "work_slice_id": "WS001",
         "goal_item_ids": ["GI001"],
         "proof_obligation_ids": ["PO001"],
         "probe_ids": ["GP001"],
+        "slice_change_boundary": {
+            "current_boundary": {
+                "file": "profile.awk",
+                "goal_item_id": "GI001",
+                "goal_item_ids": ["GI001"],
+                "proof_obligation_id": "PO001",
+                "probe_ids": ["GP001"],
+                "symbol": "profile_alpha",
+                "expected_observation": "new-profile",
+            },
+            "forbidden_future_goal_item_ids": [],
+            "forbidden_future_proof_obligation_ids": [],
+        },
+        "proof_obligations": {
+            "obligations": [
+                {
+                    "obligation_id": "PO001",
+                    "goal_item_ids": ["GI001"],
+                    "claim": "profile.awk profile_alpha=new-profile",
+                    "expected": "profile_alpha=new-profile",
+                    "target_boundaries": ["profile.awk"],
+                }
+            ]
+        },
+        "probe_plan": {
+            "probes": [
+                {
+                    "probe_id": "GP001",
+                    "obligation_ids": ["PO001"],
+                    "command": "awk -f profile.awk -f test/probe1.awk",
+                }
+            ]
+        },
         "contract_fingerprint": contract_fingerprint(),
         "task_handoff_sha256": hashlib.sha256(handoff.read_bytes()).hexdigest(),
         "candidate_patch_sha256": "1" * 64,
@@ -67,6 +104,8 @@ def _context(handoff: Path) -> dict:
 
 
 def _evidence(tmp_path: Path, *, status: str = "CAPTURED") -> tuple[Path, Path]:
+    import hashlib
+
     inventory = tmp_path / "worker_evidence_inventory.json"
     preservation = tmp_path / "worker_evidence_preservation_result.json"
     write_json(
@@ -84,12 +123,15 @@ def _evidence(tmp_path: Path, *, status: str = "CAPTURED") -> tuple[Path, Path]:
     )
     files = []
     if status == "CAPTURED":
+        durable = tmp_path / ".artifacts/probes/P0001/run_001/proof_runs.jsonl"
+        durable.parent.mkdir(parents=True, exist_ok=True)
+        durable.write_text("diagnostic evidence\n", encoding="utf-8")
         files.append(
             {
                 "capture_status": "CAPTURED",
                 "diagnostic_alias_path": ".artifacts/probes/P0001/run_001/proof_runs.jsonl",
-                "diagnostic_alias_sha256": "a" * 64,
-                "size_bytes": 21,
+                "diagnostic_alias_sha256": hashlib.sha256(durable.read_bytes()).hexdigest(),
+                "size_bytes": durable.stat().st_size,
             }
         )
     write_json(preservation, {"files": files, "preservation_complete": True})
@@ -170,10 +212,12 @@ def test_report_producer_organizes_simple_task_diagnosis_into_v2_shape(tmp_path:
     assert root["recursive_why_audit"]
 
 
-def test_report_producer_organizes_unstructured_task_semantic_prose(tmp_path: Path):
+def test_report_producer_organizes_minimal_task_semantic_observation(tmp_path: Path):
     handoff = _handoff(
         tmp_path / "handoff.json",
-        semantic_goal_results=["profile.awk::SCB001 satisfies; verified by GP001"],
+        semantic_goal_results=[
+            {"goal_item_id": "GI001", "status": "satisfied", "evidence": "GP001"}
+        ],
     )
     inventory, preservation = _evidence(tmp_path)
 
@@ -190,14 +234,131 @@ def test_report_producer_organizes_unstructured_task_semantic_prose(tmp_path: Pa
     assert report["semantic_goal_results"] == [
         {
             "goal_item_id": "GI001",
-            "result": "profile.awk::SCB001 satisfies; verified by GP001",
+            "result": "GI001 task observation for profile.awk current slice profile_alpha=new-profile: status=satisfied; diagnostic evidence=GP001.",
         }
     ]
     trace = json.loads(
         (tmp_path / "production/attempt_1/report_production_trace.json").read_text()
     )
-    assert trace["semantic_organization_warnings"][0]["blocking"] is False
-    assert trace["semantic_organization_warnings"][0]["authoritative"] is False
+    assert trace["semantic_organization_warnings"] == [
+        {
+            "warning_code": "TASK_SEMANTIC_DIAGNOSTIC_ORGANIZED",
+            "raw_item_index": 0,
+            "blocking": False,
+            "authoritative": False,
+        }
+    ]
+    assert trace["semantic_results_authoritative"] is False
+
+
+def test_report_producer_preserves_only_canonical_semantic_shorthand_fields(tmp_path: Path):
+    handoff = _handoff(
+        tmp_path / "handoff.json",
+        semantic_goal_results=[
+            {
+                "goal_item_id": "GI001",
+                "result": "profile.awk profile_alpha=new-profile and GP001 passes.",
+                "status": "satisfied",
+                "evidence": "GP001",
+                "invented": "must not cross the reporting boundary",
+            }
+        ],
+        arbitrary_task_field={"invented": True},
+    )
+    inventory, preservation = _evidence(tmp_path)
+
+    result = launch_report_production_worker(
+        task_handoff_path=handoff,
+        context=_context(handoff),
+        evidence_inventory_path=inventory,
+        evidence_preservation_path=preservation,
+        output_dir=tmp_path / "production" / "attempt_1",
+    )
+
+    assert result["accepted"] is True
+    report = json.loads((tmp_path / "production/attempt_1" / REPORT_FILENAME).read_text())
+    assert report["semantic_goal_results"] == [
+        {
+            "goal_item_id": "GI001",
+            "result": "profile.awk profile_alpha=new-profile and GP001 passes.",
+        }
+    ]
+    assert "arbitrary_task_field" not in report
+
+
+@pytest.mark.parametrize(
+    ("semantic_items", "expected_code"),
+    [
+        ([{"goal_item": "GI001", "status": "satisfied"}], "TASK_COMPLETION_HANDOFF_FORBIDDEN_GOAL_ITEM_ALIAS"),
+        ([{"status": "satisfied", "evidence": "GP001"}], "TASK_COMPLETION_HANDOFF_MISSING_GOAL_ITEM_ID"),
+        ([{"goal_item_id": "GI001"}], "TASK_COMPLETION_HANDOFF_SEMANTIC_RESULT_NOT_ORGANIZABLE"),
+        (["GI001 passed"], "TASK_COMPLETION_HANDOFF_INVALID_SEMANTIC_RESULT_SHAPE"),
+        ([{"goal_item_id": "GI999", "status": "satisfied"}], "TASK_COMPLETION_HANDOFF_UNASSIGNED_GOAL_ITEM_ID"),
+        ([{"goal_item_id": "GI001", "evidence": "/tmp/worker/proof.json"}], "TASK_COMPLETION_HANDOFF_UNSAFE_SEMANTIC_REFERENCE"),
+        ([{"goal_item_id": "GI001", "evidence": "../proof.json"}], "TASK_COMPLETION_HANDOFF_UNSAFE_SEMANTIC_REFERENCE"),
+    ],
+)
+def test_task_handoff_nested_semantic_validation(
+    tmp_path: Path,
+    semantic_items: list,
+    expected_code: str,
+):
+    handoff = _handoff(tmp_path / "handoff.json", semantic_goal_results=semantic_items)
+
+    errors = validate_task_completion_handoff(
+        handoff,
+        patchlet_id="P0001",
+        goal_item_ids=["GI001"],
+    )
+
+    assert expected_code in {error["code"] for error in errors}
+
+
+def test_report_producer_pre_submission_validator_rejects_missing_result_text(tmp_path: Path):
+    handoff = _handoff(
+        tmp_path / "handoff.json",
+        semantic_goal_results=[
+            {"goal_item_id": "GI001", "status": "satisfied", "evidence": "GP001"}
+        ],
+    )
+    inventory, preservation = _evidence(tmp_path)
+    context = _context(handoff)
+    context["mock_report_override"] = {
+        "semantic_goal_results": [
+            {"goal_item_id": "GI001", "status": "satisfied", "evidence": "GP001"}
+        ]
+    }
+
+    result = launch_report_production_worker(
+        task_handoff_path=handoff,
+        context=context,
+        evidence_inventory_path=inventory,
+        evidence_preservation_path=preservation,
+        output_dir=tmp_path / "production" / "attempt_1",
+    )
+
+    trace = json.loads(Path(result["trace_path"]).read_text())
+    signatures = {
+        error.get("normalized_signature")
+        for error in trace["deterministic_validation"]["errors"]
+    }
+    assert result["accepted"] is False
+    assert trace["deterministic_validation"]["valid"] is False
+    assert "MISSING_RESULT_TEXT" in signatures
+
+
+def test_task_handoff_prompt_assigns_reporting_to_report_production_worker():
+    text = task_completion_handoff_contract_text(
+        patchlet_id="P0002",
+        handoff_path="/tmp/P0002.task_completion_handoff.json",
+    )
+
+    assert '"goal_item_id": "<assigned goal_item_id>"' in text
+    assert '"status": "satisfied"' in text
+    assert '"evidence": "<mapped probe id or bounded diagnostic observation>"' in text
+    assert "task worker's primary responsibility is to complete and test" in text
+    assert "Report Production Worker owns evidence accounting" in text
+    assert "goal_item`, `goal`, `goal_id`, and other aliases are forbidden" in text
 
 
 def test_report_producer_rejects_absolute_product_path_before_ingestion(tmp_path: Path):

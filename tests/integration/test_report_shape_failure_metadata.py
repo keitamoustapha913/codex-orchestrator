@@ -51,11 +51,13 @@ def test_failure_record_includes_failure_signature(git_repo: Path):
     assert failure["failure_signature"] == "probe_artifact_refs_unsafe_path"
 
 
-def test_failure_record_links_report_ingestion_result(git_repo: Path):
+def test_failure_record_does_not_claim_ingestion_ran_after_pre_submission_failure(
+    git_repo: Path,
+):
     ctx = _ctx(git_repo)
     _bad(ctx)
     failure = read_json(ctx.paths.failures_dir / "F0001.json")
-    assert failure["report_ingestion_result_path"].endswith("report_ingestion_result.json")
+    assert "report_ingestion_result_path" not in failure
 
 
 def test_failure_record_links_report_validation_errors_artifact(git_repo: Path):

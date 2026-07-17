@@ -48,6 +48,11 @@ from codex_orchestrator.report_production import (
     launch_report_production_worker,
 )
 from codex_orchestrator.report_contract import contract_fingerprint
+from codex_orchestrator.report_validation_errors import (
+    assign_error_ids,
+    errors_artifact,
+    report_validation_error_detail,
+)
 from codex_orchestrator.run_records import upsert_run_record
 from codex_orchestrator.semantic_result_normalization import canonicalize_semantic_goal_results_after_probe
 from codex_orchestrator.semantic_goal_runner import run_semantic_goal_checks
@@ -89,6 +94,46 @@ def _record_path_for_manifest(ctx: TargetRepoContext, path) -> str | None:
         return str(path.relative_to(ctx.root))
     except ValueError:
         return str(path)
+
+
+def _write_report_production_validation_errors(
+    ctx: TargetRepoContext,
+    *,
+    attempt_id: str,
+    patchlet_id: str,
+    report_path: Path | None,
+    errors: list[dict],
+) -> Path:
+    detailed = []
+    for error in errors:
+        if error.get("kind") == "report_validation_error":
+            detailed.append(dict(error))
+            continue
+        detailed.append(
+            report_validation_error_detail(
+                field=str(error.get("field") or "worker_report"),
+                json_pointer=str(error.get("json_pointer") or ""),
+                message=str(error.get("message") or error.get("normalized_signature") or "report production validation failed"),
+                normalized_signature=str(
+                    error.get("normalized_signature")
+                    or "REPORT_PRODUCTION_DETERMINISTIC_VALIDATION_FAILED"
+                ),
+                repair_hint="Correct the formal V2 report without rerunning or modifying the product task.",
+            )
+        )
+    path = ctx.paths.runs_dir / attempt_id / "gates" / "report_validation_errors.json"
+    write_json(
+        path,
+        errors_artifact(
+            attempt_id=attempt_id,
+            patchlet_id=patchlet_id,
+            report_path=_record_path_for_manifest(ctx, report_path),
+            canonical_report_path=None,
+            valid=False,
+            errors=assign_error_ids(detailed),
+        ),
+    )
+    return path
 
 
 def _rewrite_target_hygiene_result(ctx: TargetRepoContext, result: dict) -> None:
@@ -422,6 +467,7 @@ def _record_failure(
 ) -> str:
     existing = sorted(ctx.paths.failures_dir.glob("F*.json"))
     failure_id = f"F{len(existing) + 1:04d}"
+    report_only_failure = report_validation_errors is not None
     record = {
         "schema_version": "1.0",
         "kind": "failure_record",
@@ -435,8 +481,8 @@ def _record_failure(
         "evidence_ids": [],
         "graph_node_ids": [],
         "changed_paths": changed_paths,
-        "suspected_scope": "inside_known_graph",
-        "required_next_step": "classify",
+        "suspected_scope": "report_only" if report_only_failure else "inside_known_graph",
+        "required_next_step": "abort_without_product_repair" if report_only_failure else "classify",
         "created_at": now_iso(),
     }
     if failure_signature:
@@ -1324,6 +1370,7 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
                     shutil.copyfile(worker_result.report_path, task_handoff_path)
                 report_production_errors: list[dict] = []
                 produced_report_path: Path | None = None
+                production: dict | None = None
                 frozen_report_input_paths = {
                     "task_handoff": task_handoff_path,
                     "candidate_patch": patch_promotion_result.patch_path,
@@ -1347,10 +1394,22 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
                             "report_attempt": report_attempt,
                             "maximum_report_attempts": REPORT_PRODUCTION_MAX_ATTEMPTS,
                             "allowed_product_runtime_file": patchlet.get("allowed_product_runtime_file"),
+                            "target_repo_root": str(ctx.root),
                             "work_slice_id": patchlet.get("work_slice_id"),
                             "goal_item_ids": list(patchlet.get("goal_item_ids") or []),
                             "proof_obligation_ids": list(patchlet.get("proof_obligation_ids") or []),
                             "probe_ids": list(patchlet.get("probe_ids") or []),
+                            "slice_change_boundary": patchlet.get("slice_change_boundary"),
+                            "proof_obligations": (
+                                read_json(ctx.paths.workflow_dir / "proof_obligations.json")
+                                if (ctx.paths.workflow_dir / "proof_obligations.json").exists()
+                                else {}
+                            ),
+                            "probe_plan": (
+                                read_json(ctx.paths.workflow_dir / "probe_plan.json")
+                                if (ctx.paths.workflow_dir / "probe_plan.json").exists()
+                                else {}
+                            ),
                             "contract_fingerprint": contract_fingerprint(),
                             "task_handoff_sha256": hashlib.sha256(task_handoff_path.read_bytes()).hexdigest(),
                             "candidate_patch_sha256": (patch_promotion_result.patch_manifest.get("patch_sha256") if patch_promotion_result else None),
@@ -1386,7 +1445,12 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
                         patchlet_id=pid,
                         attempt_id=run_id,
                         severity="success" if production.get("accepted") else "error",
-                        summary=f"Report Production Worker attempt {report_attempt} {'completed' if production.get('accepted') else 'failed'} for {pid}.",
+                        summary=(
+                            f"Report Production Worker attempt {report_attempt} completed for {pid}."
+                            if production.get("accepted")
+                            else f"Report Production Worker attempt {report_attempt} failed for {pid}: "
+                            f"{production.get('failure_code') or 'REPORT_PRODUCTION_FAILED'}."
+                        ),
                         artifact_paths=[_record_path_for_manifest(ctx, production_dir)],
                         details={
                             "report_attempt": report_attempt,
@@ -1397,12 +1461,29 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
                         },
                     )
                     if not production.get("accepted"):
-                        report_production_errors = [
-                            {
-                                "message": str(production.get("failure_code") or "report production failed"),
-                                "normalized_signature": str(production.get("failure_code") or "REPORT_PRODUCTION_FAILED"),
-                            }
-                        ]
+                        report_production_errors = list(production.get("errors") or [])
+                        if not report_production_errors:
+                            report_production_errors = [
+                                {
+                                    "message": str(
+                                        production.get("failure_code") or "report production failed"
+                                    ),
+                                    "normalized_signature": str(
+                                        production.get("failure_code") or "REPORT_PRODUCTION_FAILED"
+                                    ),
+                                }
+                            ]
+                        _write_report_production_validation_errors(
+                            ctx,
+                            attempt_id=run_id,
+                            patchlet_id=pid,
+                            report_path=(
+                                Path(production["report_path"])
+                                if production.get("report_path")
+                                else None
+                            ),
+                            errors=report_production_errors,
+                        )
                         continue
                     produced_report_path = Path(production["report_path"])
                     report_ingestion_result = ingest_patchlet_report(
@@ -1509,8 +1590,20 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
                     report_failure_signature
                     or (report_validation_errors[0].get("normalized_signature") if report_validation_errors else None)
                 )
-                ingestion_result_path = _record_path_for_manifest(ctx, ctx.paths.runs_dir / run_id / "gates" / "report_ingestion_result.json")
-                validation_errors_path = _record_path_for_manifest(ctx, ctx.paths.runs_dir / run_id / "gates" / "report_validation_errors.json")
+                ingestion_result_file = ctx.paths.runs_dir / run_id / "gates" / "report_ingestion_result.json"
+                validation_errors_file = ctx.paths.runs_dir / run_id / "gates" / "report_validation_errors.json"
+                ingestion_result_path = (
+                    _record_path_for_manifest(ctx, ingestion_result_file)
+                    if ingestion_result_file.exists()
+                    else None
+                )
+                validation_errors_path = (
+                    _record_path_for_manifest(ctx, validation_errors_file)
+                    if validation_errors_file.exists()
+                    else _record_path_for_manifest(ctx, production.get("result_path"))
+                    if isinstance(production, dict) and production.get("result_path")
+                    else None
+                )
                 append_worker_event(
                     ctx,
                     worker_capsule,

@@ -121,7 +121,8 @@ def test_invalid_report_failure_preserves_evidence_artifacts(git_repo: Path, tmp
     assert (run_dir / "stderr.txt").exists()
     assert (run_dir / "P0001.task_completion_handoff.json").exists()
     assert (run_dir / "gates/report_production_worker/attempt_1/worker_patchlet_report_v2.json").exists()
-    assert (run_dir / "gates/report_production_worker/attempt_2/report_production_worker_result.json").exists()
+    assert (run_dir / "gates/report_production_worker/attempt_1/report_production_worker_result.json").exists()
+    assert not (run_dir / "gates/report_production_worker/attempt_2").exists()
     assert (run_dir / "worker_memory" / "REPORT_SCHEMA_CONTRACT.md").exists()
     assert diagnosis["artifact_presence"]["wrapper_gate_result"] is True
 

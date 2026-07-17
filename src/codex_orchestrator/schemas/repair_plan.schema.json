@@ -50,7 +50,8 @@
         "FULL_REDISCOVERY_REQUIRED",
         "ESCALATED_REPAIR_REQUIRED",
         "GLOBAL_REVERIFY",
-        "ORCHESTRATOR_ABORTED"
+        "ORCHESTRATOR_ABORTED",
+        "REPORT_ONLY_FAILURE_RECORDED"
       ]
     },
     "impacted_goal_ids": {

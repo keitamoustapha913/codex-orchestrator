@@ -5,7 +5,6 @@ from pathlib import Path
 
 from codex_orchestrator.operator_events import read_operator_events
 from codex_orchestrator.prompt_index import read_prompt_index
-from codex_orchestrator.stages.apply_repair import apply_repair
 from codex_orchestrator.stages.build_inventory import build_inventory
 from codex_orchestrator.stages.census import run_census
 from codex_orchestrator.stages.classify_evidence import classify_evidence
@@ -15,7 +14,6 @@ from codex_orchestrator.stages.extract_invariants import extract_invariants
 from codex_orchestrator.stages.init import init_workflow
 from codex_orchestrator.stages.normalize import normalize_master_prompt
 from codex_orchestrator.stages.plan_repair import plan_repair
-from codex_orchestrator.stages.regenerate_patchlets import regenerate_patchlets
 from codex_orchestrator.stages.run_patchlet import run_next_patchlet
 from codex_orchestrator.target_repo import resolve_target_repo
 from codex_orchestrator.validators.schema_validator import validate_json_file
@@ -45,15 +43,13 @@ def _prompt_entries(ctx, kind: str | None = None):
     return entries
 
 
-def _invalid_report_then_repair(ctx):
+def _invalid_report_then_abort(ctx):
     scenario_path = ctx.paths.workflow_dir / "mock" / "next_patchlet_result.json"
     scenario_path.parent.mkdir(parents=True, exist_ok=True)
     scenario_path.write_text(json.dumps({"report_production_override": {"probe_artifact_refs": ["bad"]}}), encoding="utf-8")
     run_next_patchlet(ctx, worker_mode="mock", use_worktree=True)
     classify_failures(ctx)
     plan_repair(ctx)
-    apply_repair(ctx)
-    return regenerate_patchlets(ctx)
 
 
 def test_prompt_index_created_when_master_prompt_is_copied(git_repo: Path):
@@ -153,14 +149,15 @@ def test_prompt_index_written_before_worker_start_event(git_repo: Path):
     assert event_types.index("prompt_index_updated") < event_types.index("patchlet_worker_started")
 
 
-def test_prompt_index_updates_for_repair_patchlet_prompt(git_repo: Path):
+def test_prompt_index_does_not_add_product_repair_prompt_for_report_only_failure(
+    git_repo: Path,
+):
     ctx = _compiled_ctx(git_repo)
 
-    _invalid_report_then_repair(ctx)
+    _invalid_report_then_abort(ctx)
 
     repair_entries = _prompt_entries(ctx, "repair_subprompt")
-    assert repair_entries
-    assert repair_entries[0]["repair_plan_id"] == "RP0001"
+    assert repair_entries == []
 
 
 def test_prompt_index_does_not_duplicate_same_prompt_path(git_repo: Path):

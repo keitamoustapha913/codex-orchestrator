@@ -4,7 +4,6 @@ import json
 from pathlib import Path
 
 from codex_orchestrator.prompt_index import read_prompt_index
-from codex_orchestrator.stages.apply_repair import apply_repair
 from codex_orchestrator.stages.build_inventory import build_inventory
 from codex_orchestrator.stages.census import run_census
 from codex_orchestrator.stages.classify_evidence import classify_evidence
@@ -14,7 +13,6 @@ from codex_orchestrator.stages.extract_invariants import extract_invariants
 from codex_orchestrator.stages.init import init_workflow
 from codex_orchestrator.stages.normalize import normalize_master_prompt
 from codex_orchestrator.stages.plan_repair import plan_repair
-from codex_orchestrator.stages.regenerate_patchlets import regenerate_patchlets
 from codex_orchestrator.stages.run_patchlet import run_next_patchlet
 from codex_orchestrator.target_repo import resolve_target_repo
 
@@ -116,50 +114,46 @@ def test_task_worker_prompt_delegates_probe_refs_to_report_production(git_repo: 
     assert "Report Production Worker derive those" in text
 
 
-def test_repair_prompt_for_probe_ref_shape_failure_includes_exact_field(git_repo: Path):
+def _pre_submission_errors(ctx) -> list[dict]:
+    return json.loads(
+        (
+            ctx.paths.runs_dir
+            / "P0001_attempt1/gates/report_validation_errors.json"
+        ).read_text(encoding="utf-8")
+    )["errors"]
+
+
+def test_pre_submission_error_for_probe_ref_shape_includes_exact_field(git_repo: Path):
+    ctx = _ctx(git_repo)
+    _run_bad_report(ctx)
+    assert _pre_submission_errors(ctx)[0]["field"] == "probe_artifact_refs"
+
+
+def test_pre_submission_error_includes_expected_and_actual_types(git_repo: Path):
+    ctx = _ctx(git_repo)
+    _run_bad_report(ctx)
+    error = _pre_submission_errors(ctx)[0]
+    assert error["expected_type"] == "object"
+    assert error["actual_type"] == "string"
+
+
+def test_pre_submission_error_requires_report_only_correction(git_repo: Path):
+    ctx = _ctx(git_repo)
+    _run_bad_report(ctx)
+    failure = json.loads((ctx.paths.failures_dir / "F0001.json").read_text(encoding="utf-8"))
+    assert failure["suspected_scope"] == "report_only"
+    assert failure["required_next_step"] == "abort_without_product_repair"
+
+
+def test_report_only_failure_does_not_create_product_repair_prompt(git_repo: Path):
     ctx = _ctx(git_repo)
     _run_bad_report(ctx)
     classify_failures(ctx)
     plan_repair(ctx)
-    apply_repair(ctx)
-    regenerate_patchlets(ctx)
-    text = (ctx.paths.workflow_dir / "subprompts/0002_repair.md").read_text(encoding="utf-8")
-    assert "field: probe_artifact_refs" in text
-
-
-def test_repair_prompt_for_probe_ref_shape_failure_includes_expected_and_actual_types(git_repo: Path):
-    ctx = _ctx(git_repo)
-    _run_bad_report(ctx)
-    classify_failures(ctx)
-    plan_repair(ctx)
-    apply_repair(ctx)
-    regenerate_patchlets(ctx)
-    text = (ctx.paths.workflow_dir / "subprompts/0002_repair.md").read_text(encoding="utf-8")
-    assert "expected: array of objects" in text
-    assert "actual: array of strings" in text
-
-
-def test_repair_prompt_for_probe_ref_shape_failure_includes_valid_replacement_example(git_repo: Path):
-    ctx = _ctx(git_repo)
-    _run_bad_report(ctx)
-    classify_failures(ctx)
-    plan_repair(ctx)
-    apply_repair(ctx)
-    regenerate_patchlets(ctx)
-    text = (ctx.paths.workflow_dir / "subprompts/0002_repair.md").read_text(encoding="utf-8")
-    assert "Use this exact object shape" in text
-    assert '"patchlet_id"' in text
-
-
-def test_repair_prompt_for_probe_ref_shape_failure_says_do_not_modify_product_files_for_report_shape_only(git_repo: Path):
-    ctx = _ctx(git_repo)
-    _run_bad_report(ctx)
-    classify_failures(ctx)
-    plan_repair(ctx)
-    apply_repair(ctx)
-    regenerate_patchlets(ctx)
-    text = (ctx.paths.workflow_dir / "subprompts/0002_repair.md").read_text(encoding="utf-8")
-    assert "Do not rewrite product/runtime files just to fix this report shape" in text
+    plan = json.loads((ctx.paths.repair_plans_dir / "RP0001.json").read_text(encoding="utf-8"))
+    assert plan["recommended_action"] == "REPORT_ONLY_FAILURE_RECORDED"
+    assert json.loads(ctx.paths.state.read_text(encoding="utf-8"))["stage"] == "ORCHESTRATOR_ABORTED"
+    assert not (ctx.paths.workflow_dir / "subprompts/0002_repair.md").exists()
 
 
 def test_prompt_index_records_hardened_report_contract_artifact(git_repo: Path):

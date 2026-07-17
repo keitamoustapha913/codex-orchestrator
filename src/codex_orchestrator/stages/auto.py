@@ -108,6 +108,8 @@ def run_auto(
 
         for _ in range(max_iterations):
             state = load_state(ctx)
+            if state.stage == "ORCHESTRATOR_ABORTED":
+                return state
             if honor_stop_if_requested(ctx, stop_stage=state.stage):
                 return load_state(ctx)
             state.current_loop_iteration += 1

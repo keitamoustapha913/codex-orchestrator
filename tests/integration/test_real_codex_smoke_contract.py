@@ -100,11 +100,9 @@ report_path.write_text(json.dumps({
         "run_id": "run_001"
     }],
     "semantic_goal_results": [{
-        "criterion_id": "SGC001",
-        "kind": "python_module_function_returns",
-        "expected_value": "ok",
-        "actual_value": "ok",
-        "passed": True
+        "goal_item_id": "GI001",
+        "status": "satisfied",
+        "evidence": "GP001"
     }],
 }, indent=2) + "\\n", encoding="utf-8")
 print(str(execution_root))
@@ -252,11 +250,9 @@ report_path.write_text(json.dumps({
         "run_id": "run_001"
     }],
     "semantic_goal_results": [{
-        "criterion_id": "SGC001",
-        "kind": "python_module_function_returns",
-        "expected_value": "ok",
-        "actual_value": "ok",
-        "passed": True
+        "goal_item_id": "GI001",
+        "status": "satisfied",
+        "evidence": "GP001"
     }]
 }, indent=2) + "\\n", encoding="utf-8")
 print(str(prompt_path))
@@ -544,11 +540,9 @@ report_path.write_text(json.dumps({
         "run_id": "run_001"
     }],
     "semantic_goal_results": [{
-        "criterion_id": "SGC001",
-        "kind": "python_module_function_returns",
-        "expected_value": "ok",
-        "actual_value": "ok",
-        "passed": True
+        "goal_item_id": "GI001",
+        "status": "satisfied",
+        "evidence": "GP001"
     }],
 }, indent=2) + "\\n", encoding="utf-8")
 print(str(execution_root))
@@ -1548,11 +1542,9 @@ report_path.write_text(json.dumps({
         "run_id": "run_001"
     }],
     "semantic_goal_results": [{
-        "criterion_id": "SGC001",
-        "kind": "python_module_function_returns",
-        "expected_value": "ok",
-        "actual_value": "ok",
-        "passed": True
+        "goal_item_id": "GI001",
+        "status": "satisfied",
+        "evidence": "GP001"
     }],
 }, indent=2) + "\\n", encoding="utf-8")
 """,
@@ -1642,11 +1634,9 @@ report_path.write_text(json.dumps({
         "run_id": "run_001"
     }],
     "semantic_goal_results": [{
-        "criterion_id": "SGC001",
-        "kind": "python_module_function_returns",
-        "expected_value": "ok",
-        "actual_value": "ok",
-        "passed": True
+        "goal_item_id": "GI001",
+        "status": "satisfied",
+        "evidence": "GP001"
     }],
 }, indent=2) + "\\n", encoding="utf-8")
 """,
@@ -1725,11 +1715,9 @@ report_path.write_text(json.dumps({
         "run_id": "run_001"
     }],
     "semantic_goal_results": [{
-        "criterion_id": "SGC001",
-        "kind": "python_module_function_returns",
-        "expected_value": "ok",
-        "actual_value": "ok",
-        "passed": True
+        "goal_item_id": "GI001",
+        "status": "satisfied",
+        "evidence": "GP001"
     }],
 }, indent=2) + "\\n", encoding="utf-8")
 print(str(repo))

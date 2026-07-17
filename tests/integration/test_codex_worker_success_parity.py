@@ -118,11 +118,9 @@ handoff_path.write_text(json.dumps({
         "deterministic_run_count": "5/5"
     },
     "semantic_goal_results": [{
-        "criterion_id": "SGC001",
-        "kind": "python_module_function_returns",
-        "expected_value": "ok",
-        "actual_value": "ok",
-        "passed": True
+        "goal_item_id": "GI001",
+        "status": "satisfied",
+        "evidence": "GP001"
     }],
 }, indent=2) + "\\n", encoding="utf-8")
 

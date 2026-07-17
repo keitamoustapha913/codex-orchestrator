@@ -182,7 +182,13 @@ def task_completion_handoff_contract_text(*, patchlet_id: str, handoff_path: str
         "row_ledger": [],
         "trace_ledger": [],
         "cleanup_proof": "cleanup passed; no transient files remain",
-        "semantic_goal_results": [],
+        "semantic_goal_results": [
+            {
+                "goal_item_id": "<assigned goal_item_id>",
+                "status": "satisfied",
+                "evidence": "<mapped probe id or bounded diagnostic observation>",
+            }
+        ],
     }
     return (
         "# TASK COMPLETION HANDOFF CONTRACT\n\n"
@@ -197,6 +203,19 @@ def task_completion_handoff_contract_text(*, patchlet_id: str, handoff_path: str
         "`SUCCESS`, `PASSED`, or `OK`.\n\n"
         "`cleanup_proof` must be a string, not an object. `row_ledger` and `trace_ledger` "
         "must be present as arrays, even when empty.\n\n"
+        "The task worker's primary responsibility is to complete and test the assigned product change. "
+        "This handoff contains bounded diagnostic observations only; it is not WorkerPatchletReportV2, "
+        "and the task worker does not need to write polished V2 `result` prose. The separate Report "
+        "Production Worker owns evidence accounting, organization, formal V2 construction, and "
+        "pre-ingestion validation.\n\n"
+        "Each populated `semantic_goal_results` entry must be an object using the assigned canonical "
+        "`goal_item_id`. `goal_item`, `goal`, `goal_id`, and other aliases are forbidden. Use either a "
+        "minimal diagnostic observation such as "
+        "`{\"goal_item_id\": \"GI002\", \"status\": \"satisfied\", \"evidence\": \"GP002\"}` "
+        "or an optional descriptive observation such as "
+        "`{\"goal_item_id\": \"GI002\", \"result\": \"profile_beta produced the expected current-slice value.\"}`. "
+        "Diagnostic `status` and `evidence` are non-authoritative; the Report Production Worker converts "
+        "them into formal V2 shorthand.\n\n"
         "Use only repository-relative product names in prose. Never copy `/tmp`, checkout, "
         "sandbox, or worker-evidence absolute paths into this handoff.\n\n"
         "```json\n"

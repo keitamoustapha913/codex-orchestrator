@@ -56,7 +56,7 @@ def test_report_shape_only_failure_does_not_generate_full_repair_patchlet_when_n
     assert not list(ctx.paths.failures_dir.glob("F*.json"))
 
 
-def test_report_shape_only_failure_writes_report_only_repair_plan_when_needed(git_repo: Path):
+def test_report_shape_only_failure_records_pre_submission_validation(git_repo: Path):
     ctx = _ctx(git_repo)
     _scenario(ctx, {"report_production_override": {"probe_artifact_refs": ["/etc/passwd"]}})
     run_next_patchlet(ctx, worker_mode="mock", use_worktree=True)
@@ -72,11 +72,16 @@ def test_report_only_repair_plan_forbids_product_runtime_paths(git_repo: Path):
     assert "app.py" not in json.dumps(failure.get("report_validation_errors", []))
 
 
-def test_report_only_repair_plan_forbids_probe_artifact_mutation(git_repo: Path):
+def test_report_only_failure_stops_before_ingestion_or_probe_artifact_mutation(git_repo: Path):
     ctx = _ctx(git_repo)
     _scenario(ctx, {"report_production_override": {"probe_artifact_refs": ["/etc/passwd"]}})
     run_next_patchlet(ctx, worker_mode="mock", use_worktree=True)
-    assert (ctx.paths.runs_dir / "P0001_attempt1/gates/report_validation_errors.json").exists()
+    run_dir = ctx.paths.runs_dir / "P0001_attempt1"
+    assert (
+        run_dir
+        / "gates/report_production_worker/attempt_1/report_production_worker_result.json"
+    ).exists()
+    assert not (run_dir / "gates/report_ingestion_result.json").exists()
 
 
 def test_repeated_report_shape_failure_safe_fails_instead_of_unbounded_regeneration(git_repo: Path):

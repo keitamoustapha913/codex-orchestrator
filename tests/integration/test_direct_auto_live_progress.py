@@ -121,7 +121,7 @@ def test_cxor_auto_live_progress_prints_report_validation_failure(git_repo: Path
     assert "Report validation failed for P0001" in result.stderr
 
 
-def test_cxor_auto_live_progress_prints_repair_plan_next_action(git_repo: Path):
+def test_cxor_auto_live_progress_reports_terminal_report_only_plan(git_repo: Path):
     ctx = _setup_compiled_ctx(git_repo)
     _write_invalid_report_scenario(ctx)
 
@@ -130,8 +130,8 @@ def test_cxor_auto_live_progress_prints_repair_plan_next_action(git_repo: Path):
         cwd=git_repo,
     )
 
-    assert result.returncode == 0
-    assert "Repair plan RP0001 created" in result.stderr
+    assert result.returncode == 1
+    assert "Repair plan RP0001 created; report only failure recorded next" in result.stderr
 
 
 def test_cxor_auto_live_progress_does_not_replay_stale_loop_warning(git_repo: Path):

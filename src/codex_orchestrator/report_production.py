@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 from pathlib import Path, PurePosixPath
+import re
 import shutil
 import stat
 import subprocess
@@ -20,14 +21,24 @@ import tempfile
 from typing import Any
 
 from .jsonio import write_json
-from .report_contract import contract_fingerprint, render_primary_worker_report_template
+from .probe_artifact_refs import normalize_probe_artifact_refs
+from .report_contract import (
+    RawReportError,
+    classify_fields,
+    contract_fingerprint,
+    parse_raw_report,
+    render_primary_worker_report_template,
+)
+from .semantic_result_normalization import normalize_semantic_goal_results
+from .validators.report_validator import validate_patchlet_report_structured
+from .validators.schema_validator import iter_jsonschema_errors
 
 
 REPORT_FILENAME = "worker_patchlet_report_v2.json"
 TRACE_FILENAME = "report_production_trace.json"
 RESULT_FILENAME = "report_production_worker_result.json"
 WORKER_ALLOWED_OUTPUTS = frozenset({REPORT_FILENAME})
-REPORT_PRODUCTION_MAX_ATTEMPTS = 2
+REPORT_PRODUCTION_MAX_ATTEMPTS = 1
 TASK_HANDOFF_MAX_BYTES = 2 * 1024 * 1024
 TASK_HANDOFF_REQUIRED_FIELDS = frozenset(
     {
@@ -42,8 +53,27 @@ TASK_HANDOFF_REQUIRED_FIELDS = frozenset(
         "row_ledger",
         "trace_ledger",
         "cleanup_proof",
+        "semantic_goal_results",
     }
 )
+
+_TASK_HANDOFF_REPORT_FIELDS = frozenset(
+    {
+        "probe_commands",
+        "deterministic_run_counts",
+        "root_cause_classification",
+        "before_after_state",
+        "row_ledger",
+        "trace_ledger",
+        "cleanup_proof",
+        "semantic_goal_results",
+        "blocking_boundary_reason",
+        "failed_probe_evidence",
+    }
+)
+
+_FORBIDDEN_GOAL_ITEM_ALIASES = frozenset({"goal_item", "goal", "goal_id"})
+_UNSAFE_DIAGNOSTIC_REFERENCE = re.compile(r"(?:^|[\s=:'\"])(?:/|~/|\.\.(?:/|\\)|file://)")
 
 _ORCHESTRATOR_OWNED_FIELDS = frozenset(
     {
@@ -72,7 +102,26 @@ def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def validate_task_completion_handoff(path: Path, *, patchlet_id: str) -> list[dict[str, Any]]:
+def _nonempty_text(value: Any) -> str | None:
+    return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def _unsafe_diagnostic_reference(value: Any) -> bool:
+    if isinstance(value, str):
+        return bool(_UNSAFE_DIAGNOSTIC_REFERENCE.search(value))
+    if isinstance(value, list):
+        return any(_unsafe_diagnostic_reference(item) for item in value)
+    if isinstance(value, dict):
+        return any(_unsafe_diagnostic_reference(item) for item in value.values())
+    return False
+
+
+def validate_task_completion_handoff(
+    path: Path,
+    *,
+    patchlet_id: str,
+    goal_item_ids: list[str] | None = None,
+) -> list[dict[str, Any]]:
     errors: list[dict[str, Any]] = []
     raw = path.read_bytes()
     if len(raw) > TASK_HANDOFF_MAX_BYTES:
@@ -97,6 +146,66 @@ def validate_task_completion_handoff(path: Path, *, patchlet_id: str) -> list[di
         "FAILED_WITH_EVIDENCE",
     }:
         errors.append({"code": "TASK_COMPLETION_HANDOFF_INVALID_STATUS"})
+    semantic_items = value.get("semantic_goal_results")
+    if not isinstance(semantic_items, list):
+        errors.append({"code": "TASK_COMPLETION_HANDOFF_SEMANTIC_RESULTS_NOT_ARRAY"})
+        return errors
+    assigned_goal_item_ids = {
+        item.strip() for item in (goal_item_ids or []) if isinstance(item, str) and item.strip()
+    }
+    for index, item in enumerate(semantic_items):
+        if not isinstance(item, dict):
+            errors.append(
+                {
+                    "code": "TASK_COMPLETION_HANDOFF_INVALID_SEMANTIC_RESULT_SHAPE",
+                    "index": index,
+                }
+            )
+            continue
+        aliases = sorted(_FORBIDDEN_GOAL_ITEM_ALIASES.intersection(item))
+        if aliases:
+            errors.append(
+                {
+                    "code": "TASK_COMPLETION_HANDOFF_FORBIDDEN_GOAL_ITEM_ALIAS",
+                    "index": index,
+                    "fields": aliases,
+                }
+            )
+        goal_item_id = _nonempty_text(item.get("goal_item_id"))
+        if goal_item_id is None:
+            errors.append(
+                {
+                    "code": "TASK_COMPLETION_HANDOFF_MISSING_GOAL_ITEM_ID",
+                    "index": index,
+                }
+            )
+        elif assigned_goal_item_ids and goal_item_id not in assigned_goal_item_ids:
+            errors.append(
+                {
+                    "code": "TASK_COMPLETION_HANDOFF_UNASSIGNED_GOAL_ITEM_ID",
+                    "index": index,
+                    "goal_item_id": goal_item_id,
+                }
+            )
+        result = _nonempty_text(item.get("result"))
+        status = _nonempty_text(item.get("status"))
+        evidence = _nonempty_text(item.get("evidence"))
+        if result is None and status is None and evidence is None:
+            errors.append(
+                {
+                    "code": "TASK_COMPLETION_HANDOFF_SEMANTIC_RESULT_NOT_ORGANIZABLE",
+                    "index": index,
+                }
+            )
+        if _unsafe_diagnostic_reference(
+            {name: item.get(name) for name in ("result", "status", "evidence")}
+        ):
+            errors.append(
+                {
+                    "code": "TASK_COMPLETION_HANDOFF_UNSAFE_SEMANTIC_REFERENCE",
+                    "index": index,
+                }
+            )
     return errors
 
 
@@ -267,8 +376,10 @@ def _organize_semantic_goal_results(
     handoff: dict[str, Any],
     *,
     goal_item_ids: list[str],
+    assigned_path: str,
+    slice_change_boundary: dict[str, Any] | None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Shape task prose without granting it semantic authority."""
+    """Convert bounded task observations into non-authoritative V2 shorthand."""
     raw_items = handoff.get("semantic_goal_results")
     if not isinstance(raw_items, list):
         return [], [
@@ -282,23 +393,61 @@ def _organize_semantic_goal_results(
     warnings: list[dict[str, Any]] = []
     for index, item in enumerate(raw_items):
         if isinstance(item, dict):
-            organized.append(item)
-            continue
-        if isinstance(item, str) and item.strip() and len(goal_item_ids) == 1:
-            organized.append(
-                {
-                    "goal_item_id": goal_item_ids[0],
-                    "result": item.strip(),
-                }
-            )
-            warnings.append(
-                {
-                    "warning_code": "TASK_SEMANTIC_PROSE_ORGANIZED",
-                    "raw_item_index": index,
-                    "blocking": False,
-                    "authoritative": False,
-                }
-            )
+            goal_item_id = _nonempty_text(item.get("goal_item_id"))
+            result = _nonempty_text(item.get("result"))
+            if goal_item_id is None:
+                warnings.append(
+                    {
+                        "warning_code": "TASK_SEMANTIC_ITEM_DROPPED",
+                        "raw_item_index": index,
+                        "blocking": True,
+                        "authoritative": False,
+                    }
+                )
+                continue
+            if result is None:
+                observations = []
+                status = _nonempty_text(item.get("status"))
+                evidence = _nonempty_text(item.get("evidence"))
+                if status is not None:
+                    observations.append(f"status={status}")
+                if evidence is not None:
+                    observations.append(f"diagnostic evidence={evidence}")
+                if not observations:
+                    warnings.append(
+                        {
+                            "warning_code": "TASK_SEMANTIC_ITEM_DROPPED",
+                            "raw_item_index": index,
+                            "blocking": True,
+                            "authoritative": False,
+                        }
+                    )
+                    continue
+                current_boundary = (slice_change_boundary or {}).get("current_boundary")
+                current_boundary = current_boundary if isinstance(current_boundary, dict) else {}
+                symbol = _nonempty_text(current_boundary.get("symbol"))
+                expected = _nonempty_text(current_boundary.get("expected_observation"))
+                boundary_detail = ""
+                if symbol is not None and expected is not None:
+                    boundary_detail = f" current slice {symbol}={expected}"
+                elif symbol is not None:
+                    boundary_detail = f" current slice symbol={symbol}"
+                elif expected is not None:
+                    boundary_detail = f" current slice expected={expected}"
+                result = (
+                    f"{goal_item_id} task observation for {assigned_path}{boundary_detail}: "
+                    + "; ".join(observations)
+                    + "."
+                )
+                warnings.append(
+                    {
+                        "warning_code": "TASK_SEMANTIC_DIAGNOSTIC_ORGANIZED",
+                        "raw_item_index": index,
+                        "blocking": False,
+                        "authoritative": False,
+                    }
+                )
+            organized.append({"goal_item_id": goal_item_id, "result": result})
             continue
         warnings.append(
             {
@@ -311,11 +460,30 @@ def _organize_semantic_goal_results(
     return organized, warnings
 
 
+def _schema_errors(report: dict[str, Any]) -> list[dict[str, Any]]:
+    errors = []
+    for error in iter_jsonschema_errors(report, "worker_patchlet_report_v2.schema.json"):
+        pointer = "/" + "/".join(str(item) for item in error.absolute_path)
+        errors.append(
+            {
+                "field": str(error.absolute_path[0]) if error.absolute_path else "worker_report",
+                "json_pointer": pointer if pointer != "/" else "",
+                "message": error.message,
+                "normalized_signature": "REPORT_PRODUCTION_V2_SCHEMA_INVALID",
+            }
+        )
+    return errors
+
+
 def _pre_submission_errors(
     report: dict[str, Any],
     *,
-    assigned_path: str,
+    context: dict[str, Any],
+    inventory: dict[str, Any],
+    preservation: dict[str, Any],
+    report_path: Path,
 ) -> list[dict[str, Any]]:
+    assigned_path = str(context["allowed_product_runtime_file"])
     errors: list[dict[str, Any]] = []
     if report.get("status") == "COMPLETE" and report.get("changed_product_runtime_file") != assigned_path:
         errors.append(
@@ -343,6 +511,77 @@ def _pre_submission_errors(
                         "normalized_signature": "report_production_incomplete_root_cause",
                     }
                 )
+    target_repo_root = context.get("target_repo_root")
+    if not isinstance(target_repo_root, str) or not target_repo_root:
+        errors.append(
+            {
+                "field": "report_production_context",
+                "json_pointer": "/target_repo_root",
+                "message": "Report production context requires target_repo_root",
+                "normalized_signature": "REPORT_PRODUCTION_CONTEXT_INCOMPLETE",
+            }
+        )
+    else:
+        evidence_result = normalize_probe_artifact_refs(
+            report.get("probe_artifact_refs") or [],
+            target_repo_root=Path(target_repo_root),
+            patchlet_id=str(context.get("patchlet_id") or ""),
+            evidence_inventory=inventory,
+            evidence_preservation=preservation,
+        )
+        errors.extend(evidence_result.errors)
+        try:
+            parse_raw_report(report_path)
+        except RawReportError as exc:
+            errors.append(
+                {
+                    "field": "raw_worker_report",
+                    "json_pointer": "",
+                    "message": str(exc),
+                    "normalized_signature": exc.code,
+                }
+            )
+        semantic_items = report.get("semantic_goal_results")
+        if isinstance(semantic_items, list) and semantic_items:
+            semantic_result = normalize_semantic_goal_results(
+                raw_items=semantic_items,
+                patchlet_id=str(context.get("patchlet_id") or ""),
+                work_slice_id=str(context.get("work_slice_id") or ""),
+                selected_goal_item_ids=list(context.get("goal_item_ids") or []),
+                selected_proof_obligation_ids=list(context.get("proof_obligation_ids") or []),
+                proof_obligations=dict(context.get("proof_obligations") or {}),
+                probe_plan=dict(context.get("probe_plan") or {}),
+                slice_change_boundary=context.get("slice_change_boundary"),
+                allowed_product_runtime_file=assigned_path,
+            )
+            for rejected in semantic_result.get("rejected_raw_claims", []):
+                errors.append(
+                    {
+                        "field": "semantic_goal_results",
+                        "json_pointer": f"/semantic_goal_results/{rejected.get('raw_item_index', 0)}",
+                        "message": rejected.get("message") or rejected.get("error_code"),
+                        "normalized_signature": rejected.get("error_code"),
+                    }
+                )
+        errors.extend(_schema_errors(report))
+        patchlet = {
+            "patchlet_id": context.get("patchlet_id"),
+            "work_slice_id": context.get("work_slice_id"),
+            "allowed_product_runtime_file": assigned_path,
+            "allowed_product_runtime_files": [assigned_path],
+            "goal_item_ids": list(context.get("goal_item_ids") or []),
+            "proof_obligation_ids": list(context.get("proof_obligation_ids") or []),
+            "probe_ids": list(context.get("probe_ids") or []),
+            "slice_change_boundary": context.get("slice_change_boundary"),
+        }
+        structured_report = dict(report)
+        structured_report["probe_artifact_refs"] = evidence_result.normalized_refs
+        structured = validate_patchlet_report_structured(
+            structured_report,
+            patchlet,
+            repo_root=Path(target_repo_root),
+        )
+        errors.extend(structured.get("errors", []))
     return errors
 
 
@@ -367,7 +606,7 @@ def produce_report(
     }
     copied_fields = []
     for name in handoff:
-        if name in _ORCHESTRATOR_OWNED_FIELDS or name == "status":
+        if name not in _TASK_HANDOFF_REPORT_FIELDS:
             continue
         report[name] = handoff[name]
         copied_fields.append(name)
@@ -379,6 +618,8 @@ def produce_report(
     semantic_goal_results, semantic_organization_warnings = _organize_semantic_goal_results(
         handoff,
         goal_item_ids=[str(item) for item in context.get("goal_item_ids", []) if str(item)],
+        assigned_path=assigned_path,
+        slice_change_boundary=context.get("slice_change_boundary"),
     )
     report["semantic_goal_results"] = semantic_goal_results
     report["changed_product_runtime_file"] = assigned_path if status == "COMPLETE" else None
@@ -389,9 +630,30 @@ def produce_report(
         probe_ids=list(context.get("probe_ids") or []),
         aliases=aliases,
     )
+    target_repo_root = context.get("target_repo_root")
+    if isinstance(target_repo_root, str) and target_repo_root:
+        evidence_normalization = normalize_probe_artifact_refs(
+            report["probe_artifact_refs"],
+            target_repo_root=Path(target_repo_root),
+            patchlet_id=patchlet_id,
+            evidence_inventory=inventory,
+            evidence_preservation=preservation,
+        )
+        if not evidence_normalization.errors and not evidence_normalization.warnings:
+            report["probe_artifact_refs"] = evidence_normalization.normalized_refs
     mock_override = context.get("mock_report_override")
     if isinstance(mock_override, dict):
         report.update(mock_override)
+    if isinstance(target_repo_root, str) and target_repo_root:
+        evidence_normalization = normalize_probe_artifact_refs(
+            report.get("probe_artifact_refs") or [],
+            target_repo_root=Path(target_repo_root),
+            patchlet_id=patchlet_id,
+            evidence_inventory=inventory,
+            evidence_preservation=preservation,
+        )
+        if not evidence_normalization.errors and not evidence_normalization.warnings:
+            report["probe_artifact_refs"] = evidence_normalization.normalized_refs
     report_path = output_dir / REPORT_FILENAME
     write_json(report_path, report)
     return {"report": report}
@@ -406,12 +668,20 @@ def _orchestrator_report_metadata(
     report: dict[str, Any],
     report_path: Path,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    assigned_path = str(context["allowed_product_runtime_file"])
-    deterministic_errors = _pre_submission_errors(report, assigned_path=assigned_path)
+    deterministic_errors = _pre_submission_errors(
+        report,
+        context=context,
+        inventory=inventory,
+        preservation=preservation,
+        report_path=report_path,
+    )
+    _, unknown_report_fields = classify_fields(report)
     aliases = _captured_aliases(preservation)
     _, semantic_organization_warnings = _organize_semantic_goal_results(
         handoff,
         goal_item_ids=[str(item) for item in context.get("goal_item_ids", []) if str(item)],
+        assigned_path=str(context["allowed_product_runtime_file"]),
+        slice_change_boundary=context.get("slice_change_boundary"),
     )
     trace = {
         "schema_version": "1.0",
@@ -426,12 +696,14 @@ def _orchestrator_report_metadata(
         "copied_handoff_fields": sorted(
             name
             for name in handoff
-            if name not in _ORCHESTRATOR_OWNED_FIELDS and name != "status"
+            if name in _TASK_HANDOFF_REPORT_FIELDS
         ),
         "orchestrator_owned_fields": sorted(_ORCHESTRATOR_OWNED_FIELDS),
         "captured_evidence_reference_count": len(aliases),
         "skipped_evidence_reference_count": int(inventory.get("skipped_file_count") or 0),
         "semantic_organization_warnings": semantic_organization_warnings,
+        "semantic_results_authoritative": False,
+        "unknown_report_fields": unknown_report_fields,
         "worker_writable_outputs": [REPORT_FILENAME],
         "authoritative": False,
         "deterministic_validation": {
@@ -485,6 +757,7 @@ def launch_report_production_worker(
     handoff_errors = validate_task_completion_handoff(
         task_handoff_path,
         patchlet_id=str(context.get("patchlet_id") or ""),
+        goal_item_ids=list(context.get("goal_item_ids") or []),
     )
     if handoff_errors:
         return {

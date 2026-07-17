@@ -7,6 +7,17 @@ from codex_orchestrator.target_repo import TargetRepoContext
 
 
 def _action_for_classification(classification_value: str) -> tuple[str, str, dict[str, bool]]:
+    if classification_value == "REPORT_ONLY_FAILURE":
+        return (
+            "REPORT_ONLY_FAILURE_RECORDED",
+            "ORCHESTRATOR_ABORTED",
+            {
+                "requires_partial_rediscovery": False,
+                "requires_full_rediscovery": False,
+                "requires_inventory_rebuild": False,
+                "requires_patchlet_regeneration": False,
+            },
+        )
     if classification_value == "OUTSIDE_KNOWN_GRAPH":
         return (
             "PARTIAL_REDISCOVERY_REQUIRED",
@@ -95,7 +106,7 @@ def plan_repair(ctx: TargetRepoContext) -> dict:
     impacted_invariant_ids = primary_failure.get("blocking_invariant_ids", []) if primary_failure else []
     impacted_graph_node_ids = primary_failure.get("graph_node_ids", []) if primary_failure else []
     impacted_files = primary_failure.get("changed_paths", []) if primary_failure else []
-    if classification_value == "INSIDE_KNOWN_GRAPH":
+    if classification_value in {"INSIDE_KNOWN_GRAPH", "REPORT_ONLY_FAILURE"}:
         impacted_goal_ids = []
         impacted_invariant_ids = []
         impacted_graph_node_ids = []

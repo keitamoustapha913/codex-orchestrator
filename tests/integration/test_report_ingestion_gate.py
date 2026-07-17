@@ -32,7 +32,7 @@ def _ctx(git_repo: Path):
     build_inventory(ctx)
     extract_invariants(ctx)
     compile_patchlets(ctx)
-    _scenario(ctx, [])
+    (ctx.paths.workflow_dir / "mock").mkdir(parents=True, exist_ok=True)
     return ctx
 
 
@@ -51,6 +51,14 @@ def _scenario(ctx, refs):
         ),
         encoding="utf-8",
     )
+
+
+def _report_production_errors(ctx) -> list[dict]:
+    result = read_json(
+        ctx.paths.runs_dir
+        / "P0001_attempt1/gates/report_production_worker/attempt_1/report_production_worker_result.json"
+    )
+    return result["blocking_errors"]
 
 
 def _report_with_changed_runtime_file_alias() -> dict:
@@ -403,9 +411,16 @@ def test_p0005_v2_unknown_acceptance_criteria_result_is_warning_and_does_not_blo
     ctx = _ctx(git_repo)
     scenario = ctx.paths.workflow_dir / "mock" / "next_patchlet_result.json"
     scenario.parent.mkdir(parents=True, exist_ok=True)
-    scenario.write_text(json.dumps({"handoff_override": {
-        "acceptance_criteria_result": {"status": "PASS"},
-    }}), encoding="utf-8")
+    scenario.write_text(
+        json.dumps(
+            {
+                "report_production_override": {
+                    "acceptance_criteria_result": {"status": "PASS"}
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
 
     result = run_next_patchlet(ctx, worker_mode="mock", use_worktree=True)
 
@@ -514,14 +529,14 @@ def test_report_ingestion_records_raw_and_canonical_paths(git_repo: Path):
     assert result["canonical_report_path"] == ".codex-orchestrator/reports/P0001.json"
 
 
-def test_report_ingestion_records_normalization_kinds(git_repo: Path):
+def test_report_ingestion_records_report_producer_normalized_evidence(git_repo: Path):
     ctx = _ctx(git_repo)
     _scenario(ctx, [".artifacts/probes/P0001/run_001/before_state.json"])
 
     run_next_patchlet(ctx, worker_mode="mock", use_worktree=True)
 
     result = read_json(ctx.paths.runs_dir / "P0001_attempt1/gates/report_ingestion_result.json")
-    assert result["normalization_kinds"] == ["probe_artifact_refs_string_paths_to_objects"]
+    assert "probe_artifact_refs_object_metadata_from_actual_files" in result["normalization_kinds"]
 
 
 def test_report_ingestion_writes_result_json(git_repo: Path):
@@ -548,24 +563,24 @@ def test_report_ingestion_errors_schema_validates(git_repo: Path):
     assert validate_json_file(ctx.paths.runs_dir / "P0001_attempt1/gates/report_validation_errors.json", "report_validation_errors.schema.json") == []
 
 
-def test_report_ingestion_rejects_unsafe_path(git_repo: Path):
+def test_report_production_pre_submission_rejects_unsafe_path(git_repo: Path):
     ctx = _ctx(git_repo)
     _scenario(ctx, ["/etc/passwd"])
 
     result = run_next_patchlet(ctx, worker_mode="mock", use_worktree=True)
 
-    errors = read_json(ctx.paths.runs_dir / "P0001_attempt1/gates/report_validation_errors.json")["errors"]
+    errors = _report_production_errors(ctx)
     assert result.status == "FAILED_WITH_EVIDENCE"
     assert errors[0]["normalized_signature"] == "probe_artifact_refs_unsafe_path"
 
 
-def test_report_ingestion_rejects_missing_probe_file(git_repo: Path):
+def test_report_production_pre_submission_rejects_missing_probe_file(git_repo: Path):
     ctx = _ctx(git_repo)
     _scenario(ctx, [".artifacts/probes/P0001/missing.txt"])
 
     run_next_patchlet(ctx, worker_mode="mock", use_worktree=True)
 
-    errors = read_json(ctx.paths.runs_dir / "P0001_attempt1/gates/report_validation_errors.json")["errors"]
+    errors = _report_production_errors(ctx)
     assert errors[0]["normalized_signature"] == "probe_artifact_refs_missing_file"
 
 
@@ -616,7 +631,7 @@ def test_report_ingestion_accepts_inventory_known_skipped_limit_ref_with_warning
     assert not (ctx.root / skipped_path).exists()
 
 
-def test_report_only_retry_does_not_rerun_task_worker_or_mutate_frozen_candidate(git_repo: Path):
+def test_report_only_failure_does_not_retry_or_rerun_task_worker(git_repo: Path):
     ctx = _ctx(git_repo)
     scenario = ctx.paths.workflow_dir / "mock" / "next_patchlet_result.json"
     scenario.write_text(
@@ -636,19 +651,16 @@ def test_report_only_retry_does_not_rerun_task_worker_or_mutate_frozen_candidate
 
     run_dir = ctx.paths.runs_dir / "P0001_attempt1"
     first = read_json(run_dir / "gates/report_production_worker/attempt_1/report_production_trace.json")
-    second = read_json(run_dir / "gates/report_production_worker/attempt_2/report_production_trace.json")
     events = read_operator_events(ctx.root)
     assert result.status == "FAILED_WITH_EVIDENCE"
-    assert first["candidate_patch_sha256"] == second["candidate_patch_sha256"]
-    assert first["task_handoff_sha256"] == second["task_handoff_sha256"]
     assert first["deterministic_validation"]["valid"] is False
-    assert second["deterministic_validation"]["valid"] is False
+    assert not (run_dir / "gates/report_production_worker/attempt_2").exists()
     assert sum(event["event_type"] == "patchlet_worker_started" for event in events) == 1
-    assert sum(event["event_type"] == "report_production_worker_failed" for event in events) == 2
+    assert sum(event["event_type"] == "report_production_worker_failed" for event in events) == 1
     assert not (run_dir / "patch_promotion/clean_candidate_promotion_result.json").exists()
 
 
-def test_report_ingestion_rejects_patchlet_mismatch(git_repo: Path):
+def test_report_production_pre_submission_rejects_patchlet_mismatch(git_repo: Path):
     ctx = _ctx(git_repo)
     _scenario(ctx, [".artifacts/probes/P0001/run_001/before_state.json", ".artifacts/probes/P9999/file.txt"])
     bad = git_repo / ".artifacts/probes/P9999/file.txt"
@@ -657,11 +669,14 @@ def test_report_ingestion_rejects_patchlet_mismatch(git_repo: Path):
 
     run_next_patchlet(ctx, worker_mode="mock", use_worktree=True)
 
-    errors = read_json(ctx.paths.runs_dir / "P0001_attempt1/gates/report_validation_errors.json")["errors"]
+    errors = _report_production_errors(ctx)
     assert any(error["normalized_signature"] == "probe_artifact_refs_patchlet_mismatch" for error in errors)
 
 
-def test_report_ingestion_rejects_symlink_escape(git_repo: Path, tmp_path: Path):
+def test_report_production_pre_submission_rejects_symlink_escape(
+    git_repo: Path,
+    tmp_path: Path,
+):
     ctx = _ctx(git_repo)
     outside = tmp_path / "outside.txt"
     outside.write_text("x", encoding="utf-8")
@@ -672,7 +687,7 @@ def test_report_ingestion_rejects_symlink_escape(git_repo: Path, tmp_path: Path)
 
     run_next_patchlet(ctx, worker_mode="mock", use_worktree=True)
 
-    errors = read_json(ctx.paths.runs_dir / "P0001_attempt1/gates/report_validation_errors.json")["errors"]
+    errors = _report_production_errors(ctx)
     assert errors[0]["normalized_signature"] == "probe_artifact_refs_unsafe_path"
 
 
@@ -685,14 +700,22 @@ def test_report_ingestion_emits_normalized_operator_event(git_repo: Path):
     assert any(event["event_type"] == "report_ingestion_normalized" for event in read_operator_events(ctx.root))
 
 
-def test_report_ingestion_emits_failed_operator_event(git_repo: Path):
+def test_report_production_emits_failed_operator_event_before_ingestion(git_repo: Path):
     ctx = _ctx(git_repo)
     _scenario(ctx, ["/etc/passwd"])
 
     run_next_patchlet(ctx, worker_mode="mock", use_worktree=True)
 
-    events = [event for event in read_operator_events(ctx.root) if event["event_type"] == "report_ingestion_failed"]
-    assert events[-1]["details"]["failure_signature"] == "probe_artifact_refs_unsafe_path"
+    events = [
+        event
+        for event in read_operator_events(ctx.root)
+        if event["event_type"] == "report_production_worker_failed"
+    ]
+    assert len(events) == 1
+    assert events[0]["details"]["accepted"] is False
+    assert not (
+        ctx.paths.runs_dir / "P0001_attempt1/gates/report_ingestion_result.json"
+    ).exists()
 
 
 def test_wrapper_gate_uses_canonical_report_after_ingestion(git_repo: Path):

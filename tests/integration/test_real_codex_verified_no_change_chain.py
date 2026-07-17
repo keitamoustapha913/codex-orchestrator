@@ -85,11 +85,9 @@ report = {{
     "cleanup_proof": "cleanup ok",
     "probe_artifact_refs": [{{"patchlet_id": patchlet_id, "probe_root": f".artifacts/probes/{{patchlet_id}}", "run_id": "run_001"}}],
     "semantic_goal_results": [{{
-        "criterion_id": "SGC001",
-        "kind": "python_module_function_returns",
-        "expected_value": "ok",
-        "actual_value": "ok",
-        "passed": True
+        "goal_item_id": "GI001",
+        "status": "satisfied",
+        "evidence": "GP001"
     }}],
 }}
 Path(os.environ["CXOR_TASK_COMPLETION_HANDOFF_PATH"]).parent.mkdir(parents=True, exist_ok=True)

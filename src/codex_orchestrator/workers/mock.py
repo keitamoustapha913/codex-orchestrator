@@ -12,19 +12,16 @@ from .base import Worker, WorkerResult, ensure_run_context
 
 def _default_report(patchlet: dict) -> dict:
     pid = patchlet["patchlet_id"]
-    semantic_goal_results = []
-    behavior = patchlet.get("expected_behavior") or {}
-    criteria = patchlet.get("semantic_criteria") or []
-    if behavior.get("kind") == "python_module_function_returns":
-        expected = behavior.get("expected_value")
-        semantic_goal_results.append({
-            "criterion_id": criteria[0] if criteria else "SGC001",
-            "kind": "python_module_function_returns",
-            "expected_value": expected,
-            "actual_value": expected,
-            "passed": True,
-            "probe_artifact_ref": {"path": f".artifacts/probes/{pid}/run_001/semantic_goal_result.json"},
-        })
+    probe_ids = sorted(set(patchlet.get("probe_ids") or []))
+    diagnostic_evidence = probe_ids[0] if probe_ids else "task probe completed"
+    semantic_goal_results = [
+        {
+            "goal_item_id": goal_item_id,
+            "status": "satisfied",
+            "evidence": diagnostic_evidence,
+        }
+        for goal_item_id in patchlet.get("goal_item_ids") or []
+    ]
     return {
         "schema_version": "1.0",
         "kind": "task_worker_completion_handoff",

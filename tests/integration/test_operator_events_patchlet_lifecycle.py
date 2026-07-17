@@ -6,7 +6,6 @@ from pathlib import Path
 from conftest import read_json
 
 from codex_orchestrator.operator_events import read_operator_events
-from codex_orchestrator.stages.apply_repair import apply_repair
 from codex_orchestrator.stages.build_inventory import build_inventory
 from codex_orchestrator.stages.census import run_census
 from codex_orchestrator.stages.classify_evidence import classify_evidence
@@ -16,7 +15,6 @@ from codex_orchestrator.stages.extract_invariants import extract_invariants
 from codex_orchestrator.stages.init import init_workflow
 from codex_orchestrator.stages.normalize import normalize_master_prompt
 from codex_orchestrator.stages.plan_repair import plan_repair
-from codex_orchestrator.stages.regenerate_patchlets import regenerate_patchlets
 from codex_orchestrator.stages.run_patchlet import run_next_patchlet
 from codex_orchestrator.target_repo import resolve_target_repo
 
@@ -196,19 +194,17 @@ def test_repair_planning_emits_repair_plan_created_event(git_repo: Path):
     assert ".codex-orchestrator/repair_plans/RP0001.json" in event["artifact_paths"]
 
 
-def test_patchlet_regeneration_emits_repair_patchlets_regenerated_event(git_repo: Path):
+def test_report_only_failure_does_not_regenerate_patchlets(git_repo: Path):
     ctx = _compiled_ctx(git_repo)
     _run_invalid_patchlet(ctx)
     classify_failures(ctx)
     plan_repair(ctx)
-    apply_repair(ctx)
-
-    result = regenerate_patchlets(ctx)
-
-    event = _event(ctx, "repair_patchlets_regenerated")
-    assert result["patchlet_ids"] == ["P0002"]
-    assert event["repair_plan_id"] == "RP0001"
-    assert event["details"]["patchlet_ids"] == ["P0002"]
+    plan = read_json(ctx.paths.repair_plans_dir / "RP0001.json")
+    events = read_operator_events(ctx.root)
+    assert plan["recommended_action"] == "REPORT_ONLY_FAILURE_RECORDED"
+    assert read_json(ctx.paths.state)["stage"] == "ORCHESTRATOR_ABORTED"
+    assert not any(event["event_type"] == "repair_patchlets_regenerated" for event in events)
+    assert not (ctx.paths.patchlets_dir / "P0002.json").exists()
 
 
 def test_operator_events_include_artifact_paths(git_repo: Path):
