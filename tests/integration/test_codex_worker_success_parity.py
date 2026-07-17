@@ -17,7 +17,7 @@ from codex_orchestrator.stages.init import init_workflow
 from codex_orchestrator.stages.normalize import normalize_master_prompt
 from codex_orchestrator.target_repo import resolve_target_repo
 from codex_orchestrator.validators.probe_artifact_validator import validate_probe_artifact_run
-from codex_orchestrator.validators.report_validator import validate_patchlet_report_file
+from codex_orchestrator.report_production import validate_task_completion_handoff
 from codex_orchestrator.workers.codex_exec import CodexExecWorker
 
 
@@ -52,7 +52,7 @@ run_dir = Path(os.environ["CXOR_RUN_DIR"])
 patchlet_id = os.environ["CXOR_PATCHLET_ID"]
 attempt_id = os.environ["CXOR_ATTEMPT_ID"]
 allowed_file = os.environ["CXOR_ALLOWED_PRODUCT_RUNTIME_FILE"]
-report_path = Path(os.environ["CXOR_REPORT_PATH"])
+handoff_path = Path(os.environ["CXOR_TASK_COMPLETION_HANDOFF_PATH"])
 probe_root = Path(os.environ["CXOR_PROBE_ROOT"])
 
 run_dir.mkdir(parents=True, exist_ok=True)
@@ -68,7 +68,7 @@ run_dir.mkdir(parents=True, exist_ok=True)
     "patchlet_id": patchlet_id,
     "attempt_id": attempt_id,
     "allowed_file": allowed_file,
-    "report_path": str(report_path),
+    "handoff_path": str(handoff_path),
     "probe_root": str(probe_root)
 }, indent=2, sort_keys=True), encoding="utf-8")
 
@@ -87,21 +87,12 @@ probe_run_dir.mkdir(parents=True, exist_ok=True)
 (probe_run_dir / "after_state.json").write_text(json.dumps({"value": "after"}) + "\\n", encoding="utf-8")
 (probe_run_dir / "cleanup_proof.json").write_text(json.dumps({"cleanup_passed": True}) + "\\n", encoding="utf-8")
 
-report_path.parent.mkdir(parents=True, exist_ok=True)
-report_path.write_text(json.dumps({
+handoff_path.parent.mkdir(parents=True, exist_ok=True)
+handoff_path.write_text(json.dumps({
     "schema_version": "1.0",
-    "kind": "patchlet_report",
+    "kind": "task_worker_completion_handoff",
     "patchlet_id": patchlet_id,
     "status": "COMPLETE",
-    "changed_product_runtime_file": allowed_file,
-    "changed_artifact_files": [
-        f".artifacts/probes/{patchlet_id}/probe.py",
-        f".artifacts/probes/{patchlet_id}/run_001/row_ledger.jsonl",
-        f".artifacts/probes/{patchlet_id}/run_001/trace_ledger.jsonl",
-        f".artifacts/probes/{patchlet_id}/run_001/before_state.json",
-        f".artifacts/probes/{patchlet_id}/run_001/after_state.json",
-        f".artifacts/probes/{patchlet_id}/run_001/cleanup_proof.json"
-    ],
     "probe_commands": [f"python .artifacts/probes/{patchlet_id}/probe.py"],
     "deterministic_run_counts": {
         "baseline": "5/5",
@@ -126,11 +117,6 @@ report_path.write_text(json.dumps({
         "summary": "direct probe passed after allowed change",
         "deterministic_run_count": "5/5"
     },
-    "probe_artifact_refs": [{
-        "patchlet_id": patchlet_id,
-        "probe_root": f".artifacts/probes/{patchlet_id}",
-        "run_id": "run_001"
-    }],
     "semantic_goal_results": [{
         "criterion_id": "SGC001",
         "kind": "python_module_function_returns",
@@ -138,7 +124,6 @@ report_path.write_text(json.dumps({
         "actual_value": "ok",
         "passed": True
     }],
-    "acceptance_criteria_result": "pass"
 }, indent=2) + "\\n", encoding="utf-8")
 
 print(str(execution_root))
@@ -164,7 +149,7 @@ def _run_fake_success(ctx, patchlet: dict, *, execution_root: Path, artifact_roo
     return run_ctx, result, env_dump
 
 
-def test_fake_codex_success_payload_writes_valid_complete_report_and_probe_artifacts(
+def test_fake_codex_success_payload_writes_valid_task_handoff_and_probe_artifacts(
     git_repo: Path,
     tmp_path: Path,
     monkeypatch,
@@ -178,7 +163,7 @@ def test_fake_codex_success_payload_writes_valid_complete_report_and_probe_artif
 
     run_ctx, result, _ = _run_fake_success(ctx, patchlet, execution_root=execution_root, artifact_root=ctx.root)
 
-    assert result.report_path == ctx.paths.reports_dir / "P0001.json"
+    assert result.report_path == run_ctx.run_dir / "P0001.task_completion_handoff.json"
     assert result.report_path.exists()
     assert (run_ctx.worker_evidence_dir / "GP001" / "probe.py").exists()
     assert (run_ctx.worker_evidence_dir / "GP001" / "run_001" / "row_ledger.jsonl").exists()
@@ -186,7 +171,7 @@ def test_fake_codex_success_payload_writes_valid_complete_report_and_probe_artif
     assert (run_ctx.run_dir / "env.json").exists()
 
 
-def test_fake_codex_success_payload_passes_patchlet_report_validator(
+def test_fake_codex_success_payload_passes_handoff_and_evidence_boundaries(
     git_repo: Path,
     tmp_path: Path,
     monkeypatch,
@@ -206,10 +191,10 @@ def test_fake_codex_success_payload_passes_patchlet_report_validator(
         report_path=result.report_path,
     )
 
-    report = validate_patchlet_report_file(ctx.paths.reports_dir / "P0001.json", patchlet)
+    handoff_errors = validate_task_completion_handoff(result.report_path, patchlet_id="P0001")
     probe_result = validate_probe_artifact_run(ctx.paths.probe_dir / "P0001" / "run_001", patchlet_id="P0001")
 
-    assert report["status"] == "COMPLETE"
+    assert handoff_errors == []
     evidence_inventory = json.loads(
         (run_ctx.run_dir / "gates" / "worker_evidence_inventory.json").read_text(encoding="utf-8")
     )
@@ -266,10 +251,12 @@ def test_fake_codex_success_payload_uses_only_cxor_environment_paths(
     assert env_dump["target_root"] == str(ctx.root)
     assert env_dump["execution_root"] == str(execution_root)
     assert env_dump["artifact_root"] == str(ctx.root)
-    assert env_dump["report_path"] == str(ctx.paths.reports_dir / "P0001.json")
+    assert env_dump["handoff_path"] == str(
+        ctx.paths.runs_dir / "P0001_attempt1" / "P0001.task_completion_handoff.json"
+    )
     assert env_dump["probe_root"] == str(Path(env_dump["probe_dir"]) / patchlet["probe_ids"][0])
     assert env_dump["run_dir"] == str(ctx.paths.runs_dir / "P0001_attempt1")
-    assert Path(env_dump["report_path"]).exists()
+    assert Path(env_dump["handoff_path"]).exists()
     assert Path(env_dump["probe_root"]).exists()
-    assert not env_dump["report_path"].startswith(str(execution_root))
+    assert not env_dump["handoff_path"].startswith(str(execution_root))
     assert not env_dump["probe_root"].startswith(str(execution_root))

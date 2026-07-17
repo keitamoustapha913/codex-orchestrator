@@ -180,12 +180,12 @@ def test_mock_patchlet_execution_writes_durable_probe_artifacts_and_valid_report
     assert (run_root / "before_state.json").exists()
     assert (run_root / "after_state.json").exists()
     assert (run_root / "cleanup_proof.json").exists()
-    assert report["probe_artifact_refs"] == [{
-        "patchlet_id": result.patchlet_id,
-        "probe_root": f".artifacts/probes/{result.patchlet_id}",
-        "run_id": "run_001",
-    }]
-    assert validate_json_file(ctx.paths.reports_dir / f"{result.patchlet_id}.json", "patchlet_report.schema.json") == []
+    assert {ref["probe_root"] for ref in report["probe_artifact_refs"]} == {
+        f".artifacts/probes/{result.patchlet_id}",
+        f".artifacts/probes/{result.patchlet_id}/run_001",
+    }
+    assert all(ref["files"] for ref in report["probe_artifact_refs"])
+    assert validate_json_file(ctx.paths.reports_dir / f"{result.patchlet_id}.json", "worker_patchlet_report_v2.schema.json") == []
 
 
 def test_global_verifier_marks_done_after_valid_reports(git_repo: Path):
@@ -394,7 +394,7 @@ def test_run_generated_repair_patchlet_with_mock_worker_completes_and_preserves_
     assert result.patchlet_id == "P0002"
     assert result.status in {"COMPLETE", "VERIFIED_NO_CHANGE_NEEDED"}
     assert report_path.exists()
-    assert validate_json_file(report_path, "patchlet_report.schema.json") == []
+    assert validate_json_file(report_path, "worker_patchlet_report_v2.schema.json") == []
 
     patchlet_index = read_json(ctx.paths.patchlet_index)
     repair_patchlet = next(p for p in patchlet_index["patchlets"] if p["patchlet_id"] == "P0002")

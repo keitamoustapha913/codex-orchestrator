@@ -3,8 +3,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from conftest import read_json
-
 from codex_orchestrator.operator_events import read_operator_events
 from codex_orchestrator.prompt_index import read_prompt_index
 from codex_orchestrator.stages.apply_repair import apply_repair
@@ -50,7 +48,7 @@ def _prompt_entries(ctx, kind: str | None = None):
 def _invalid_report_then_repair(ctx):
     scenario_path = ctx.paths.workflow_dir / "mock" / "next_patchlet_result.json"
     scenario_path.parent.mkdir(parents=True, exist_ok=True)
-    scenario_path.write_text(json.dumps({"report_override": {"probe_artifact_refs": ["bad"]}}), encoding="utf-8")
+    scenario_path.write_text(json.dumps({"report_production_override": {"probe_artifact_refs": ["bad"]}}), encoding="utf-8")
     run_next_patchlet(ctx, worker_mode="mock", use_worktree=True)
     classify_failures(ctx)
     plan_repair(ctx)
@@ -131,7 +129,8 @@ def test_prompt_index_entry_contains_contracts(git_repo: Path):
 
     entry = _prompt_entries(ctx, "patchlet_worker_prompt")[0]
 
-    assert "REPORT_SCHEMA_CONTRACT.md" in entry["contracts"]
+    assert "TASK_COMPLETION_HANDOFF_CONTRACT.md" in entry["contracts"]
+    assert "REPORT_SCHEMA_CONTRACT.md" not in entry["contracts"]
     assert "FINAL_REPORT_CONTRACT.md" in entry["contracts"]
 
 

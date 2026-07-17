@@ -5,9 +5,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-from conftest import read_json
-
-from codex_orchestrator.operator_events import read_operator_events
 from codex_orchestrator.stages.build_inventory import build_inventory
 from codex_orchestrator.stages.census import run_census
 from codex_orchestrator.stages.classify_evidence import classify_evidence
@@ -38,7 +35,7 @@ def _run_cli(args: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
 def _scenario(ctx, refs):
     p = ctx.paths.workflow_dir / "mock" / "next_patchlet_result.json"
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps({"report_override": {"probe_artifact_refs": refs}}), encoding="utf-8")
+    p.write_text(json.dumps({"report_production_override": {"probe_artifact_refs": refs}}), encoding="utf-8")
 
 
 def test_live_progress_prints_report_ingestion_normalized(git_repo: Path):

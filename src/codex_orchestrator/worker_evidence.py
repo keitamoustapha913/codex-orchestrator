@@ -351,6 +351,7 @@ def preserve_worker_evidence(
                     "source_sha256": source_hash,
                     "preserved_sha256": destination_hash,
                     "diagnostic_alias_sha256": alias_hash,
+                    "size_bytes": before.st_size,
                     "authoritative": False,
                 }
             )

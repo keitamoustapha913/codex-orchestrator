@@ -227,17 +227,12 @@ Patchlet Codex defaults to `gpt-5.4-mini` and reasoning `medium`.
 Non-patchlet/orchestrator Codex profiles default to `gpt-5.5` and reasoning
 `medium`.
 
-Prompt contract artifact:
-
-- `src/codex_orchestrator/prompt_templates/real_codex_patchlet_contract.md`
-
-During the opt-in smoke, that contract is injected into the smoke prompt and
-the generated prompt artifact under `.codex-orchestrator/subprompts/`. Inspect
-that generated subprompt artifact first if installed Codex fails safely.
-
-The contract carries a minimal valid report example for `CXOR_REPORT_PATH`, a
-minimal durable probe layout for `CXOR_PROBE_ROOT`, and explicit instructions
-not to invent alternate paths.
+Each worker attempt generates `worker_memory/REPORT_SCHEMA_CONTRACT.md` from
+the WorkerPatchletReportV2 source in `report_contract.py` and embeds the same
+contract in `codex_task_prompt.md`. Inspect those attempt-local artifacts first
+after a safe failure. V1 reports fail before transformation; unknown V2
+extensions are non-authoritative warnings. `acceptance_criteria_result` has no
+special handling, and `worker_semantic_claims` is orchestrator-derived.
 
 CI-friendly commands that exist:
 

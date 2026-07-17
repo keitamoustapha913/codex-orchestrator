@@ -6,8 +6,8 @@ from codex_orchestrator.validators.schema_validator import validate_json
 
 def _base_report(semantic_goal_results):
     return {
-        "schema_version": "1.0",
-        "kind": "patchlet_report",
+        "schema_version": "2.0",
+        "kind": "worker_patchlet_report",
         "patchlet_id": "P0001",
         "status": "COMPLETE",
         "changed_product_runtime_file": "service.cfg",
@@ -28,7 +28,6 @@ def _base_report(semantic_goal_results):
         "row_ledger": [],
         "trace_ledger": [],
         "cleanup_proof": "clean",
-        "acceptance_criteria_result": "pass",
         "semantic_goal_results": semantic_goal_results,
     }
 
@@ -47,22 +46,22 @@ def _normalization(raw_items):
 
 
 def test_report_validation_accepts_canonical_semantic_goal_result():
-    errors = validate_json(_base_report([{"criterion_id": "PO001", "kind": "orchestrator_verified_proof_obligation_result", "expected_value": "status=ready-no-compat", "actual_value": "status=ready-no-compat", "passed": True}]), "patchlet_report.schema.json")
+    errors = validate_json(_base_report([{"criterion_id": "PO001", "kind": "orchestrator_verified_proof_obligation_result", "expected_value": "status=ready-no-compat", "actual_value": "status=ready-no-compat", "passed": True}]), "worker_patchlet_report_v2.schema.json")
     assert errors == []
 
 
 def test_report_validation_accepts_safe_shorthand_semantic_goal_result():
-    errors = validate_json(_base_report([{"goal_item_id": "GI001", "result": "status=ready-no-compat"}]), "patchlet_report.schema.json")
+    errors = validate_json(_base_report([{"goal_item_id": "GI001", "result": "status=ready-no-compat"}]), "worker_patchlet_report_v2.schema.json")
     assert errors == []
     assert _normalization([{"goal_item_id": "GI001", "result": "status=ready-no-compat"}])["accepted"] is True
 
 
 def test_report_validation_rejects_shorthand_without_goal_item():
-    assert validate_json(_base_report([{"result": "status=ready-no-compat"}]), "patchlet_report.schema.json")
+    assert validate_json(_base_report([{"result": "status=ready-no-compat"}]), "worker_patchlet_report_v2.schema.json")
 
 
 def test_report_validation_rejects_shorthand_without_result_text():
-    assert validate_json(_base_report([{"goal_item_id": "GI001"}]), "patchlet_report.schema.json")
+    assert validate_json(_base_report([{"goal_item_id": "GI001"}]), "worker_patchlet_report_v2.schema.json")
 
 
 def test_report_validation_warns_for_shorthand_with_unknown_extra_proof_claim():
@@ -87,8 +86,8 @@ def test_report_validation_reports_structured_error_for_vague_shorthand():
     assert result["semantic_quality_warnings"][0]["error_code"] == "VAGUE_RESULT_TEXT"
 
 
-def test_patchlet_report_schema_requires_canonical_goal_item_id():
+def test_worker_patchlet_report_v2_schema_requires_canonical_goal_item_id():
     assert validate_json(
         _base_report([{"goal": "GI001", "result": "status=ready-no-compat"}]),
-        "patchlet_report.schema.json",
+        "worker_patchlet_report_v2.schema.json",
     )

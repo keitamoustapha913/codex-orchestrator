@@ -49,10 +49,16 @@
     },
     "changed_artifact_files": {
       "type": "array",
+      "items": {
+        "type": "string"
+      },
       "description": "Reported evidence artifacts."
     },
     "probe_commands": {
       "type": "array",
+      "items": {
+        "type": "string"
+      },
       "description": "Worker-described probes; independent proof remains authoritative."
     },
     "deterministic_run_counts": {
@@ -81,15 +87,122 @@
     },
     "probe_artifact_refs": {
       "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "patchlet_id",
+          "probe_root",
+          "run_id"
+        ],
+        "properties": {
+          "patchlet_id": {
+            "type": "string"
+          },
+          "probe_root": {
+            "type": "string"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "path",
+                "kind",
+                "sha256",
+                "size_bytes"
+              ],
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string"
+                },
+                "sha256": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                },
+                "size_bytes": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "extension": {
+                  "type": "string"
+                },
+                "mime_type": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": true
+            }
+          }
+        },
+        "additionalProperties": true
+      },
       "description": "References to evidence under approved probe roots."
     },
     "semantic_goal_results": {
       "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "criterion_id",
+              "kind",
+              "expected_value",
+              "actual_value",
+              "passed"
+            ],
+            "properties": {
+              "criterion_id": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string"
+              },
+              "expected_value": {},
+              "actual_value": {},
+              "passed": {
+                "type": "boolean"
+              },
+              "probe_artifact_ref": {
+                "type": "object"
+              }
+            },
+            "additionalProperties": true
+          },
+          {
+            "type": "object",
+            "required": [
+              "goal_item_id",
+              "result"
+            ],
+            "properties": {
+              "goal_item_id": {
+                "type": "string"
+              },
+              "result": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "additionalProperties": true
+          }
+        ]
+      },
       "description": "Worker semantic observations pending independent proof."
     },
-    "worker_semantic_claims": {
-      "type": "array",
-      "description": "Normalized worker claims; non-authoritative."
+    "blocking_boundary_reason": {
+      "type": "string",
+      "description": "Worker description of the current blocking boundary."
+    },
+    "failed_probe_evidence": {
+      "type": "string",
+      "description": "Worker description of failed probe evidence."
     }
   },
   "additionalProperties": true

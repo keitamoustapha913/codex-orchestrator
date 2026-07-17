@@ -3,8 +3,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
-
 from codex_orchestrator.run_records import append_run_record
 from codex_orchestrator.stages.init import init_workflow
 from codex_orchestrator.target_repo import resolve_target_repo
@@ -140,7 +138,10 @@ def _seed_failed_real_codex_attempt(
     )
     prompt_artifact = ctx.paths.subprompts_dir / "0001_app.md"
     prompt_artifact.parent.mkdir(parents=True, exist_ok=True)
-    prompt_artifact.write_text("# Real Codex Patchlet Contract\nCXOR_REPORT_PATH\n", encoding="utf-8")
+    prompt_artifact.write_text(
+        "# Task Completion Handoff Contract\nCXOR_TASK_COMPLETION_HANDOFF_PATH\n",
+        encoding="utf-8",
+    )
 
     run_record = {
             "stage": "PATCHLET_EXECUTION_IN_PROGRESS",

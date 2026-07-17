@@ -33,7 +33,7 @@ def _ctx(git_repo: Path):
 def _scenario(ctx, refs):
     p = ctx.paths.workflow_dir / "mock" / "next_patchlet_result.json"
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps({"report_override": {"probe_artifact_refs": refs}}), encoding="utf-8")
+    p.write_text(json.dumps({"report_production_override": {"probe_artifact_refs": refs}}), encoding="utf-8")
 
 
 def test_fake_real_codex_string_probe_refs_are_normalized_and_accepted(git_repo: Path):

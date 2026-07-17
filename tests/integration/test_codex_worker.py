@@ -52,7 +52,7 @@ print(cwd)
 print("fake codex diagnostic", file=sys.stderr)
 report = {
     "schema_version": "1.0",
-    "kind": "patchlet_report",
+    "kind": "task_worker_completion_handoff",
     "patchlet_id": "P0001",
     "status": "VERIFIED_NO_CHANGE_NEEDED",
     "changed_product_runtime_file": None,
@@ -72,10 +72,8 @@ report = {
     "row_ledger": [],
     "trace_ledger": [],
     "cleanup_proof": "probe cleaned up temporary state",
-    "acceptance_criteria_result": "pass"
 }
-(cwd / ".codex-orchestrator" / "reports").mkdir(parents=True, exist_ok=True)
-(cwd / ".codex-orchestrator" / "reports" / "P0001.json").write_text(json.dumps(report), encoding="utf-8")
+Path(os.environ["CXOR_TASK_COMPLETION_HANDOFF_PATH"]).write_text(json.dumps(report), encoding="utf-8")
 """,
     )
     monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ.get('PATH', '')}")
@@ -86,7 +84,7 @@ report = {
     command = json.loads((run_dir / "command.json").read_text(encoding="utf-8"))
     output = json.loads((run_dir / "output.jsonl").read_text(encoding="utf-8").strip())
     assert result.exit_code == 0
-    assert result.report_path == ctx.paths.reports_dir / "P0001.json"
+    assert result.report_path == run_dir / "P0001.task_completion_handoff.json"
     assert (run_dir / "stdout.txt").read_text(encoding="utf-8").strip() == str(ctx.root)
     assert "fake codex diagnostic" in (run_dir / "stderr.txt").read_text(encoding="utf-8")
     assert command["cwd"] == str(ctx.root)
@@ -104,6 +102,7 @@ def test_codex_worker_records_stdout_stderr_jsonl_and_exit_code(git_repo: Path, 
         fake_codex,
         """#!/usr/bin/env python3
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -112,7 +111,7 @@ print("stderr-marker", file=sys.stderr)
 cwd = Path.cwd()
 report = {
     "schema_version": "1.0",
-    "kind": "patchlet_report",
+    "kind": "task_worker_completion_handoff",
     "patchlet_id": "P0001",
     "status": "VERIFIED_NO_CHANGE_NEEDED",
     "changed_product_runtime_file": None,
@@ -132,10 +131,8 @@ report = {
     "row_ledger": [],
     "trace_ledger": [],
     "cleanup_proof": "probe cleaned up temporary state",
-    "acceptance_criteria_result": "pass"
 }
-(cwd / ".codex-orchestrator" / "reports").mkdir(parents=True, exist_ok=True)
-(cwd / ".codex-orchestrator" / "reports" / "P0001.json").write_text(json.dumps(report), encoding="utf-8")
+Path(os.environ["CXOR_TASK_COMPLETION_HANDOFF_PATH"]).write_text(json.dumps(report), encoding="utf-8")
 """,
     )
     monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ.get('PATH', '')}")
@@ -207,9 +204,9 @@ def test_codex_worker_default_patchlet_timeout_is_ten_minutes(git_repo: Path, tm
 import json
 import os
 from pathlib import Path
-Path(os.environ["CXOR_REPORT_PATH"]).parent.mkdir(parents=True, exist_ok=True)
-Path(os.environ["CXOR_REPORT_PATH"]).write_text(json.dumps({
-    "schema_version": "1.0", "kind": "patchlet_report", "patchlet_id": "P0001",
+Path(os.environ["CXOR_TASK_COMPLETION_HANDOFF_PATH"]).parent.mkdir(parents=True, exist_ok=True)
+Path(os.environ["CXOR_TASK_COMPLETION_HANDOFF_PATH"]).write_text(json.dumps({
+    "schema_version": "1.0", "kind": "task_worker_completion_handoff", "patchlet_id": "P0001",
     "status": "VERIFIED_NO_CHANGE_NEEDED", "changed_product_runtime_file": None,
     "changed_artifact_files": [".artifacts/probes/P0001/probe.py"],
     "probe_commands": ["python .artifacts/probes/P0001/probe.py"],
@@ -223,7 +220,6 @@ Path(os.environ["CXOR_REPORT_PATH"]).write_text(json.dumps({
     },
     "before_after_state": [{"before": "ok", "after": "ok"}],
     "row_ledger": [], "trace_ledger": [], "cleanup_proof": "cleanup ok",
-    "acceptance_criteria_result": "pass"
 }), encoding="utf-8")
 """,
     )
@@ -527,12 +523,13 @@ def test_codex_worker_does_not_write_into_orchestrator_source_repo(git_repo: Pat
         fake_codex,
         """#!/usr/bin/env python3
 import json
+import os
 from pathlib import Path
 
 cwd = Path.cwd()
 report = {
     "schema_version": "1.0",
-    "kind": "patchlet_report",
+    "kind": "task_worker_completion_handoff",
     "patchlet_id": "P0001",
     "status": "VERIFIED_NO_CHANGE_NEEDED",
     "changed_product_runtime_file": None,
@@ -552,10 +549,8 @@ report = {
     "row_ledger": [],
     "trace_ledger": [],
     "cleanup_proof": "probe cleaned up temporary state",
-    "acceptance_criteria_result": "pass"
 }
-(cwd / ".codex-orchestrator" / "reports").mkdir(parents=True, exist_ok=True)
-(cwd / ".codex-orchestrator" / "reports" / "P0001.json").write_text(json.dumps(report), encoding="utf-8")
+Path(os.environ["CXOR_TASK_COMPLETION_HANDOFF_PATH"]).write_text(json.dumps(report), encoding="utf-8")
 """,
     )
     monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ.get('PATH', '')}")
@@ -563,7 +558,8 @@ report = {
     run_dir = ctx.paths.runs_dir / "real_codex_target_only"
     CodexExecWorker().run_patchlet(ctx, patchlet, run_dir=run_dir)
 
-    assert (ctx.paths.reports_dir / "P0001.json").exists()
+    assert (run_dir / "P0001.task_completion_handoff.json").exists()
+    assert not (ctx.paths.reports_dir / "P0001.json").exists()
     assert not source_repo_report.exists()
 
 

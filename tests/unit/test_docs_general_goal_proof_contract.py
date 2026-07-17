@@ -57,3 +57,14 @@ def test_docs_explain_no_compatibility_fast_path():
     text = _docs_text()
     assert "no compatibility fast path" in text.lower()
     assert "app.py" in text and "app.main" in text
+
+
+def test_worker_semantic_docs_use_only_canonical_goal_item_id():
+    text = "\n".join([
+        Path("docs/general_goal_proof_contract.md").read_text(encoding="utf-8"),
+        Path("docs/real_codex_smoke.md").read_text(encoding="utf-8"),
+        Path("docs/semantic_goal_satisfaction.md").read_text(encoding="utf-8"),
+    ])
+    assert "goal_item_id" in text
+    assert '`{"goal_item":' not in text
+    assert "with `goal_item` and" not in text

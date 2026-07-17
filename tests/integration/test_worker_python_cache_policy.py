@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 import subprocess
 from pathlib import Path
@@ -59,7 +58,7 @@ Path(os.environ["CXOR_FINAL_REPORT_PATH"]).write_text("FINAL_STATUS: PASS\\n", e
 }), encoding="utf-8")
 report = {
     "schema_version": "1.0",
-    "kind": "patchlet_report",
+    "kind": "task_worker_completion_handoff",
     "patchlet_id": patchlet_id,
     "status": "VERIFIED_NO_CHANGE_NEEDED",
     "changed_product_runtime_file": None,
@@ -81,9 +80,8 @@ report = {
     "trace_ledger": [],
     "cleanup_proof": "cleanup ok",
     "probe_artifact_refs": [{"patchlet_id": patchlet_id, "probe_root": f".artifacts/probes/{patchlet_id}", "run_id": "run_001"}],
-    "acceptance_criteria_result": "pass"
 }
-Path(os.environ["CXOR_REPORT_PATH"]).write_text(json.dumps(report), encoding="utf-8")
+Path(os.environ["CXOR_TASK_COMPLETION_HANDOFF_PATH"]).write_text(json.dumps(report), encoding="utf-8")
 print(json.dumps({"type": "turn.completed"}), flush=True)
 """,
         encoding="utf-8",

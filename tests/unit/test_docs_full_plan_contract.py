@@ -220,22 +220,31 @@ def test_docs_link_real_codex_failure_to_run_manifest_evidence():
     assert "WORKER_FAILED" in text
 
 
-def test_docs_reference_real_codex_patchlet_contract_prompt():
+def test_docs_define_worker_patchlet_report_v2_as_sole_contract():
     text = _docs_text()
-    assert "real_codex_patchlet_contract.md" in text
+    assert "WorkerPatchletReportV2 is the sole" in text
 
 
-def test_docs_explain_real_codex_contract_is_injected_into_smoke_prompt():
+def test_docs_state_v1_reports_are_rejected_before_normalization():
     text = _docs_text().lower()
-    assert "real_codex_patchlet_contract.md" in text
-    assert "contract injected" in text or "injected into the smoke prompt" in text
+    assert "v1" in text
+    assert "rejected before" in text
+    assert "normalization" in text
 
 
-def test_docs_explain_real_codex_contract_contains_minimal_valid_payload_example():
+def test_docs_state_report_contract_is_generated_per_attempt():
+    text = _docs_text()
+    assert "REPORT_SCHEMA_CONTRACT.md" in text
+    assert "generated" in text.lower()
+    assert "per attempt" in text.lower() or "each attempt" in text.lower()
+
+
+def test_docs_explain_task_handoff_and_separate_report_production_contract():
     text = _docs_text().lower()
-    assert "minimal valid report" in text
-    assert "cxor_report_path" in text
-    assert "cxor_probe_root" in text
+    assert "task completion handoff" in text
+    assert "report production worker" in text
+    assert "cxor_task_completion_handoff_path" in text
+    assert "cxor_worker_evidence_dir" in text
 
 
 def test_docs_explain_how_to_inspect_generated_prompt_artifact():

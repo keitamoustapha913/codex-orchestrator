@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from codex_orchestrator import report_contract
 from codex_orchestrator.semantic_result_normalization import normalize_semantic_goal_results
 
 
@@ -95,6 +96,16 @@ def test_canonical_goal_item_id_is_accepted():
     result = _normalize([{"goal_item_id": "GI001", "result": "status updated from pending to ready-no-compat without changing reserved keys"}])
     assert result["accepted"] is True
     assert result["accepted_raw_claims"][0]["claim_status"] == "LINKED_PENDING_ORCHESTRATOR_PROOF"
+
+
+def test_normalizer_and_generated_example_share_goal_item_id_field(monkeypatch):
+    monkeypatch.setattr(report_contract, "SEMANTIC_GOAL_ITEM_ID_FIELD", "contract_goal_item_id")
+    raw = report_contract.semantic_goal_result_shorthand_example()
+    raw["contract_goal_item_id"] = "GI001"
+    raw["result"] = "status updated from pending to ready-no-compat without changing reserved keys"
+    result = _normalize([raw])
+    assert result["accepted"] is True
+    assert result["accepted_raw_claims"][0]["goal_item_id"] == "GI001"
 
 
 def test_goal_item_alias_is_not_normalized():

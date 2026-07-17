@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import codex_orchestrator.validators.report_validator as report_validator
 from codex_orchestrator.validators.diff_validator import validate_changed_paths
 from codex_orchestrator.validators.report_validator import ReportValidationError, validate_patchlet_report, validate_patchlet_report_file
 import pytest
@@ -28,8 +29,8 @@ def base_patchlet() -> dict:
 
 def complete_report() -> dict:
     return {
-        "schema_version": "1.0",
-        "kind": "patchlet_report",
+        "schema_version": "2.0",
+        "kind": "worker_patchlet_report",
         "patchlet_id": "P0001",
         "status": "COMPLETE",
         "changed_product_runtime_file": "app.py",
@@ -55,7 +56,6 @@ def complete_report() -> dict:
             "probe_root": ".artifacts/probes/P0001",
             "run_id": "run_001",
         }],
-        "acceptance_criteria_result": "pass",
     }
 
 
@@ -63,7 +63,6 @@ def failed_report() -> dict:
     report = complete_report()
     report["status"] = "FAILED_WITH_EVIDENCE"
     report["changed_product_runtime_file"] = None
-    report["acceptance_criteria_result"] = "fail"
     report["failed_probe_evidence"] = "probe reproduced the failure deterministically"
     return report
 
@@ -72,7 +71,6 @@ def blocked_report() -> dict:
     report = complete_report()
     report["status"] = "BLOCKED_WITH_EVIDENCE"
     report["changed_product_runtime_file"] = None
-    report["acceptance_criteria_result"] = "blocked"
     report["blocking_boundary_reason"] = "requires external dependency boundary outside allowed scope"
     return report
 
@@ -118,6 +116,79 @@ def test_diff_validator_rejects_frozen_workflow_artifacts():
 
 def test_report_validator_accepts_complete_report():
     validate_patchlet_report(complete_report(), base_patchlet())
+
+
+def test_report_validator_rejects_wrong_relative_product_path():
+    report = complete_report()
+    report["changed_product_runtime_file"] = "other.py"
+
+    with pytest.raises(ReportValidationError) as exc_info:
+        validate_patchlet_report(report, base_patchlet())
+
+    assert exc_info.value.errors[0]["normalized_signature"] == "changed_product_runtime_file_mismatch"
+
+
+def test_report_validator_rejects_absolute_product_path():
+    report = complete_report()
+    report["changed_product_runtime_file"] = "/tmp/worker/checkout/app.py"
+
+    with pytest.raises(ReportValidationError):
+        validate_patchlet_report(report, base_patchlet())
+
+
+def _v1_report() -> dict:
+    report = complete_report()
+    report["schema_version"] = "1.0"
+    report["kind"] = "patchlet_report"
+    report["acceptance_criteria_result"] = "pass"
+    return report
+
+
+def test_report_validator_rejects_v1_schema_version():
+    with pytest.raises(ReportValidationError):
+        validate_patchlet_report(_v1_report(), base_patchlet())
+
+
+def test_report_validator_rejects_v1_report_kind():
+    with pytest.raises(ReportValidationError):
+        validate_patchlet_report(_v1_report(), base_patchlet())
+
+
+def test_report_validator_always_uses_worker_patchlet_report_v2_schema(monkeypatch: pytest.MonkeyPatch):
+    schema_names = []
+
+    def record_schema(report, schema_name):
+        schema_names.append(schema_name)
+        return []
+
+    monkeypatch.setattr(report_validator, "iter_jsonschema_errors", record_schema)
+    validate_patchlet_report(_v1_report(), base_patchlet())
+    assert schema_names == ["worker_patchlet_report_v2.schema.json"]
+
+
+def test_complete_v2_report_does_not_require_acceptance_criteria_result():
+    report = complete_report()
+    assert "acceptance_criteria_result" not in report
+    validate_patchlet_report(report, base_patchlet())
+
+
+def test_verified_no_change_v2_report_does_not_require_acceptance_criteria_result():
+    report = complete_report()
+    report["status"] = "VERIFIED_NO_CHANGE_NEEDED"
+    report["changed_product_runtime_file"] = None
+    validate_patchlet_report(report, base_patchlet())
+
+
+def test_blocked_v2_report_does_not_require_acceptance_criteria_result():
+    report = blocked_report()
+    assert "acceptance_criteria_result" not in report
+    validate_patchlet_report(report, base_patchlet())
+
+
+def test_failed_v2_report_does_not_require_acceptance_criteria_result():
+    report = failed_report()
+    assert "acceptance_criteria_result" not in report
+    validate_patchlet_report(report, base_patchlet())
 
 
 def test_report_validator_rejects_vague_status():

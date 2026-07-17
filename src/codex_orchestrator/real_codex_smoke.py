@@ -26,10 +26,6 @@ from .jsonio import read_json
 ATTEMPT_ID_PATTERN = re.compile(r"^P\d+_attempt\d+$")
 
 
-def _real_codex_contract_template_path() -> Path:
-    return Path(__file__).resolve().parent / "prompt_templates" / "real_codex_patchlet_contract.md"
-
-
 def real_codex_smoke_enabled(explicit_flag: bool) -> bool:
     return bool(explicit_flag)
 
@@ -61,7 +57,6 @@ def run_real_codex_smoke(
     master: str | Path,
     codex_binary: str = "codex",
     allow_real_codex: bool = False,
-    inject_contract: bool = True,
 ) -> dict:
     ensure_real_codex_smoke_prereqs(
         ctx,
@@ -77,12 +72,7 @@ def run_real_codex_smoke(
     compile_patchlets(ctx)
 
     previous_binary = os.environ.get("CXOR_CODEX_BINARY")
-    previous_contract = os.environ.get("CXOR_REAL_CODEX_CONTRACT_PATH")
     os.environ["CXOR_CODEX_BINARY"] = codex_binary
-    if inject_contract:
-        os.environ["CXOR_REAL_CODEX_CONTRACT_PATH"] = str(_real_codex_contract_template_path())
-    else:
-        os.environ.pop("CXOR_REAL_CODEX_CONTRACT_PATH", None)
     try:
         result = run_next_patchlet(ctx, worker_mode="real_codex")
     finally:
@@ -90,10 +80,6 @@ def run_real_codex_smoke(
             os.environ.pop("CXOR_CODEX_BINARY", None)
         else:
             os.environ["CXOR_CODEX_BINARY"] = previous_binary
-        if previous_contract is None:
-            os.environ.pop("CXOR_REAL_CODEX_CONTRACT_PATH", None)
-        else:
-            os.environ["CXOR_REAL_CODEX_CONTRACT_PATH"] = previous_contract
 
     state = load_state(ctx)
     run_dir = ctx.paths.runs_dir / f"{result.patchlet_id}_attempt1"
@@ -110,6 +96,7 @@ def run_real_codex_smoke(
         "command_path": str(run_dir / "command.json"),
         "output_jsonl_path": str(run_dir / "output.jsonl"),
         "diff_path": str(run_dir / "diff.patch"),
+        "report_schema_contract_path": str(run_dir / "worker_memory" / "REPORT_SCHEMA_CONTRACT.md"),
     }
 
 
@@ -282,13 +269,14 @@ def _smoke_result(
     run_manifest_entry = matching_manifest_entry
     prompt_artifact_path = _latest_prompt_artifact_path(ctx)
     capsule_manifest_path = str(run_dir / "worker_capsule.json") if run_dir is not None else None
-    contract_template_path = _real_codex_contract_template_path()
-    contract_injected = False
+    report_schema_contract_path = (
+        run_dir / "worker_memory" / "REPORT_SCHEMA_CONTRACT.md"
+        if run_dir is not None
+        else None
+    )
     command = {}
     if run_dir is not None and (run_dir / "command.json").exists():
         command = read_json(run_dir / "command.json")
-    if prompt_artifact_path is not None and prompt_artifact_path.exists():
-        contract_injected = "Real Codex Patchlet Contract" in prompt_artifact_path.read_text(encoding="utf-8")
     diagnosis_attempt_id = run_manifest_entry.get("attempt_id") if run_manifest_entry is not None else None
     result = {
         "worker_mode": "real_codex",
@@ -310,8 +298,11 @@ def _smoke_result(
         "worker_memory_dir": str(run_dir / "worker_memory") if run_dir is not None else None,
         "worker_stage_dir": str(run_dir / "worker_stage") if run_dir is not None else None,
         "wrapper_gate_result_path": str(run_dir / "gates" / "wrapper_gate_result.json") if run_dir is not None else None,
-        "contract_template_path": str(contract_template_path),
-        "contract_injected": contract_injected,
+        "report_schema_contract_path": (
+            str(report_schema_contract_path)
+            if report_schema_contract_path is not None
+            else None
+        ),
         "final_verification_path": str(ctx.paths.final_verification_json),
         "reports_dir": str(ctx.paths.reports_dir),
         "probes_dir": str(ctx.paths.probe_dir),
@@ -358,7 +349,6 @@ def run_real_codex_auto_worktree_smoke(
     allow_real_codex: bool = False,
     until: str = "DONE",
     max_iterations: int = 150,
-    inject_contract: bool = True,
 ) -> dict:
     ensure_real_codex_smoke_prereqs(
         ctx,
@@ -374,12 +364,7 @@ def run_real_codex_auto_worktree_smoke(
     )
 
     previous_binary = os.environ.get("CXOR_CODEX_BINARY")
-    previous_contract = os.environ.get("CXOR_REAL_CODEX_CONTRACT_PATH")
     os.environ["CXOR_CODEX_BINARY"] = codex_binary
-    if inject_contract:
-        os.environ["CXOR_REAL_CODEX_CONTRACT_PATH"] = str(_real_codex_contract_template_path())
-    else:
-        os.environ.pop("CXOR_REAL_CODEX_CONTRACT_PATH", None)
     try:
         try:
             state = run_auto(
@@ -408,10 +393,6 @@ def run_real_codex_auto_worktree_smoke(
             os.environ.pop("CXOR_CODEX_BINARY", None)
         else:
             os.environ["CXOR_CODEX_BINARY"] = previous_binary
-        if previous_contract is None:
-            os.environ.pop("CXOR_REAL_CODEX_CONTRACT_PATH", None)
-        else:
-            os.environ["CXOR_REAL_CODEX_CONTRACT_PATH"] = previous_contract
 
     return _smoke_result(
         ctx,

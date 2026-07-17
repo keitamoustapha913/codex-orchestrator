@@ -33,7 +33,7 @@ def _ctx(git_repo: Path):
 def _bad(ctx):
     path = ctx.paths.workflow_dir / "mock" / "next_patchlet_result.json"
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"report_override": {"probe_artifact_refs": ["/etc/passwd"]}}), encoding="utf-8")
+    path.write_text(json.dumps({"report_production_override": {"probe_artifact_refs": ["/etc/passwd"]}}), encoding="utf-8")
     run_next_patchlet(ctx, worker_mode="mock", use_worktree=True)
 
 

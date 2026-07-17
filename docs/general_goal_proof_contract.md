@@ -33,7 +33,7 @@ patchlet-scoped proof runs only selected current obligations for the active work
 ## RC6B Semantic Result Normalization
 
 Real Codex may emit shorthand `semantic_goal_results` such as
-`{"goal_item": "GI001", "result": "status updated from pending to ready-no-compat"}`.
+`{"goal_item_id": "GI001", "result": "status updated from pending to ready-no-compat"}`.
 The orchestrator accepts that shape only as a raw worker semantic claim, never
 as proof. The raw worker output is preserved and linked to the current
 patchlet goal item, proof obligation, slice boundary, and probe plan.

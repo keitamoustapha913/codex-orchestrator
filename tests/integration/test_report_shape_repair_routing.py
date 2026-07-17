@@ -37,28 +37,28 @@ def _scenario(ctx, data):
 
 def test_report_shape_only_failure_is_classified_report_shape_only(git_repo: Path):
     ctx = _ctx(git_repo)
-    _scenario(ctx, {"report_override": {"probe_artifact_refs": ["/etc/passwd"]}})
+    _scenario(ctx, {"report_production_override": {"probe_artifact_refs": ["/etc/passwd"]}})
     run_next_patchlet(ctx, worker_mode="mock", use_worktree=True)
     assert read_json(ctx.paths.failures_dir / "F0001.json")["failure_signature"] == "probe_artifact_refs_unsafe_path"
 
 
 def test_safe_normalizable_probe_refs_continue_without_full_patchlet_regeneration(git_repo: Path):
     ctx = _ctx(git_repo)
-    _scenario(ctx, {"report_override": {"probe_artifact_refs": [".artifacts/probes/P0001/run_001/before_state.json"]}})
+    _scenario(ctx, {"report_production_override": {"probe_artifact_refs": [".artifacts/probes/P0001/run_001/before_state.json"]}})
     result = run_next_patchlet(ctx, worker_mode="mock", use_worktree=True)
     assert result.status == "VERIFIED_NO_CHANGE_NEEDED"
 
 
 def test_report_shape_only_failure_does_not_generate_full_repair_patchlet_when_normalization_succeeds(git_repo: Path):
     ctx = _ctx(git_repo)
-    _scenario(ctx, {"report_override": {"probe_artifact_refs": [".artifacts/probes/P0001/run_001/before_state.json"]}})
+    _scenario(ctx, {"report_production_override": {"probe_artifact_refs": [".artifacts/probes/P0001/run_001/before_state.json"]}})
     run_next_patchlet(ctx, worker_mode="mock", use_worktree=True)
     assert not list(ctx.paths.failures_dir.glob("F*.json"))
 
 
 def test_report_shape_only_failure_writes_report_only_repair_plan_when_needed(git_repo: Path):
     ctx = _ctx(git_repo)
-    _scenario(ctx, {"report_override": {"probe_artifact_refs": ["/etc/passwd"]}})
+    _scenario(ctx, {"report_production_override": {"probe_artifact_refs": ["/etc/passwd"]}})
     run_next_patchlet(ctx, worker_mode="mock", use_worktree=True)
     failure = read_json(ctx.paths.failures_dir / "F0001.json")
     assert failure["report_validation_errors_path"].endswith("report_validation_errors.json")
@@ -66,7 +66,7 @@ def test_report_shape_only_failure_writes_report_only_repair_plan_when_needed(gi
 
 def test_report_only_repair_plan_forbids_product_runtime_paths(git_repo: Path):
     ctx = _ctx(git_repo)
-    _scenario(ctx, {"report_override": {"probe_artifact_refs": ["/etc/passwd"]}})
+    _scenario(ctx, {"report_production_override": {"probe_artifact_refs": ["/etc/passwd"]}})
     run_next_patchlet(ctx, worker_mode="mock", use_worktree=True)
     failure = read_json(ctx.paths.failures_dir / "F0001.json")
     assert "app.py" not in json.dumps(failure.get("report_validation_errors", []))
@@ -74,7 +74,7 @@ def test_report_only_repair_plan_forbids_product_runtime_paths(git_repo: Path):
 
 def test_report_only_repair_plan_forbids_probe_artifact_mutation(git_repo: Path):
     ctx = _ctx(git_repo)
-    _scenario(ctx, {"report_override": {"probe_artifact_refs": ["/etc/passwd"]}})
+    _scenario(ctx, {"report_production_override": {"probe_artifact_refs": ["/etc/passwd"]}})
     run_next_patchlet(ctx, worker_mode="mock", use_worktree=True)
     assert (ctx.paths.runs_dir / "P0001_attempt1/gates/report_validation_errors.json").exists()
 

@@ -94,20 +94,22 @@ def test_report_schema_contract_says_changed_product_runtime_file_required(git_r
     assert "`changed_product_runtime_file` must be present" in text
 
 
-def test_task_contract_references_report_schema_contract(git_repo: Path):
+def test_task_contract_references_task_handoff_contract(git_repo: Path):
     _, _, _, capsule = _setup(git_repo)
 
     text = (capsule.worker_memory_dir / "TASK_CONTRACT.md").read_text(encoding="utf-8")
 
-    assert "REPORT_SCHEMA_CONTRACT.md" in text
+    assert "TASK_COMPLETION_HANDOFF_CONTRACT.md" in text
+    assert "REPORT_SCHEMA_CONTRACT.md" not in text
 
 
-def test_write_these_files_references_report_schema_contract(git_repo: Path):
+def test_write_these_files_references_task_handoff_not_formal_report_contract(git_repo: Path):
     _, _, _, capsule = _setup(git_repo)
 
     text = (capsule.worker_memory_dir / "WRITE_THESE_FILES.md").read_text(encoding="utf-8")
 
-    assert "REPORT_SCHEMA_CONTRACT.md" in text
+    assert "TASK_COMPLETION_HANDOFF_CONTRACT.md" in text
+    assert "REPORT_SCHEMA_CONTRACT.md" not in text
 
 
 def test_worker_capsule_memory_includes_execution_root_edit_contract(git_repo: Path):

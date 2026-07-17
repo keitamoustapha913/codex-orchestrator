@@ -97,18 +97,11 @@ Patchlet Codex defaults to `gpt-5.4-mini` with reasoning `medium`.
 Non-patchlet/orchestrator Codex profiles default to `gpt-5.5` with reasoning
 `medium`.
 
-Operator prompt contract:
-
-- `src/codex_orchestrator/prompt_templates/real_codex_patchlet_contract.md`
-
-For the opt-in real Codex smoke, the orchestrator injects this contract into
-the generated subprompt artifact under `.codex-orchestrator/subprompts/`. That
-artifact is the exact prompt context to inspect after a safe failure.
-
-The contract contains a minimal valid report example for `CXOR_REPORT_PATH`, a
-minimal durable probe example for `CXOR_PROBE_ROOT`, and explicit instructions
-that real success is not guaranteed unless Codex obeys the contract without the
-validators being weakened.
+Every attempt receives one generated WorkerPatchletReportV2 contract at
+`worker_memory/REPORT_SCHEMA_CONTRACT.md`, also embedded in
+`codex_task_prompt.md`. There is no alternate static contract. V1 identity is
+rejected before report reorganization or normalization. Unknown extensions
+cannot establish proof, coverage, semantic acceptance, or promotion.
 
 If the opt-in smoke fails safely, run:
 

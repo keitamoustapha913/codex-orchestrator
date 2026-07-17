@@ -42,6 +42,9 @@ class PatchletRunContext:
     def required_report_path(self, patchlet_id: str) -> Path:
         return self.reports_dir / f"{patchlet_id}.json"
 
+    def task_completion_handoff_path(self, patchlet_id: str) -> Path:
+        return self.run_dir / f"{patchlet_id}.task_completion_handoff.json"
+
     def required_probe_artifact_root(self, patchlet_id: str) -> Path:
         return self.probe_dir / patchlet_id
 

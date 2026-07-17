@@ -18,6 +18,21 @@ RAW_REPORT_MAX_DEPTH = 32
 RAW_REPORT_MAX_ARRAY_LENGTH = 10_000
 RAW_REPORT_MAX_FIELDS = 2_000
 
+SEMANTIC_GOAL_ITEM_ID_FIELD = "goal_item_id"
+SEMANTIC_GOAL_RESULT_FIELD = "result"
+SEMANTIC_GOAL_RESULT_SHORTHAND_FIELDS: dict[str, dict[str, Any]] = {
+    SEMANTIC_GOAL_ITEM_ID_FIELD: {
+        "json_type": "string",
+        "required": True,
+        "description": "Current patchlet goal item identity.",
+    },
+    SEMANTIC_GOAL_RESULT_FIELD: {
+        "json_type": "string",
+        "required": True,
+        "description": "Descriptive current-slice worker observation.",
+    },
+}
+
 
 class WorkerPatchletReportV2(TypedDict, total=False):
     """Typed canonical report shape; worker extensions are never included here."""
@@ -36,6 +51,59 @@ class WorkerPatchletReportV2(TypedDict, total=False):
     cleanup_proof: str
     probe_artifact_refs: list[dict[str, Any]]
     semantic_goal_results: list[dict[str, Any]]
+    blocking_boundary_reason: str
+    failed_probe_evidence: str
+
+
+PROBE_ARTIFACT_FILE_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "required": ["path", "kind", "sha256", "size_bytes"],
+    "properties": {
+        "path": {"type": "string"},
+        "kind": {"type": "string"},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "size_bytes": {"type": "integer", "minimum": 0},
+        "extension": {"type": "string"},
+        "mime_type": {"type": "string"},
+    },
+    "additionalProperties": True,
+}
+
+PROBE_ARTIFACT_REF_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "required": ["patchlet_id", "probe_root", "run_id"],
+    "properties": {
+        "patchlet_id": {"type": "string"},
+        "probe_root": {"type": "string"},
+        "run_id": {"type": "string"},
+        "files": {"type": "array", "items": PROBE_ARTIFACT_FILE_SCHEMA},
+    },
+    "additionalProperties": True,
+}
+
+CANONICAL_SEMANTIC_GOAL_RESULT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "required": ["criterion_id", "kind", "expected_value", "actual_value", "passed"],
+    "properties": {
+        "criterion_id": {"type": "string"},
+        "kind": {"type": "string"},
+        "expected_value": {},
+        "actual_value": {},
+        "passed": {"type": "boolean"},
+        "probe_artifact_ref": {"type": "object"},
+    },
+    "additionalProperties": True,
+}
+
+SEMANTIC_GOAL_RESULT_SHORTHAND_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "required": [SEMANTIC_GOAL_ITEM_ID_FIELD, SEMANTIC_GOAL_RESULT_FIELD],
+    "properties": {
+        SEMANTIC_GOAL_ITEM_ID_FIELD: {"type": "string"},
+        SEMANTIC_GOAL_RESULT_FIELD: {"type": "string", "minLength": 1},
+    },
+    "additionalProperties": True,
+}
 
 FIELD_METADATA: dict[str, dict[str, Any]] = {
     "schema_version": {"json_type": "string", "python_types": (str,), "required": True, "description": "WorkerPatchletReportV2 version.", "reference_class": "NONE"},
@@ -43,17 +111,35 @@ FIELD_METADATA: dict[str, dict[str, Any]] = {
     "patchlet_id": {"json_type": "string", "python_types": (str,), "required": True, "description": "Orchestrator-assigned patchlet identity.", "reference_class": "IDENTITY"},
     "status": {"json_type": "string", "python_types": (str,), "required": True, "description": "Worker lifecycle status; not proof.", "reference_class": "NONE"},
     "changed_product_runtime_file": {"json_type": ["string", "null"], "python_types": (str, type(None)), "required": True, "description": "Reported product file; boundary gates remain authoritative.", "reference_class": "PRODUCT_PATH"},
-    "changed_artifact_files": {"json_type": "array", "python_types": (list,), "required": True, "description": "Reported evidence artifacts.", "reference_class": "ARTIFACT_PATH"},
-    "probe_commands": {"json_type": "array", "python_types": (list,), "required": True, "description": "Worker-described probes; independent proof remains authoritative.", "reference_class": "NONE"},
+    "changed_artifact_files": {"json_type": "array", "json_schema": {"type": "array", "items": {"type": "string"}}, "python_types": (list,), "required": True, "description": "Reported evidence artifacts.", "reference_class": "ARTIFACT_PATH"},
+    "probe_commands": {"json_type": "array", "json_schema": {"type": "array", "items": {"type": "string"}}, "python_types": (list,), "required": True, "description": "Worker-described probes; independent proof remains authoritative.", "reference_class": "NONE"},
     "deterministic_run_counts": {"json_type": "object", "python_types": (dict,), "required": True, "description": "Declared run counts; not independent proof.", "reference_class": "NONE"},
     "root_cause_classification": {"json_type": "object", "python_types": (dict,), "required": True, "description": "Structured worker diagnosis.", "reference_class": "NONE"},
     "before_after_state": {"json_type": "array", "python_types": (list,), "required": True, "description": "Worker state observations.", "reference_class": "NONE"},
     "row_ledger": {"json_type": "array", "python_types": (list,), "required": True, "description": "Worker evidence ledger.", "reference_class": "NONE"},
     "trace_ledger": {"json_type": "array", "python_types": (list,), "required": True, "description": "Worker trace ledger.", "reference_class": "NONE"},
     "cleanup_proof": {"json_type": "string", "python_types": (str,), "required": True, "description": "Worker cleanup observation; hygiene gates remain authoritative.", "reference_class": "NONE"},
-    "probe_artifact_refs": {"json_type": "array", "python_types": (list,), "required": False, "description": "References to evidence under approved probe roots.", "reference_class": "ARTIFACT_PATH"},
-    "semantic_goal_results": {"json_type": "array", "python_types": (list,), "required": False, "description": "Worker semantic observations pending independent proof.", "reference_class": "NONE"},
-    "worker_semantic_claims": {"json_type": "array", "python_types": (list,), "required": False, "description": "Normalized worker claims; non-authoritative.", "reference_class": "NONE"},
+    "probe_artifact_refs": {"json_type": "array", "json_schema": {"type": "array", "items": PROBE_ARTIFACT_REF_SCHEMA}, "python_types": (list,), "required": False, "description": "References to evidence under approved probe roots.", "reference_class": "ARTIFACT_PATH"},
+    "semantic_goal_results": {"json_type": "array", "json_schema": {"type": "array", "items": {"oneOf": [CANONICAL_SEMANTIC_GOAL_RESULT_SCHEMA, SEMANTIC_GOAL_RESULT_SHORTHAND_SCHEMA]}}, "python_types": (list,), "required": False, "description": "Worker semantic observations pending independent proof.", "reference_class": "NONE"},
+    "blocking_boundary_reason": {"json_type": "string", "python_types": (str,), "required": False, "description": "Worker description of the current blocking boundary.", "reference_class": "NONE"},
+    "failed_probe_evidence": {"json_type": "string", "python_types": (str,), "required": False, "description": "Worker description of failed probe evidence.", "reference_class": "NONE"},
+}
+DERIVED_CANONICAL_REPORT_FIELD_METADATA: dict[str, dict[str, Any]] = {
+    "worker_semantic_claims": {
+        "json_type": "array",
+        "description": "Claims derived only by semantic-result normalization; non-authoritative.",
+        "producer": "normalize_semantic_goal_results",
+    },
+    "worker_semantic_quality_warnings": {
+        "json_type": "array",
+        "description": "Semantic-quality warnings derived by the orchestrator.",
+        "producer": "normalize_semantic_goal_results",
+    },
+    "semantic_goal_results_raw": {
+        "json_type": "array",
+        "description": "Raw semantic observations retained by the orchestrator for diagnosis.",
+        "producer": "report_ingestion",
+    },
 }
 KNOWN_FIELD_TYPES: dict[str, tuple[type, ...]] = {name: meta["python_types"] for name, meta in FIELD_METADATA.items()}
 REQUIRED_V2_FIELDS = frozenset(name for name, meta in FIELD_METADATA.items() if meta["required"])
@@ -62,9 +148,25 @@ EXTENSION_POLICY = "Unknown top-level fields are preserved as non-authoritative 
 
 def contract_payload() -> dict[str, Any]:
     fields = {name: {key: ([item.__name__ for item in value] if key == "python_types" else value) for key, value in meta.items()} for name, meta in FIELD_METADATA.items()}
+    shorthand_fields = {
+        name: dict(metadata)
+        for name, metadata in SEMANTIC_GOAL_RESULT_SHORTHAND_FIELDS.items()
+    }
     return {
         "name": "WorkerPatchletReportV2",
-        "fields": fields,
+        "worker_input_fields": fields,
+        "derived_canonical_fields": {
+            name: dict(metadata)
+            for name, metadata in DERIVED_CANONICAL_REPORT_FIELD_METADATA.items()
+        },
+        "semantic_goal_result_shorthand": {
+            "required": [
+                name
+                for name, metadata in shorthand_fields.items()
+                if metadata["required"]
+            ],
+            "fields": shorthand_fields,
+        },
         "extension_policy": EXTENSION_POLICY,
     }
 
@@ -82,7 +184,13 @@ def known_field_type_table() -> dict[str, str | list[str]]:
 
 
 def generated_v2_schema() -> dict[str, Any]:
-    properties = {name: {"type": meta["json_type"], "description": meta["description"]} for name, meta in FIELD_METADATA.items()}
+    properties = {
+        name: {
+            **meta.get("json_schema", {"type": meta["json_type"]}),
+            "description": meta["description"],
+        }
+        for name, meta in FIELD_METADATA.items()
+    }
     properties["schema_version"] = {"const": "2.0", "description": FIELD_METADATA["schema_version"]["description"]}
     properties["kind"] = {"const": "worker_patchlet_report", "description": FIELD_METADATA["kind"]["description"]}
     properties["status"]["enum"] = ["COMPLETE", "VERIFIED_NO_CHANGE_NEEDED", "BLOCKED_WITH_EVIDENCE", "FAILED_WITH_EVIDENCE"]
@@ -123,9 +231,21 @@ def canonical_example_report() -> dict[str, Any]:
     return {"schema_version": "2.0", "kind": "worker_patchlet_report", "patchlet_id": "P0005", "status": "VERIFIED_NO_CHANGE_NEEDED", "changed_product_runtime_file": None, "changed_artifact_files": [], "probe_commands": ["<independent probe command>"], "deterministic_run_counts": {}, "root_cause_classification": {}, "before_after_state": [], "row_ledger": [], "trace_ledger": [], "cleanup_proof": "<worker cleanup observation>", "probe_artifact_refs": [], "semantic_goal_results": []}
 
 
+def semantic_goal_result_shorthand_example() -> dict[str, str]:
+    return {
+        SEMANTIC_GOAL_ITEM_ID_FIELD: "<current goal item id>",
+        SEMANTIC_GOAL_RESULT_FIELD: "<descriptive current-slice result mentioning the allowed boundary>",
+    }
+
+
+def render_semantic_goal_result_shorthand_example() -> str:
+    return json.dumps(semantic_goal_result_shorthand_example(), indent=2)
+
+
 def render_primary_worker_report_template() -> str:
     fields = "\n".join(f"- `{name}` ({meta['json_type']}): {meta['description']}" for name, meta in FIELD_METADATA.items())
-    return f"# WorkerPatchletReportV2 report contract\n\nContract fingerprint: `{contract_fingerprint()}`\n\nEmit these fields only as evidence; the orchestrator owns acceptance:\n{fields}\n\nReport path fields are bounded logical references, never absolute filesystem paths.\nUse `.artifacts/probes/<patchlet-id>/...` for `changed_artifact_files`, `probe_root`, and file `path` values. Never copy `$CXOR_WORKER_EVIDENCE_DIR`, `/tmp/...`, `~`, `..`, or sandbox paths into the report.\n\nUnknown fields are preserved as non-authoritative warnings.\n"
+    shorthand_fields = ", ".join(f"`{name}`" for name in SEMANTIC_GOAL_RESULT_SHORTHAND_FIELDS)
+    return f"# WorkerPatchletReportV2 report contract\n\nContract fingerprint: `{contract_fingerprint()}`\n\nEmit these fields only as evidence; the orchestrator owns acceptance:\n{fields}\n\nSemantic shorthand entries use exactly these fields: {shorthand_fields}.\n\nReport path fields are bounded logical references, never absolute filesystem paths.\nUse `.artifacts/probes/<patchlet-id>/...` for `changed_artifact_files`, `probe_root`, and file `path` values. Never copy `$CXOR_WORKER_EVIDENCE_DIR`, `/tmp/...`, `~`, `..`, or sandbox paths into the report.\n\nUnknown fields are preserved as non-authoritative warnings.\n"
 
 
 def render_reorganization_worker_instructions() -> str:

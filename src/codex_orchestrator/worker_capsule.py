@@ -8,7 +8,11 @@ from pathlib import Path
 from codex_orchestrator.codex_execution_policy import resolve_patchlet_timeout_seconds, soft_deadline_seconds
 from codex_orchestrator.jsonio import write_json
 from codex_orchestrator.patchlet_run_context import PatchletRunContext
-from codex_orchestrator.report_contract import contract_fingerprint, required_field_list
+from codex_orchestrator.report_contract import (
+    contract_fingerprint,
+    render_semantic_goal_result_shorthand_example,
+    required_field_list,
+)
 from codex_orchestrator.paths import relative_to_repo
 from codex_orchestrator.state import now_iso
 from codex_orchestrator.target_repo import TargetRepoContext
@@ -32,6 +36,7 @@ class WorkerCapsule:
 REQUIRED_MEMORY_FILES = (
     "TASK_CONTRACT.md",
     "WORK_SLICE_CONTRACT.md",
+    "TASK_COMPLETION_HANDOFF_CONTRACT.md",
     "REPORT_SCHEMA_CONTRACT.md",
     "FINAL_REPORT_CONTRACT.md",
     "RUNTIME_SIDE_EFFECT_CONTRACT.md",
@@ -102,7 +107,6 @@ def _minimal_report_skeleton(patchlet_id: str) -> str:
             "kind": "worker_patchlet_report",
             "patchlet_id": patchlet_id,
             "status": "VERIFIED_NO_CHANGE_NEEDED",
-            "final_status_marker": "FINAL_STATUS: PASS",
             "changed_product_runtime_file": None,
             "changed_artifact_files": [],
             "probe_commands": [],
@@ -146,6 +150,61 @@ def _minimal_report_skeleton(patchlet_id: str) -> str:
     )
 
 
+def task_completion_handoff_contract_text(*, patchlet_id: str, handoff_path: str) -> str:
+    """Render the task worker's diagnostic handoff contract.
+
+    The task worker does not author WorkerPatchletReportV2.  Precise product
+    paths and durable evidence references are owned by the later constrained
+    report-production stage.
+    """
+    skeleton = {
+        "schema_version": "1.0",
+        "kind": "task_worker_completion_handoff",
+        "patchlet_id": patchlet_id,
+        "status": "COMPLETE",
+        "probe_commands": ["<diagnostic command actually run>"],
+        "deterministic_run_counts": {
+            "baseline": "5/5",
+            "proof_of_fix": "5/5",
+            "negative_controls": "5/5",
+        },
+        "root_cause_classification": {
+            "observed_failure": "<directly observed current-slice failure>",
+            "immediate_cause": "<bounded immediate cause>",
+            "why_immediate_cause_happened": "<diagnostic observation>",
+            "deeper_owner_boundary": "<assigned product boundary; repository-relative prose only>",
+            "producer_transformer_consumer_boundary": "<bounded data-flow observation>",
+            "not_downstream_of_unprobed_state_proof": "<direct-probe observation>",
+            "negative_control_proof": "<negative-control observation>",
+            "recursive_why_audit": ["<bounded why-chain observation>"],
+        },
+        "before_after_state": [],
+        "row_ledger": [],
+        "trace_ledger": [],
+        "cleanup_proof": "cleanup passed; no transient files remain",
+        "semantic_goal_results": [],
+    }
+    return (
+        "# TASK COMPLETION HANDOFF CONTRACT\n\n"
+        f"Write the diagnostic task handoff to `{handoff_path}`.\n\n"
+        "This is not WorkerPatchletReportV2. A separate Report Production Worker "
+        "creates that report after the candidate diff is frozen and evidence is inventoried.\n\n"
+        "Do not include `changed_product_runtime_file`, `changed_artifact_files`, or "
+        "`probe_artifact_refs`; the orchestrator and Report Production Worker derive those "
+        "from the assigned path and durable evidence inventory.\n\n"
+        "The only allowed status values are `COMPLETE`, `VERIFIED_NO_CHANGE_NEEDED`, "
+        "`BLOCKED_WITH_EVIDENCE`, and `FAILED_WITH_EVIDENCE`. Never use `FIXED`, `DONE`, "
+        "`SUCCESS`, `PASSED`, or `OK`.\n\n"
+        "`cleanup_proof` must be a string, not an object. `row_ledger` and `trace_ledger` "
+        "must be present as arrays, even when empty.\n\n"
+        "Use only repository-relative product names in prose. Never copy `/tmp`, checkout, "
+        "sandbox, or worker-evidence absolute paths into this handoff.\n\n"
+        "```json\n"
+        f"{json.dumps(skeleton, indent=2, sort_keys=True)}\n"
+        "```\n"
+    )
+
+
 def _semantic_contract_report_section(patchlet: dict | None = None) -> str:
     criteria = (patchlet or {}).get("expected_behavior")
     criterion_ids = (patchlet or {}).get("semantic_criteria") or []
@@ -186,6 +245,7 @@ def report_schema_contract_text(*, patchlet_id: str, report_path: str, patchlet:
     allowed = "\n".join(f"- {status}" for status in ALLOWED_REPORT_STATUSES)
     forbidden = "\n".join(f"- {status}" for status in FORBIDDEN_REPORT_STATUSES)
     required_fields = "\n".join(f"- {field}" for field in required_field_list())
+    assigned_path = str((patchlet or {}).get("allowed_product_runtime_file") or "<assigned-product-path>")
     return (
         "# REPORT SCHEMA CONTRACT\n\n"
         "## Required report path\n\n"
@@ -200,11 +260,10 @@ def report_schema_contract_text(*, patchlet_id: str, report_path: str, patchlet:
         "## Required top-level fields\n\n"
         f"{required_fields}\n\n"
         "`final_status_marker` belongs to the final Markdown wrapper, not the JSON contract.\n"
-        "`acceptance_criteria_result` is not a V2 authority field; if present, preserve it as an unrecognized extension.\n\n"
         "## Required type reminders\n\n"
         "- `cleanup_proof` must be a string, not an object.\n"
         "- `changed_product_runtime_file` must be present and must be a string or null.\n"
-        "- Use the allowed product/runtime path string when exactly one product file changed.\n"
+        f"- For COMPLETE, `changed_product_runtime_file` must be exactly `{assigned_path}`.\n"
         "- Use null when no product/runtime file changed.\n"
         "- `deterministic_run_counts` must be present.\n"
         "- `before_after_state` must be present.\n"
@@ -214,6 +273,8 @@ def report_schema_contract_text(*, patchlet_id: str, report_path: str, patchlet:
         "## Evidence report paths are bounded relative references\n\n"
         "The filesystem location in `$CXOR_WORKER_EVIDENCE_DIR` is only for writing files.\n"
         "Never copy that absolute filesystem path into the JSON report.\n"
+        f"`changed_product_runtime_file` is a bounded repository-relative path and must never "
+        f"be an absolute checkout or sandbox path; its assigned value is `{assigned_path}`.\n"
         "All `changed_artifact_files`, `probe_artifact_refs.probe_root`, and\n"
         "`probe_artifact_refs.files[].path` values must be bounded, POSIX-style,\n"
         "relative logical references rooted at `.artifacts/probes/<patchlet-id>/`.\n"
@@ -270,10 +331,7 @@ def report_schema_contract_text(*, patchlet_id: str, report_path: str, patchlet:
         "## semantic_goal_results shorthand\n\n"
         "If you cannot produce canonical semantic_goal_results, you may write a shorthand worker claim:\n\n"
         "```json\n"
-        "{\n"
-        "  \"goal_item\": \"<current goal item id>\",\n"
-        "  \"result\": \"<descriptive current-slice result mentioning the allowed boundary>\"\n"
-        "}\n"
+        f"{render_semantic_goal_result_shorthand_example()}\n"
         "```\n\n"
         "A shorthand result is not proof. Do not set `passed`, `expected_value`, or `actual_value` in shorthand.\n"
         "Do not write vague shorthand such as `done`, `ok`, `looks good`, or `probably passes`.\n"
@@ -293,7 +351,6 @@ def report_schema_contract_text(*, patchlet_id: str, report_path: str, patchlet:
         "- kind\n"
         "- patchlet_id\n"
         "- status\n"
-        "- final_status_marker\n"
         "- changed_product_runtime_file\n"
         "- changed_artifact_files\n"
         "- probe_commands\n"
@@ -350,7 +407,7 @@ def final_report_contract_text(*, patchlet_id: str, attempt_id: str, final_repor
         f"- Patchlet: {patchlet_id}\n"
         f"- Attempt: {attempt_id}\n"
         "- Outcome: <one sentence>\n"
-        f"- Report JSON: {report_path}\n"
+        f"- Task handoff JSON: {report_path}\n"
         f"- Probe root: {probe_root}\n"
         "```\n\n"
         "## Pre-submit checklist\n\n"
@@ -358,7 +415,7 @@ def final_report_contract_text(*, patchlet_id: str, attempt_id: str, final_repor
         "- Verify the marker starts at column 1.\n"
         "- Verify the marker is not wrapped in backticks.\n"
         "- Verify the marker is not prefixed by \"Marker:\".\n"
-        "- Verify the report JSON was written and follows REPORT_SCHEMA_CONTRACT.md.\n"
+        "- Verify the task handoff JSON was written and follows TASK_COMPLETION_HANDOFF_CONTRACT.md.\n"
     )
 
 
@@ -516,7 +573,7 @@ def _task_contract_text(
     preflight_path = worker_stage_dir / "00_preflight.md"
     final_report_path = worker_stage_dir / "05_final_report.md"
     target_root_worker_stage = run_context.target_root / "worker_stage"
-    report_contract_path = run_context.run_dir / "worker_memory" / "REPORT_SCHEMA_CONTRACT.md"
+    handoff_contract_path = run_context.run_dir / "worker_memory" / "TASK_COMPLETION_HANDOFF_CONTRACT.md"
     final_report_contract_path = run_context.run_dir / "worker_memory" / "FINAL_REPORT_CONTRACT.md"
     runtime_contract_path = run_context.run_dir / "worker_memory" / "RUNTIME_SIDE_EFFECT_CONTRACT.md"
     work_slice_contract_path = run_context.run_dir / "worker_memory" / "WORK_SLICE_CONTRACT.md"
@@ -543,13 +600,13 @@ def _task_contract_text(
         f"- goal items: `{', '.join(patchlet.get('goal_item_ids', [])) or 'none'}`\n"
         f"- slice change boundary: `{(patchlet.get('slice_change_boundary') or {}).get('boundary_id') or patchlet.get('boundary_enforcement_status') or 'none'}`\n"
         f"- work slice contract: `{work_slice_contract_path}`\n"
-        f"- required report path: `.codex-orchestrator/reports/{patchlet_id}.json`\n"
-        f"- report schema contract: `{report_contract_path}`\n"
+        f"- required task handoff path: `{run_context.task_completion_handoff_path(patchlet_id)}`\n"
+        f"- task handoff contract: `{handoff_contract_path}`\n"
         f"- final report contract: `{final_report_contract_path}`\n"
         f"- runtime side-effect contract: `{runtime_contract_path}`\n"
         f"- report probe-reference root (orchestrator-populated): `.artifacts/probes/{patchlet_id}`\n"
         f"- attempt root env: `$CXOR_ATTEMPT_ROOT` = `{run_context.run_dir}`\n"
-        f"- required report path env: `$CXOR_REQUIRED_REPORT_PATH` = `{run_context.required_report_path(patchlet_id)}`\n"
+        f"- required task handoff path env: `$CXOR_TASK_COMPLETION_HANDOFF_PATH` = `{run_context.task_completion_handoff_path(patchlet_id)}`\n"
         f"- staged probe artifact root env: `$CXOR_REQUIRED_PROBE_ARTIFACT_ROOT` = `{worker_evidence_dir / example_probe}`\n"
         f"- worker scratch dir env: `$CXOR_WORKER_SCRATCH_DIR` = `{worker_scratch_dir}`\n"
         f"- worker evidence dir env: `$CXOR_WORKER_EVIDENCE_DIR` = `{worker_evidence_dir}`\n"
@@ -563,7 +620,7 @@ def _task_contract_text(
         "- required final status marker: a standalone column-1 line: `FINAL_STATUS: PASS`, `FINAL_STATUS: BLOCKED`, or `FINAL_STATUS: FAILED`\n"
         f"- time budget: hard timeout of {timeout_seconds} seconds\n"
         f"- soft deadline: Aim to finish by {soft_deadline} seconds\n"
-        "- if blocked near the budget, write `$CXOR_FINAL_REPORT_PATH` with explicit BLOCKED or FAILED status and preserve what you learned\n"
+        "- if blocked near the budget, write `$CXOR_TASK_COMPLETION_HANDOFF_PATH` and `$CXOR_FINAL_REPORT_PATH` with explicit BLOCKED or FAILED status and preserve what you learned\n"
         "- Do not create target-root worker_stage/; all Worker Capsule stage files must stay under `$CXOR_WORKER_STAGE_DIR`\n"
         "- Product source edits: write only to the assigned product file in the Git checkout.\n"
         "- Temporary files: write only beneath `$CXOR_WORKER_SCRATCH_DIR`.\n"
@@ -631,13 +688,13 @@ def _live_memory_json(run_context: PatchletRunContext, patchlet: dict) -> dict:
         "invariant_ids": patchlet.get("invariant_ids", []),
         "evidence_ids": patchlet.get("evidence_ids", []),
         "graph_node_ids": patchlet.get("graph_node_ids", []),
-        "required_report_path": f".codex-orchestrator/reports/{patchlet_id}.json",
+        "required_report_path": str(run_context.task_completion_handoff_path(patchlet_id)),
         "required_probe_root": f".artifacts/probes/{patchlet_id}",
         "attempt_root": str(run_context.run_dir),
         "attempt_scratch_dir": str(run_context.attempt_scratch_dir),
         "worker_evidence_dir": str(run_context.worker_evidence_dir),
         "quarantine_dir": str(run_context.quarantine_dir),
-        "required_report_path_absolute": str(run_context.required_report_path(patchlet_id)),
+        "required_report_path_absolute": str(run_context.task_completion_handoff_path(patchlet_id)),
         "required_probe_artifact_root": str(run_context.required_probe_artifact_root(patchlet_id)),
         "current_stage": "worker_initialized",
         "known_facts": [],
@@ -685,10 +742,19 @@ def ensure_worker_memory(
         encoding="utf-8",
     )
     report_contract_path = capsule.worker_memory_dir / "REPORT_SCHEMA_CONTRACT.md"
+    handoff_contract_path = capsule.worker_memory_dir / "TASK_COMPLETION_HANDOFF_CONTRACT.md"
     final_report_contract_path = capsule.worker_memory_dir / "FINAL_REPORT_CONTRACT.md"
     runtime_contract_path = capsule.worker_memory_dir / "RUNTIME_SIDE_EFFECT_CONTRACT.md"
     work_slice_contract_path = capsule.worker_memory_dir / "WORK_SLICE_CONTRACT.md"
     report_path = f".codex-orchestrator/reports/{patchlet['patchlet_id']}.json"
+    handoff_path = str(run_context.task_completion_handoff_path(patchlet["patchlet_id"]))
+    handoff_contract_path.write_text(
+        task_completion_handoff_contract_text(
+            patchlet_id=patchlet["patchlet_id"],
+            handoff_path=handoff_path,
+        ),
+        encoding="utf-8",
+    )
     final_report_path = f"{capsule.worker_stage_dir / '05_final_report.md'}"
     probe_root = f".artifacts/probes/{patchlet['patchlet_id']}"
     report_contract_path.write_text(
@@ -704,7 +770,7 @@ def ensure_worker_memory(
             patchlet_id=patchlet["patchlet_id"],
             attempt_id=run_context.run_dir.name,
             final_report_path=final_report_path,
-            report_path=report_path,
+            report_path=handoff_path,
             probe_root=probe_root,
         ),
         encoding="utf-8",
@@ -732,8 +798,8 @@ def ensure_worker_memory(
         f"- patchlet: `{patchlet['patchlet_id']}`\n"
         f"- attempt: `{run_context.run_dir.name}`\n"
         f"- allowed file: `{patchlet.get('allowed_product_runtime_file')}`\n"
-        f"- report path: `{live_memory['required_report_path']}`\n"
-        f"- report schema contract: `{report_contract_path}`\n"
+        f"- task completion handoff path: `{live_memory['required_report_path']}`\n"
+        f"- task completion handoff contract: `{handoff_contract_path}`\n"
         f"- final report contract: `{final_report_contract_path}`\n"
         f"- runtime side-effect contract: `{runtime_contract_path}`\n"
         f"- work slice contract: `{work_slice_contract_path}`\n"
@@ -765,8 +831,8 @@ def ensure_worker_memory(
         "# WRITE THESE FILES\n\n"
         f"- `$CXOR_WORKER_STAGE_DIR/00_preflight.md` (`{capsule.worker_stage_dir / '00_preflight.md'}`)\n"
         f"- `$CXOR_WORKER_STAGE_DIR/05_final_report.md` (`{capsule.worker_stage_dir / '05_final_report.md'}`)\n"
-        f"- `.codex-orchestrator/reports/{patchlet['patchlet_id']}.json`\n"
-        f"- Read and obey `{report_contract_path}` before writing the report.\n"
+        f"- `$CXOR_TASK_COMPLETION_HANDOFF_PATH` (`{handoff_path}`)\n"
+        f"- Read and obey `{handoff_contract_path}` before writing the task completion handoff.\n"
         f"- Read and obey `{final_report_contract_path}` before writing the final Markdown report.\n"
         f"- Read and obey `{runtime_contract_path}` before running runtime probes.\n"
         f"- Read and obey `{work_slice_contract_path}` before editing product/runtime code.\n"

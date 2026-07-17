@@ -21,12 +21,8 @@ from codex_orchestrator.target_repo import resolve_target_repo
 from codex_orchestrator.workers.codex_exec import CodexExecWorker
 
 
-def _contract_template_path() -> Path:
-    return Path("src/codex_orchestrator/prompt_templates/real_codex_patchlet_contract.md").resolve()
-
-
 def _setup_compiled_ctx(git_repo: Path, monkeypatch):
-    monkeypatch.setenv("CXOR_REAL_CODEX_CONTRACT_PATH", str(_contract_template_path()))
+    del monkeypatch
     ctx = resolve_target_repo(repo=git_repo)
     init_workflow(ctx, master=git_repo / "master_prompt.md", invocation_argv=["cxor", "init"])
     normalize_master_prompt(ctx)
@@ -72,11 +68,9 @@ from pathlib import Path
 patchlet_id = os.environ["CXOR_PATCHLET_ID"]
 report = {
     "schema_version": "1.0",
-    "kind": "patchlet_report",
+    "kind": "task_worker_completion_handoff",
     "patchlet_id": patchlet_id,
     "status": "VERIFIED_NO_CHANGE_NEEDED",
-    "changed_product_runtime_file": None,
-    "changed_artifact_files": [f".artifacts/probes/{patchlet_id}/probe.py"],
     "probe_commands": [f"python .artifacts/probes/{patchlet_id}/probe.py"],
     "deterministic_run_counts": {"baseline": "5/5", "proof_of_fix": "5/5", "negative_controls": "5/5"},
     "root_cause_classification": {
@@ -93,11 +87,9 @@ report = {
     "row_ledger": [],
     "trace_ledger": [],
     "cleanup_proof": "cleanup ok",
-    "probe_artifact_refs": [],
-    "acceptance_criteria_result": "pass"
 }
-Path(os.environ["CXOR_REPORT_PATH"]).parent.mkdir(parents=True, exist_ok=True)
-Path(os.environ["CXOR_REPORT_PATH"]).write_text(json.dumps(report), encoding="utf-8")
+Path(os.environ["CXOR_TASK_COMPLETION_HANDOFF_PATH"]).parent.mkdir(parents=True, exist_ok=True)
+Path(os.environ["CXOR_TASK_COMPLETION_HANDOFF_PATH"]).write_text(json.dumps(report), encoding="utf-8")
 """,
         encoding="utf-8",
     )
@@ -122,6 +114,40 @@ def test_generated_real_codex_prompt_includes_allowed_report_statuses(git_repo: 
         assert status in prompt
 
 
+def test_initial_worker_prompt_contains_exactly_one_task_handoff_contract(git_repo: Path, tmp_path: Path, monkeypatch):
+    ctx, patchlet = _setup_compiled_ctx(git_repo, monkeypatch)
+    prompt = _generated_prompt_for_patchlet(ctx, patchlet, tmp_path, monkeypatch)
+    assert prompt.count('"kind": "task_worker_completion_handoff"') == 1
+    assert prompt.count("# TASK COMPLETION HANDOFF CONTRACT") == 1
+    assert '"kind": "worker_patchlet_report"' not in prompt
+
+
+def test_repair_worker_prompt_contains_exactly_one_task_handoff_contract(git_repo: Path, monkeypatch):
+    ctx, repair_patchlet = _setup_repair_patchlet_ctx(git_repo, monkeypatch)
+    prompt = (ctx.root / repair_patchlet["subprompt_path"]).read_text(encoding="utf-8")
+    assert prompt.count('"kind": "task_worker_completion_handoff"') == 1
+    assert prompt.count("# TASK COMPLETION HANDOFF CONTRACT") == 1
+    assert '"kind": "worker_patchlet_report"' not in prompt
+
+
+def test_initial_worker_prompt_contains_no_legacy_report_identity(git_repo: Path, tmp_path: Path, monkeypatch):
+    ctx, patchlet = _setup_compiled_ctx(git_repo, monkeypatch)
+    prompt = _generated_prompt_for_patchlet(ctx, patchlet, tmp_path, monkeypatch)
+    assert '"kind": "patchlet_report"' not in prompt
+
+
+def test_repair_worker_prompt_contains_no_legacy_report_identity(git_repo: Path, monkeypatch):
+    ctx, repair_patchlet = _setup_repair_patchlet_ctx(git_repo, monkeypatch)
+    prompt = (ctx.root / repair_patchlet["subprompt_path"]).read_text(encoding="utf-8")
+    assert '"kind": "patchlet_report"' not in prompt
+
+
+def test_generated_prompt_does_not_read_external_report_contract_path():
+    source = (Path(__file__).parents[2] / "src/codex_orchestrator/stages/compile_patchlets.py").read_text(encoding="utf-8")
+    assert "CXOR_REAL_CODEX_CONTRACT_PATH" not in source
+    assert "_real_codex_contract_text" not in source
+
+
 def test_generated_real_codex_prompt_forbids_fixed_done_success_passed_ok(git_repo: Path, tmp_path: Path, monkeypatch):
     ctx, patchlet = _setup_compiled_ctx(git_repo, monkeypatch)
 
@@ -132,12 +158,12 @@ def test_generated_real_codex_prompt_forbids_fixed_done_success_passed_ok(git_re
     assert "Never use" in prompt
 
 
-def test_generated_real_codex_prompt_includes_patchlet_report_json_skeleton(git_repo: Path, tmp_path: Path, monkeypatch):
+def test_generated_real_codex_prompt_includes_task_handoff_json_skeleton(git_repo: Path, tmp_path: Path, monkeypatch):
     ctx, patchlet = _setup_compiled_ctx(git_repo, monkeypatch)
 
     prompt = _generated_prompt_for_patchlet(ctx, patchlet, tmp_path, monkeypatch)
 
-    assert '"kind": "patchlet_report"' in prompt
+    assert '"kind": "task_worker_completion_handoff"' in prompt
     assert '"cleanup_proof": "cleanup passed; no transient files remain"' in prompt
 
 
@@ -158,13 +184,15 @@ def test_generated_real_codex_prompt_says_cleanup_proof_is_string(git_repo: Path
     assert "must be a string, not an object" in prompt
 
 
-def test_generated_real_codex_prompt_says_changed_product_runtime_file_is_required(git_repo: Path, tmp_path: Path, monkeypatch):
+def test_generated_real_codex_prompt_reserves_changed_product_runtime_file_for_report_production(
+    git_repo: Path, tmp_path: Path, monkeypatch
+):
     ctx, patchlet = _setup_compiled_ctx(git_repo, monkeypatch)
 
     prompt = _generated_prompt_for_patchlet(ctx, patchlet, tmp_path, monkeypatch)
 
     assert "changed_product_runtime_file" in prompt
-    assert "must be present" in prompt
+    assert "Do not include" in prompt
 
 
 def test_generated_real_codex_prompt_says_required_ledgers_must_exist(git_repo: Path, tmp_path: Path, monkeypatch):
@@ -192,13 +220,14 @@ def test_generated_real_codex_prompt_separates_product_scratch_and_evidence_path
     assert "P0001_attempt1" in prompt
 
 
-def test_repair_patchlet_prompt_includes_same_report_contract_as_initial_patchlet(git_repo: Path, monkeypatch):
+def test_repair_patchlet_prompt_includes_same_handoff_contract_as_initial_patchlet(git_repo: Path, monkeypatch):
     ctx, repair_patchlet = _setup_repair_patchlet_ctx(git_repo, monkeypatch)
 
     prompt = (ctx.root / repair_patchlet["subprompt_path"]).read_text(encoding="utf-8")
 
-    assert "Real Codex Patchlet Contract" in prompt
-    assert "# REPORT SCHEMA CONTRACT" in prompt
+    assert "# TASK COMPLETION HANDOFF CONTRACT" in prompt
+    assert '"kind": "task_worker_completion_handoff"' in prompt
+    assert '"kind": "worker_patchlet_report"' not in prompt
     assert "FIXED" in prompt
     assert "cleanup_proof" in prompt
 
@@ -240,20 +269,13 @@ def test_repair_patchlet_prompt_includes_final_report_contract(git_repo: Path, m
     assert "Marker: `FINAL_STATUS: PASS`" in prompt
 
 
-def test_real_codex_contract_injected_true_for_repair_patchlet_prompt(git_repo: Path, monkeypatch):
-    ctx, repair_patchlet = _setup_repair_patchlet_ctx(git_repo, monkeypatch)
-
-    prompt = (ctx.root / repair_patchlet["subprompt_path"]).read_text(encoding="utf-8")
-
-    assert "Real Codex Patchlet Contract" in prompt
-
-
 def test_generated_prompt_distinguishes_execution_root_from_target_root(git_repo: Path, tmp_path: Path, monkeypatch):
     ctx, patchlet = _setup_compiled_ctx(git_repo, monkeypatch)
 
     prompt = _generated_prompt_for_patchlet(ctx, patchlet, tmp_path, monkeypatch)
 
-    assert "There are two roots" in prompt
+    assert "Concrete execution-root edit contract" in prompt
+    assert "Allowed product/runtime edit path" in prompt
     assert "CXOR_EXECUTION_ROOT" in prompt
     assert "CXOR_TARGET_ROOT" in prompt
 
@@ -263,7 +285,7 @@ def test_generated_prompt_says_product_edits_happen_in_execution_root(git_repo: 
 
     prompt = _generated_prompt_for_patchlet(ctx, patchlet, tmp_path, monkeypatch)
 
-    assert "Product/runtime edits happen only here" in prompt or "where product/runtime files are edited" in prompt
+    assert "Allowed product/runtime edit path" in prompt
 
 
 def test_generated_prompt_says_target_root_product_file_is_read_only(git_repo: Path, tmp_path: Path, monkeypatch):
@@ -271,7 +293,7 @@ def test_generated_prompt_says_target_root_product_file_is_read_only(git_repo: P
 
     prompt = _generated_prompt_for_patchlet(ctx, patchlet, tmp_path, monkeypatch)
 
-    assert "Product/runtime files under target root are read-only" in prompt
+    assert "Product/runtime files and durable workflow evidence under target root are read-only" in prompt
 
 
 def test_generated_prompt_lists_allowed_execution_root_edit_path(git_repo: Path, tmp_path: Path, monkeypatch):

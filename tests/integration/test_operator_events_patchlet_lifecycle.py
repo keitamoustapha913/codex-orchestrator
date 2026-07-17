@@ -49,7 +49,7 @@ def _event(ctx, event_type: str) -> dict:
 
 def _write_invalid_report_scenario(ctx) -> None:
     scenario = {
-        "report_override": {
+        "report_production_override": {
             "probe_artifact_refs": ["bad-probe-ref"],
         }
     }

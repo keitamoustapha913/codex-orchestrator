@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 from pathlib import Path
 
@@ -33,46 +32,39 @@ def _setup(git_repo: Path):
     return ctx
 
 
-def _write_invalid_report_codex(path: Path) -> None:
-    path.write_text(
-        """#!/usr/bin/env python3
-import json
-import os
-import sys
-from pathlib import Path
-
-print(json.dumps({"event": "error", "message": "network timeout keyword noise"}), flush=True)
-print("API model timeout keyword noise", file=sys.stderr)
-Path(os.environ["CXOR_PREFLIGHT_PATH"]).parent.mkdir(parents=True, exist_ok=True)
-Path(os.environ["CXOR_PREFLIGHT_PATH"]).write_text("preflight done", encoding="utf-8")
-Path(os.environ["CXOR_FINAL_REPORT_PATH"]).write_text("FINAL_STATUS: PASS\\n", encoding="utf-8")
-report = {
-    "schema_version": "1.0",
-    "kind": "patchlet_report",
-    "patchlet_id": os.environ["CXOR_PATCHLET_ID"],
-    "status": "FIXED",
-    "changed_artifact_files": [],
-    "probe_commands": [],
-    "root_cause_classification": {},
-    "cleanup_proof": {"cleanup_passed": True},
-    "acceptance_criteria_result": "pass"
-}
-Path(os.environ["CXOR_REPORT_PATH"]).parent.mkdir(parents=True, exist_ok=True)
-Path(os.environ["CXOR_REPORT_PATH"]).write_text(json.dumps(report), encoding="utf-8")
-""",
-        encoding="utf-8",
-    )
-    path.chmod(0o755)
-
-
 def _run_invalid_report_attempt(git_repo: Path, tmp_path: Path, monkeypatch):
+    del tmp_path
+    import codex_orchestrator.stages.run_patchlet as run_patchlet_stage
+    from codex_orchestrator.workers.mock import MockWorker
+
     ctx = _setup(git_repo)
-    fake_codex = tmp_path / "codex"
-    _write_invalid_report_codex(fake_codex)
-    monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ.get('PATH', '')}")
+    invalid_override = {
+        "status": "FIXED",
+        "changed_product_runtime_file": None,
+        "changed_artifact_files": [],
+        "probe_commands": [],
+        "deterministic_run_counts": None,
+        "root_cause_classification": {},
+        "before_after_state": None,
+        "row_ledger": None,
+        "trace_ledger": None,
+        "cleanup_proof": {"cleanup_passed": True},
+        "probe_artifact_refs": [],
+    }
+    original_launch = run_patchlet_stage.launch_report_production_worker
+
+    def launch_invalid_report(**kwargs):
+        kwargs["context"] = {**kwargs["context"], "mock_report_override": invalid_override}
+        return original_launch(**kwargs)
+
+    monkeypatch.setattr(run_patchlet_stage, "worker_for_mode", lambda _mode: MockWorker())
+    monkeypatch.setattr(run_patchlet_stage, "launch_report_production_worker", launch_invalid_report)
 
     result = run_next_patchlet(ctx, worker_mode="real_codex", use_worktree=True)
     attempt_id = f"{result.patchlet_id}_attempt1"
+    run_dir = ctx.paths.runs_dir / attempt_id
+    (run_dir / "stdout.txt").write_text("network timeout keyword noise\n", encoding="utf-8")
+    (run_dir / "stderr.txt").write_text("API model timeout keyword noise\n", encoding="utf-8")
     diagnosis_result = diagnose_real_codex_attempt(ctx, attempt_id=attempt_id)
     diagnosis = _read_json(Path(diagnosis_result["diagnosis_json_path"]))
     run_manifest = _read_json(ctx.paths.run_manifest)
@@ -97,16 +89,15 @@ def test_fake_codex_invalid_cleanup_proof_object_safe_fails_with_schema_diagnosi
     assert "cleanup_proof_type_error" in diagnosis["observed_signals"]
 
 
-def test_fake_codex_missing_required_report_fields_safe_fails_with_schema_diagnosis(git_repo: Path, tmp_path: Path, monkeypatch):
+def test_report_producer_invalid_required_field_types_safe_fail_with_schema_diagnosis(
+    git_repo: Path, tmp_path: Path, monkeypatch
+):
     _, _, run, diagnosis = _run_invalid_report_attempt(git_repo, tmp_path, monkeypatch)
 
     reason = run["report_validation"]["reason"]
     assert diagnosis["diagnosis"]["primary_category"] == "patchlet_report_schema_violation"
-    assert "changed_product_runtime_file" in reason
-    assert "deterministic_run_counts" in reason
-    assert "before_after_state" in reason
-    assert "row_ledger" in reason
-    assert "trace_ledger" in reason
+    assert "None is not of type" in reason
+    assert "FIXED" in reason
 
 
 def test_invalid_report_diagnosis_preserves_report_validation_reason(git_repo: Path, tmp_path: Path, monkeypatch):
@@ -128,8 +119,9 @@ def test_invalid_report_failure_preserves_evidence_artifacts(git_repo: Path, tmp
 
     assert (run_dir / "stdout.txt").exists()
     assert (run_dir / "stderr.txt").exists()
-    assert (run_dir / "command.json").exists()
-    assert (run_dir / "output.jsonl").exists()
+    assert (run_dir / "P0001.task_completion_handoff.json").exists()
+    assert (run_dir / "gates/report_production_worker/attempt_1/worker_patchlet_report_v2.json").exists()
+    assert (run_dir / "gates/report_production_worker/attempt_2/report_production_worker_result.json").exists()
     assert (run_dir / "worker_memory" / "REPORT_SCHEMA_CONTRACT.md").exists()
     assert diagnosis["artifact_presence"]["wrapper_gate_result"] is True
 

@@ -16,6 +16,7 @@ from codex_orchestrator.real_codex_smoke import (
     run_real_codex_auto_worktree_smoke,
     run_real_codex_smoke,
 )
+from codex_orchestrator.report_contract import contract_fingerprint
 from codex_orchestrator.target_repo import resolve_target_repo
 from codex_orchestrator.validators.schema_validator import validate_json_file
 
@@ -42,7 +43,7 @@ execution_root = Path(os.environ["CXOR_EXECUTION_ROOT"])
 run_dir = Path(os.environ["CXOR_RUN_DIR"])
 patchlet_id = os.environ["CXOR_PATCHLET_ID"]
 allowed_file = os.environ["CXOR_ALLOWED_PRODUCT_RUNTIME_FILE"]
-report_path = Path(os.environ["CXOR_REPORT_PATH"])
+report_path = Path(os.environ["CXOR_TASK_COMPLETION_HANDOFF_PATH"])
 probe_root = Path(os.environ["CXOR_PROBE_ROOT"])
 
 run_dir.mkdir(parents=True, exist_ok=True)
@@ -61,7 +62,7 @@ final_report.write_text("FINAL_STATUS: PASS\\n", encoding="utf-8")
 report_path.parent.mkdir(parents=True, exist_ok=True)
 report_path.write_text(json.dumps({
     "schema_version": "1.0",
-    "kind": "patchlet_report",
+    "kind": "task_worker_completion_handoff",
     "patchlet_id": patchlet_id,
     "status": "COMPLETE",
     "changed_product_runtime_file": allowed_file,
@@ -105,7 +106,6 @@ report_path.write_text(json.dumps({
         "actual_value": "ok",
         "passed": True
     }],
-    "acceptance_criteria_result": "pass"
 }, indent=2) + "\\n", encoding="utf-8")
 print(str(execution_root))
 print("fake real_codex success parity", file=__import__("sys").stderr)
@@ -125,11 +125,11 @@ from pathlib import Path
 target_root = Path(os.environ["CXOR_TARGET_ROOT"])
 (target_root / "worker_stage").mkdir(parents=True, exist_ok=True)
 (target_root / "worker_stage" / "05_final_report.md").write_text("FINAL_STATUS: PASS\\n", encoding="utf-8")
-report_path = Path(os.environ["CXOR_REPORT_PATH"])
+report_path = Path(os.environ["CXOR_TASK_COMPLETION_HANDOFF_PATH"])
 report_path.parent.mkdir(parents=True, exist_ok=True)
 report_path.write_text(json.dumps({
     "schema_version": "1.0",
-    "kind": "patchlet_report",
+    "kind": "task_worker_completion_handoff",
     "patchlet_id": os.environ["CXOR_PATCHLET_ID"],
     "status": "VERIFIED_NO_CHANGE_NEEDED"
 }), encoding="utf-8")
@@ -171,8 +171,12 @@ if task_contract_path is not None:
     task_contract_read = True
 (run_dir / "contract_check.json").write_text(json.dumps({
     "prompt_path": str(prompt_path),
-    "contract_seen": "Real Codex Patchlet Contract" in prompt_text,
-    "report_path_seen": "CXOR_REPORT_PATH" in prompt_text,
+    "task_handoff_contract_seen": (
+        "# TASK COMPLETION HANDOFF CONTRACT" in prompt_text
+        and '"kind": "task_worker_completion_handoff"' in prompt_text
+    ),
+    "formal_contract_absent": "# REPORT SCHEMA CONTRACT" not in prompt_text,
+    "handoff_path_seen": "CXOR_TASK_COMPLETION_HANDOFF_PATH" in prompt_text,
     "probe_root_seen": "CXOR_PROBE_ROOT" in prompt_text,
     "allowed_file_seen": "CXOR_ALLOWED_PRODUCT_RUNTIME_FILE" in prompt_text,
     "task_contract_seen": "worker_memory/TASK_CONTRACT.md" in prompt_text,
@@ -183,14 +187,17 @@ if task_contract_path is not None:
     "wrapper_gate_seen": "The orchestrator writes gates." in prompt_text
 }, indent=2, sort_keys=True), encoding="utf-8")
 
-if "Real Codex Patchlet Contract" not in prompt_text:
-    print("missing real codex contract", file=sys.stderr)
+if not (
+    "# TASK COMPLETION HANDOFF CONTRACT" in prompt_text
+    and '"kind": "task_worker_completion_handoff"' in prompt_text
+):
+    print("missing task completion handoff contract", file=sys.stderr)
     raise SystemExit(17)
 
 execution_root = Path(os.environ["CXOR_EXECUTION_ROOT"])
 patchlet_id = os.environ["CXOR_PATCHLET_ID"]
 allowed_file = os.environ["CXOR_ALLOWED_PRODUCT_RUNTIME_FILE"]
-report_path = Path(os.environ["CXOR_REPORT_PATH"])
+report_path = Path(os.environ["CXOR_TASK_COMPLETION_HANDOFF_PATH"])
 probe_root = Path(os.environ["CXOR_PROBE_ROOT"])
 
 (execution_root / allowed_file).write_text("def main():\\n    return 'ok'\\n# contract sensitive parity\\n", encoding="utf-8")
@@ -207,7 +214,7 @@ final_report.write_text("FINAL_STATUS: PASS\\n", encoding="utf-8")
 report_path.parent.mkdir(parents=True, exist_ok=True)
 report_path.write_text(json.dumps({
     "schema_version": "1.0",
-    "kind": "patchlet_report",
+    "kind": "task_worker_completion_handoff",
     "patchlet_id": patchlet_id,
     "status": "COMPLETE",
     "changed_product_runtime_file": allowed_file,
@@ -250,8 +257,7 @@ report_path.write_text(json.dumps({
         "expected_value": "ok",
         "actual_value": "ok",
         "passed": True
-    }],
-    "acceptance_criteria_result": "pass"
+    }]
 }, indent=2) + "\\n", encoding="utf-8")
 print(str(prompt_path))
 print("contract present", file=sys.stderr)
@@ -347,7 +353,7 @@ def test_real_codex_auto_worktree_pytest_documents_exact_opt_in_command():
     assert "-s" in command
 
 
-def test_real_codex_auto_worktree_smoke_injects_patchlet_contract_into_generated_prompt(
+def test_real_codex_auto_worktree_smoke_uses_generated_v2_contract(
     git_repo: Path,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -364,7 +370,7 @@ raise SystemExit(17)
     monkeypatch.setenv("PATH", f"{fake_bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
 
     ctx = resolve_target_repo(repo=git_repo)
-    run_real_codex_auto_worktree_smoke(
+    result = run_real_codex_auto_worktree_smoke(
         ctx,
         master=git_repo / "master_prompt.md",
         allow_real_codex=True,
@@ -372,8 +378,11 @@ raise SystemExit(17)
         max_iterations=25,
     )
 
-    _, subprompt = _first_subprompt_text(ctx)
-    assert "Real Codex Patchlet Contract" in subprompt
+    prompt = Path(result["prompt_artifact_path"]).read_text(encoding="utf-8")
+    assert "# TASK COMPLETION HANDOFF CONTRACT" in prompt
+    assert '"kind": "task_worker_completion_handoff"' in prompt
+    assert "# REPORT SCHEMA CONTRACT" not in prompt
+    assert "Real Codex Patchlet Contract" not in prompt
 
 
 def test_real_codex_auto_worktree_smoke_prompt_mentions_cxor_report_and_probe_paths(
@@ -393,7 +402,7 @@ raise SystemExit(17)
     monkeypatch.setenv("PATH", f"{fake_bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
 
     ctx = resolve_target_repo(repo=git_repo)
-    run_real_codex_auto_worktree_smoke(
+    result = run_real_codex_auto_worktree_smoke(
         ctx,
         master=git_repo / "master_prompt.md",
         allow_real_codex=True,
@@ -401,10 +410,10 @@ raise SystemExit(17)
         max_iterations=25,
     )
 
-    _, subprompt = _first_subprompt_text(ctx)
-    assert "CXOR_REPORT_PATH" in subprompt
-    assert "CXOR_PROBE_ROOT" in subprompt
-    assert "probe_artifact_refs" in subprompt
+    prompt = Path(result["prompt_artifact_path"]).read_text(encoding="utf-8")
+    assert "P0001.task_completion_handoff.json" in prompt
+    assert "$CXOR_WORKER_EVIDENCE_DIR" in prompt
+    assert "Do not include `changed_product_runtime_file`, `changed_artifact_files`, or `probe_artifact_refs`" in prompt
 
 
 def test_real_codex_auto_worktree_smoke_prompt_mentions_only_allowed_product_file(
@@ -424,7 +433,7 @@ raise SystemExit(17)
     monkeypatch.setenv("PATH", f"{fake_bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
 
     ctx = resolve_target_repo(repo=git_repo)
-    run_real_codex_auto_worktree_smoke(
+    result = run_real_codex_auto_worktree_smoke(
         ctx,
         master=git_repo / "master_prompt.md",
         allow_real_codex=True,
@@ -432,9 +441,9 @@ raise SystemExit(17)
         max_iterations=25,
     )
 
-    _, subprompt = _first_subprompt_text(ctx)
-    assert "CXOR_ALLOWED_PRODUCT_RUNTIME_FILE" in subprompt
-    assert "Only change the allowed product/runtime file" in subprompt
+    prompt = Path(result["prompt_artifact_path"]).read_text(encoding="utf-8")
+    assert "$CXOR_EXECUTION_ROOT/app.py" in prompt
+    assert "Allowed product/runtime file: `app.py`" in prompt
 
 
 def test_real_codex_auto_worktree_smoke_prompt_is_available_as_durable_artifact(
@@ -497,11 +506,11 @@ probe_root = artifact_root / ".artifacts" / "probes" / patchlet_id
 final_report = artifact_root / ".codex-orchestrator" / "runs" / "P0001_attempt1" / "worker_stage" / "05_final_report.md"
 final_report.parent.mkdir(parents=True, exist_ok=True)
 final_report.write_text("FINAL_STATUS: PASS\\n", encoding="utf-8")
-report_path = artifact_root / ".codex-orchestrator" / "reports" / f"{patchlet_id}.json"
+report_path = Path(os.environ["CXOR_TASK_COMPLETION_HANDOFF_PATH"])
 report_path.parent.mkdir(parents=True, exist_ok=True)
 report_path.write_text(json.dumps({
-    "schema_version": "1.0",
-    "kind": "patchlet_report",
+        "schema_version": "1.0",
+        "kind": "task_worker_completion_handoff",
     "patchlet_id": patchlet_id,
     "status": "COMPLETE",
     "changed_product_runtime_file": "app.py",
@@ -541,7 +550,6 @@ report_path.write_text(json.dumps({
         "actual_value": "ok",
         "passed": True
     }],
-    "acceptance_criteria_result": "pass"
 }, indent=2) + "\\n", encoding="utf-8")
 print(str(execution_root))
 print("fake codex success", file=__import__("sys").stderr)
@@ -691,34 +699,7 @@ def test_real_codex_worker_fake_success_artifacts_are_under_target_root(
     assert patchlet_run["artifact_root"] == str(ctx.root)
 
 
-def test_fake_codex_contract_sensitive_binary_fails_without_contract(
-    git_repo: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-):
-    fake_bin_dir = tmp_path / "fake-bin"
-    fake_bin_dir.mkdir()
-    fake_codex = fake_bin_dir / "codex"
-    _write_contract_sensitive_fake_codex(fake_codex)
-    monkeypatch.setenv("PATH", f"{fake_bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
-
-    ctx = resolve_target_repo(repo=git_repo)
-    result = run_real_codex_auto_worktree_smoke(
-        ctx,
-        master=git_repo / "master_prompt.md",
-        allow_real_codex=True,
-        codex_binary="codex",
-        max_iterations=25,
-        inject_contract=False,
-    )
-
-    contract_check = read_json(Path(result["run_dir"]) / "contract_check.json")
-    assert result["outcome"] == "safe_failure"
-    assert result["error_type"] == "WorkerExecutionError"
-    assert contract_check["contract_seen"] is False
-
-
-def test_fake_codex_contract_sensitive_binary_reaches_done_with_injected_contract(
+def test_fake_codex_task_handoff_contract_sensitive_binary_reaches_done(
     git_repo: Path,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -746,10 +727,12 @@ def test_fake_codex_contract_sensitive_binary_reaches_done_with_injected_contrac
     assert result["state_stage"] == "DONE"
     assert final["status"] == "DONE"
     assert patchlet_run["status"] == "COMPLETE"
-    assert contract_check["contract_seen"] is True
+    assert contract_check["task_handoff_contract_seen"] is True
+    assert contract_check["formal_contract_absent"] is True
+    assert contract_check["handoff_path_seen"] is True
 
 
-def test_fake_codex_contract_sensitive_binary_records_prompt_contract_evidence(
+def test_fake_codex_records_generated_v2_contract_fingerprint(
     git_repo: Path,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -771,10 +754,11 @@ def test_fake_codex_contract_sensitive_binary_records_prompt_contract_evidence(
 
     contract_check = read_json(Path(result["run_dir"]) / "contract_check.json")
     assert contract_check["prompt_path"] == result["prompt_artifact_path"]
-    assert contract_check["contract_seen"] is True
-    assert contract_check["report_path_seen"] is True
-    assert contract_check["probe_root_seen"] is True
-    assert contract_check["allowed_file_seen"] is True
+    assert contract_check["task_handoff_contract_seen"] is True
+    assert contract_check["formal_contract_absent"] is True
+    assert contract_fingerprint() in (
+        Path(result["run_dir"]) / "gates" / "REPORT_SCHEMA_CONTRACT.md"
+    ).read_text(encoding="utf-8")
     assert contract_check["task_contract_seen"] is True
     assert contract_check["preflight_stage_seen"] is True
     assert contract_check["final_report_stage_seen"] is True
@@ -976,7 +960,8 @@ def test_contract_sensitive_fake_codex_reads_task_contract_and_reaches_done(
 
     contract_check = read_json(Path(result["run_dir"]) / "contract_check.json")
     assert result["state_stage"] == "DONE"
-    assert contract_check["contract_seen"] is True
+    assert contract_check["task_handoff_contract_seen"] is True
+    assert contract_check["formal_contract_absent"] is True
     assert contract_check["task_contract_seen"] is True
     assert contract_check["task_contract_read"] is True
     assert contract_check["task_contract_text_seen"] is True
@@ -1114,31 +1099,7 @@ def test_real_codex_auto_worktree_smoke_result_reports_prompt_artifact_path(
     assert Path(result["prompt_artifact_path"]).is_relative_to(ctx.root)
 
 
-def test_real_codex_auto_worktree_smoke_result_reports_contract_injected_true(
-    git_repo: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-):
-    fake_bin_dir = tmp_path / "fake-bin"
-    fake_bin_dir.mkdir()
-    fake_codex = fake_bin_dir / "codex"
-    _write_contract_sensitive_fake_codex(fake_codex)
-    monkeypatch.setenv("PATH", f"{fake_bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
-
-    ctx = resolve_target_repo(repo=git_repo)
-    result = run_real_codex_auto_worktree_smoke(
-        ctx,
-        master=git_repo / "master_prompt.md",
-        allow_real_codex=True,
-        codex_binary="codex",
-        max_iterations=25,
-    )
-
-    assert result["contract_template_path"].endswith("real_codex_patchlet_contract.md")
-    assert result["contract_injected"] is True
-
-
-def test_real_codex_auto_worktree_smoke_safe_failure_reports_contract_prompt_context(
+def test_real_codex_auto_worktree_smoke_safe_failure_reports_generated_contract_path(
     git_repo: Path,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -1166,8 +1127,8 @@ raise SystemExit(17)
     assert result["outcome"] == "safe_failure"
     assert result["prompt_artifact_path"]
     assert Path(result["prompt_artifact_path"]).exists()
-    assert result["contract_template_path"].endswith("real_codex_patchlet_contract.md")
-    assert result["contract_injected"] is True
+    assert result["report_schema_contract_path"].endswith("worker_memory/REPORT_SCHEMA_CONTRACT.md")
+    assert Path(result["report_schema_contract_path"]).exists()
 
 
 def test_real_codex_auto_worktree_smoke_safe_failure_contract_with_fake_codex(
@@ -1549,11 +1510,11 @@ probe_root = artifact_root / ".artifacts" / "probes" / patchlet_id
 (probe_root / "run_001" / "before_state.json").write_text(json.dumps({"value": "before"}) + "\\n", encoding="utf-8")
 (probe_root / "run_001" / "after_state.json").write_text(json.dumps({"value": "after"}) + "\\n", encoding="utf-8")
 (probe_root / "run_001" / "cleanup_proof.json").write_text(json.dumps({"cleanup_passed": True}) + "\\n", encoding="utf-8")
-report_path = artifact_root / ".codex-orchestrator" / "reports" / f"{patchlet_id}.json"
+report_path = Path(os.environ["CXOR_TASK_COMPLETION_HANDOFF_PATH"])
 report_path.parent.mkdir(parents=True, exist_ok=True)
 report_path.write_text(json.dumps({
     "schema_version": "1.0",
-    "kind": "patchlet_report",
+    "kind": "task_worker_completion_handoff",
     "patchlet_id": patchlet_id,
     "status": "COMPLETE",
     "changed_product_runtime_file": "app.py",
@@ -1593,7 +1554,6 @@ report_path.write_text(json.dumps({
         "actual_value": "ok",
         "passed": True
     }],
-    "acceptance_criteria_result": "pass"
 }, indent=2) + "\\n", encoding="utf-8")
 """,
     )
@@ -1644,11 +1604,11 @@ probe_root = artifact_root / ".artifacts" / "probes" / patchlet_id
 (probe_root / "run_001" / "before_state.json").write_text(json.dumps({"value": "before"}) + "\\n", encoding="utf-8")
 (probe_root / "run_001" / "after_state.json").write_text(json.dumps({"value": "after"}) + "\\n", encoding="utf-8")
 (probe_root / "run_001" / "cleanup_proof.json").write_text(json.dumps({"cleanup_passed": True}) + "\\n", encoding="utf-8")
-report_path = artifact_root / ".codex-orchestrator" / "reports" / f"{patchlet_id}.json"
+report_path = Path(os.environ["CXOR_TASK_COMPLETION_HANDOFF_PATH"])
 report_path.parent.mkdir(parents=True, exist_ok=True)
 report_path.write_text(json.dumps({
     "schema_version": "1.0",
-    "kind": "patchlet_report",
+    "kind": "task_worker_completion_handoff",
     "patchlet_id": patchlet_id,
     "status": "COMPLETE",
     "changed_product_runtime_file": "app.py",
@@ -1688,7 +1648,6 @@ report_path.write_text(json.dumps({
         "actual_value": "ok",
         "passed": True
     }],
-    "acceptance_criteria_result": "pass"
 }, indent=2) + "\\n", encoding="utf-8")
 """,
     )
@@ -1721,7 +1680,7 @@ from pathlib import Path
 
 repo = Path.cwd()
 artifact_root = Path(os.environ["CXOR_ARTIFACT_ROOT"])
-report_path = artifact_root / ".codex-orchestrator" / "reports" / "P0001.json"
+report_path = Path(os.environ["CXOR_TASK_COMPLETION_HANDOFF_PATH"])
 report_path.parent.mkdir(parents=True, exist_ok=True)
 probe_root = artifact_root / ".artifacts" / "probes" / "P0001"
 (probe_root / "run_001").mkdir(parents=True, exist_ok=True)
@@ -1733,7 +1692,7 @@ probe_root = artifact_root / ".artifacts" / "probes" / "P0001"
 (probe_root / "run_001" / "cleanup_proof.json").write_text(json.dumps({"cleanup_passed": True}) + "\\n", encoding="utf-8")
 report_path.write_text(json.dumps({
     "schema_version": "1.0",
-    "kind": "patchlet_report",
+    "kind": "task_worker_completion_handoff",
     "patchlet_id": "P0001",
     "status": "VERIFIED_NO_CHANGE_NEEDED",
     "changed_product_runtime_file": None,
@@ -1772,7 +1731,6 @@ report_path.write_text(json.dumps({
         "actual_value": "ok",
         "passed": True
     }],
-    "acceptance_criteria_result": "pass"
 }, indent=2) + "\\n", encoding="utf-8")
 print(str(repo))
 print("fake codex stderr", file=__import__("sys").stderr)
@@ -1801,9 +1759,24 @@ print("fake codex stderr", file=__import__("sys").stderr)
     assert stderr_path.exists()
     assert command_path.exists()
     assert output_jsonl_path.exists()
-    assert validate_json_file(report_path, "patchlet_report.schema.json") == []
+    assert validate_json_file(report_path, "worker_patchlet_report_v2.schema.json") == []
     assert stdout_path.read_text(encoding="utf-8").strip()
     assert "fake codex stderr" in stderr_path.read_text(encoding="utf-8")
     index = read_json(ctx.paths.patchlet_index)
     assert index["patchlets"][0]["patchlet_id"] == "P0001"
     assert index["patchlets"][0]["status"] == "VERIFIED_NO_CHANGE_NEEDED"
+def test_real_codex_smoke_uses_generated_capsule_contract_only():
+    source = (Path(__file__).parents[2] / "src/codex_orchestrator/real_codex_smoke.py").read_text(encoding="utf-8")
+    assert "inject_contract" not in source
+    assert "_real_codex_contract_template_path" not in source
+
+
+def test_real_codex_smoke_result_reports_generated_contract_path():
+    source = (Path(__file__).parents[2] / "src/codex_orchestrator/real_codex_smoke.py").read_text(encoding="utf-8")
+    assert '"report_schema_contract_path"' in source
+
+
+def test_real_codex_smoke_result_has_no_static_contract_fields():
+    source = (Path(__file__).parents[2] / "src/codex_orchestrator/real_codex_smoke.py").read_text(encoding="utf-8")
+    assert '"contract_template_path"' not in source
+    assert '"contract_injected"' not in source

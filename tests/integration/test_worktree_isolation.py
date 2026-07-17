@@ -94,7 +94,7 @@ def test_worktree_run_writes_reports_and_probes_to_target_artifact_root(git_repo
 
     assert (ctx.paths.reports_dir / "P0001.json").exists()
     assert (ctx.paths.probe_dir / "P0001" / "run_001" / "row_ledger.jsonl").exists()
-    assert validate_json_file(ctx.paths.reports_dir / "P0001.json", "patchlet_report.schema.json") == []
+    assert validate_json_file(ctx.paths.reports_dir / "P0001.json", "worker_patchlet_report_v2.schema.json") == []
 
 
 def test_patchlet_worktree_peer_debris_does_not_mutate_target_repo(git_repo: Path):

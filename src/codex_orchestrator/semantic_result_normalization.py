@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from codex_orchestrator import report_contract
 from codex_orchestrator.boundary_evidence import (
     detect_future_boundary_claim,
     is_vague_worker_claim,
@@ -18,7 +19,7 @@ def _norm_text(value: str) -> str:
 
 
 def _goal_item_from(raw_item: dict[str, Any]) -> str | None:
-    value = raw_item.get("goal_item_id")
+    value = raw_item.get(report_contract.SEMANTIC_GOAL_ITEM_ID_FIELD)
     if isinstance(value, str) and value.strip():
         return value.strip()
     return None

@@ -12,6 +12,13 @@ Default pytest does not run real Codex. The `real-codex-smoke-runbook`
 command is an operator-controlled evidence capture for manual installed-Codex
 smoke runs, and it is not part of the default test suite.
 
+Each attempt generates `worker_memory/REPORT_SCHEMA_CONTRACT.md` from the sole
+WorkerPatchletReportV2 contract and embeds it in `codex_task_prompt.md`. V1
+reports are rejected before reorganization and normalization. Unknown V2
+extensions remain warning-only and non-authoritative;
+`acceptance_criteria_result` is not normalized, and `worker_semantic_claims`
+is derived only by the orchestrator.
+
 ## Dry Run
 
 Use dry-run mode first:

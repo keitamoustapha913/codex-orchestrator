@@ -73,7 +73,11 @@ cxor auto --repo /path/to/target-repo --resume --until DONE --worker-mode mock
 
 ## Durable probes and verification
 
-Patchlet reports must carry `probe_artifact_refs` that point at durable probe artifacts under `.artifacts/probes/`.
+Task workers stage diagnostic evidence beneath `$CXOR_WORKER_EVIDENCE_DIR` and
+write a task-completion handoff, not the formal V2 report. After the product
+candidate is frozen and evidence is inventoried, a separate constrained Report
+Production Worker creates the formal report from the exact assigned product
+path and the durably captured evidence subset.
 Canonical patchlet reports require `probe_artifact_refs` entries to be objects,
 not string-only paths. Raw real-Codex reports may contain string refs only
 before report ingestion; safe refs under `.artifacts/probes/` are normalized
@@ -86,6 +90,9 @@ files. Worker-provided hashes are not trusted, worker-provided sizes are not
 trusted, and raw worker metadata is preserved for audit in
 `probe_artifact_refs_normalization_result.json`. unsafe paths, missing files,
 patchlet mismatches, and product files remain rejected.
+Inventory-known evidence skipped by the 64-file limit or unsafe-object policy
+is warning-only and excluded from canonical references. A reference with no
+matching inventory entry remains a blocking missing-file failure.
 
 Real Codex shorthand `semantic_goal_results` are accepted only as raw worker
 semantic claims. They are linked to the current goal item, proof obligation,
@@ -289,19 +296,27 @@ Non-patchlet/orchestrator Codex profiles default to `gpt-5.5` with
 `CODEX_REASONING=medium`. `CODEX_MODEL`/`CODEX_REASONING` override both when
 specific patchlet or orchestrator variables are absent.
 
-Operator prompt contract:
+WorkerPatchletReportV2 is the sole accepted worker report contract. Each
+attempt generates `worker_memory/REPORT_SCHEMA_CONTRACT.md` from
+`report_contract.py` for the constrained Report Production Worker. The task
+worker prompt embeds `TASK_COMPLETION_HANDOFF_CONTRACT.md`, not the formal V2
+contract; no static secondary report contract is injected.
+Reports with V1 identity are rejected before reorganization or normalization.
+Unknown V2 extensions are warning-only and non-authoritative, including
+`acceptance_criteria_result`, which receives no special normalization.
+`worker_semantic_claims` is orchestrator-derived from normalized semantic
+results and is never a worker input field.
 
-- `src/codex_orchestrator/prompt_templates/real_codex_patchlet_contract.md`
-
-For the opt-in smoke, this contract is injected into the smoke prompt and the
-generated subprompt artifact under `.codex-orchestrator/subprompts/` so the
-real Codex subprocess sees the same path and payload rules that the fake-success
-parity harness proved.
-
-The contract includes a minimal valid report example written to
-`CXOR_REPORT_PATH`, a durable probe tree rooted at `CXOR_PROBE_ROOT`, and
-explicit instructions not to invent alternate paths or mutate any file other
-than the allowed product/runtime file.
+The task worker writes a task completion handoff to
+`$CXOR_TASK_COMPLETION_HANDOFF_PATH` and places
+diagnostic probe artifacts beneath `$CXOR_WORKER_EVIDENCE_DIR`. After the
+candidate is frozen and evidence is inventoried, the Report Production Worker
+uses the exact assigned product path and captured evidence inventory to write
+only the V2 candidate JSON. The orchestrator writes the production trace and
+validation result. Neither worker output grants product or proof authority.
+Inspect the generated subprompt under `.codex-orchestrator/subprompts/`, the
+task handoff contract, and the attempt-local `REPORT_SCHEMA_CONTRACT.md` when
+diagnosing report output.
 
 Real Codex failure diagnosis:
 

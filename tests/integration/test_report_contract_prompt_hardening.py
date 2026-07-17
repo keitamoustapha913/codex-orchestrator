@@ -32,7 +32,7 @@ def _ctx(git_repo: Path):
 
 
 def _run_bad_report(ctx):
-    scenario = {"report_override": {"probe_artifact_refs": ["/etc/passwd"]}}
+    scenario = {"report_production_override": {"probe_artifact_refs": ["/etc/passwd"]}}
     path = ctx.paths.workflow_dir / "mock" / "next_patchlet_result.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(scenario), encoding="utf-8")
@@ -75,6 +75,23 @@ def test_report_schema_contract_requires_bounded_relative_evidence_paths(git_rep
     assert ".artifacts/probes/P0001/run_001/before_state.json" in text
 
 
+def test_report_schema_contract_uses_canonical_goal_item_id_shorthand(git_repo: Path):
+    ctx = _ctx(git_repo)
+    run_next_patchlet(ctx, worker_mode="mock", use_worktree=True)
+    text = (ctx.paths.runs_dir / "P0001_attempt1/worker_memory/REPORT_SCHEMA_CONTRACT.md").read_text(encoding="utf-8")
+    assert '"goal_item_id": "<current goal item id>"' in text
+    assert '"goal_item":' not in text
+
+
+def test_report_schema_contract_keeps_final_status_marker_out_of_report_json(git_repo: Path):
+    ctx = _ctx(git_repo)
+    run_next_patchlet(ctx, worker_mode="mock", use_worktree=True)
+    text = (ctx.paths.runs_dir / "P0001_attempt1/worker_memory/REPORT_SCHEMA_CONTRACT.md").read_text(encoding="utf-8")
+    assert '"final_status_marker":' not in text
+    assert "- final_status_marker\n" not in text
+    assert "`final_status_marker` belongs to the final Markdown wrapper" in text
+
+
 def test_primary_worker_report_template_forbids_absolute_and_traversal_paths():
     from codex_orchestrator.report_contract import render_primary_worker_report_template
 
@@ -84,19 +101,19 @@ def test_primary_worker_report_template_forbids_absolute_and_traversal_paths():
     assert "`..`" in text
 
 
-def test_worker_prompt_includes_object_shaped_probe_ref_skeleton(git_repo: Path):
+def test_task_worker_prompt_does_not_include_formal_probe_ref_skeleton(git_repo: Path):
     ctx = _ctx(git_repo)
     run_next_patchlet(ctx, worker_mode="mock", use_worktree=True)
     text = (ctx.paths.runs_dir / "P0001_attempt1/codex_task_prompt.md").read_text(encoding="utf-8")
-    assert '"probe_root": ".artifacts/probes/P0001"' in text
-    assert '"run_id": "default"' in text
+    assert '"probe_root": ".artifacts/probes/P0001"' not in text
+    assert '"probe_artifact_refs":' not in text
 
 
-def test_worker_prompt_says_empty_probe_refs_only_when_no_probe_artifacts(git_repo: Path):
+def test_task_worker_prompt_delegates_probe_refs_to_report_production(git_repo: Path):
     ctx = _ctx(git_repo)
     run_next_patchlet(ctx, worker_mode="mock", use_worktree=True)
     text = (ctx.paths.runs_dir / "P0001_attempt1/codex_task_prompt.md").read_text(encoding="utf-8")
-    assert 'If no probe artifacts are produced, use `"probe_artifact_refs": []`' in text
+    assert "Report Production Worker derive those" in text
 
 
 def test_repair_prompt_for_probe_ref_shape_failure_includes_exact_field(git_repo: Path):
@@ -150,4 +167,24 @@ def test_prompt_index_records_hardened_report_contract_artifact(git_repo: Path):
     run_next_patchlet(ctx, worker_mode="mock", use_worktree=True)
     prompts = read_prompt_index(ctx.root)["prompts"]
     worker_prompt = [prompt for prompt in prompts if prompt["kind"] == "patchlet_worker_prompt"][-1]
-    assert "REPORT_SCHEMA_CONTRACT.md" in worker_prompt["contracts"]
+    assert "TASK_COMPLETION_HANDOFF_CONTRACT.md" in worker_prompt["contracts"]
+    assert "REPORT_SCHEMA_CONTRACT.md" not in worker_prompt["contracts"]
+
+
+def test_generated_report_contract_does_not_advertise_acceptance_criteria_result(git_repo: Path):
+    ctx = _ctx(git_repo)
+    run_next_patchlet(ctx, worker_mode="mock", use_worktree=True)
+    contract = (
+        ctx.paths.runs_dir
+        / "P0001_attempt1/worker_memory/REPORT_SCHEMA_CONTRACT.md"
+    ).read_text(encoding="utf-8")
+    assert "acceptance_criteria_result" not in contract
+
+
+def test_generated_worker_prompt_does_not_advertise_acceptance_criteria_result(git_repo: Path):
+    ctx = _ctx(git_repo)
+    run_next_patchlet(ctx, worker_mode="mock", use_worktree=True)
+    prompt = (
+        ctx.paths.runs_dir / "P0001_attempt1/codex_task_prompt.md"
+    ).read_text(encoding="utf-8")
+    assert "acceptance_criteria_result" not in prompt

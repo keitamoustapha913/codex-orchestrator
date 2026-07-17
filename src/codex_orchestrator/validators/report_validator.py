@@ -181,7 +181,7 @@ def validate_patchlet_report_structured(report: dict, patchlet: dict | None = No
         return {"valid": False, "errors": errors, "message": "; ".join(error["message"] for error in errors)}
     structured = [
         detail_from_jsonschema_error(error, error_id=f"RVE{index:06d}", patchlet_id=report.get("patchlet_id") or (patchlet or {}).get("patchlet_id"))
-        for index, error in enumerate(iter_jsonschema_errors(report, "worker_patchlet_report_v2.schema.json" if report.get("schema_version") == "2.0" else "patchlet_report.schema.json"), start=1)
+        for index, error in enumerate(iter_jsonschema_errors(report, "worker_patchlet_report_v2.schema.json"), start=1)
     ]
     if structured:
         return {"valid": False, "errors": structured, "message": "; ".join(error["message"] for error in structured)}
@@ -216,8 +216,20 @@ def validate_patchlet_report_structured(report: dict, patchlet: dict | None = No
     if status == "COMPLETE":
         if not _nonempty(report.get("changed_product_runtime_file")):
             semantic_errors.append(_error("changed_product_runtime_file", "COMPLETE requires changed_product_runtime_file"))
-        if report.get("schema_version") != "2.0" and report.get("acceptance_criteria_result") != "pass":
-            semantic_errors.append(_error("acceptance_criteria_result", "COMPLETE requires acceptance_criteria_result=pass"))
+        elif (
+            patchlet is not None
+            and isinstance(patchlet.get("allowed_product_runtime_file"), str)
+            and patchlet.get("allowed_product_runtime_file")
+            and report.get("changed_product_runtime_file") != patchlet.get("allowed_product_runtime_file")
+        ):
+            semantic_errors.append(
+                _error(
+                    "changed_product_runtime_file",
+                    "Report changed_product_runtime_file must exactly match the assigned repository-relative product path",
+                    signature="changed_product_runtime_file_mismatch",
+                    pointer="/changed_product_runtime_file",
+                )
+            )
         if not _nonempty(run_counts.get("proof_of_fix")):
             semantic_errors.append(_error("deterministic_run_counts", "COMPLETE requires proof_of_fix deterministic run count"))
         for field in REQUIRED_ROOT_CAUSE_FIELDS:
@@ -227,20 +239,14 @@ def validate_patchlet_report_structured(report: dict, patchlet: dict | None = No
     if status == "VERIFIED_NO_CHANGE_NEEDED":
         if report.get("changed_product_runtime_file") is not None:
             semantic_errors.append(_error("changed_product_runtime_file", "VERIFIED_NO_CHANGE_NEEDED cannot include a product/runtime diff"))
-        if report.get("schema_version") != "2.0" and report.get("acceptance_criteria_result") != "pass":
-            semantic_errors.append(_error("acceptance_criteria_result", "VERIFIED_NO_CHANGE_NEEDED requires acceptance_criteria_result=pass"))
 
     if status == "BLOCKED_WITH_EVIDENCE":
-        if report.get("schema_version") != "2.0" and report.get("acceptance_criteria_result") != "blocked":
-            semantic_errors.append(_error("acceptance_criteria_result", "BLOCKED_WITH_EVIDENCE requires acceptance_criteria_result=blocked"))
         if not _nonempty(root.get("observed_failure")):
             semantic_errors.append(_error("root_cause_classification", "BLOCKED_WITH_EVIDENCE requires observed_failure evidence"))
         if not _nonempty(report.get("blocking_boundary_reason")):
             semantic_errors.append(_error("blocking_boundary_reason", "BLOCKED_WITH_EVIDENCE requires blocking_boundary_reason"))
 
     if status == "FAILED_WITH_EVIDENCE":
-        if report.get("schema_version") != "2.0" and report.get("acceptance_criteria_result") != "fail":
-            semantic_errors.append(_error("acceptance_criteria_result", "FAILED_WITH_EVIDENCE requires acceptance_criteria_result=fail"))
         if not _nonempty(root.get("observed_failure")):
             semantic_errors.append(_error("root_cause_classification", "FAILED_WITH_EVIDENCE requires observed_failure evidence"))
         if not _nonempty(report.get("failed_probe_evidence")):

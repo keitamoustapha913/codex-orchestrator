@@ -32,13 +32,25 @@ def _ctx(git_repo: Path):
     build_inventory(ctx)
     extract_invariants(ctx)
     compile_patchlets(ctx)
+    _scenario(ctx, [])
     return ctx
 
 
 def _scenario(ctx, refs):
     path = ctx.paths.workflow_dir / "mock" / "next_patchlet_result.json"
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"report_override": {"probe_artifact_refs": refs}}), encoding="utf-8")
+    path.write_text(
+        json.dumps(
+            {
+                "report_production_override": {
+                    "schema_version": "2.0",
+                    "kind": "worker_patchlet_report",
+                    "probe_artifact_refs": refs,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
 
 
 def _report_with_changed_runtime_file_alias() -> dict:
@@ -59,6 +71,280 @@ def _report_with_changed_runtime_file_alias() -> dict:
         "probe_artifact_refs": [],
         "semantic_goal_results": [],
     }
+
+
+def _identity_gate_report(*, schema_version: str = "1.0", kind: str = "patchlet_report") -> dict:
+    return {
+        "schema_version": schema_version,
+        "kind": kind,
+        "patchlet_id": "P0001",
+        "status": "COMPLETE",
+        "changed_product_runtime_file": "app.py",
+        "changed_artifact_files": [],
+        "probe_commands": ["python app.py"],
+        "deterministic_run_counts": {
+            "baseline": "1/1",
+            "proof_of_fix": "1/1",
+            "negative_controls": "1/1",
+        },
+        "root_cause_classification": {
+            "observed_failure": "old value",
+            "immediate_cause": "old implementation",
+            "why_immediate_cause_happened": "current slice was absent",
+            "deeper_owner_boundary": "app.py",
+            "producer_transformer_consumer_boundary": "app.py to probe",
+            "not_downstream_of_unprobed_state_proof": "direct probe",
+            "negative_control_proof": "peer values unchanged",
+            "recursive_why_audit": ["bounded cause"],
+        },
+        "before_after_state": [],
+        "row_ledger": [],
+        "trace_ledger": [],
+        "cleanup_proof": "clean",
+        "probe_artifact_refs": [
+            {
+                "patchlet_id": "P0001",
+                "probe_root": ".artifacts/probes/P0001",
+                "run_id": "default",
+            }
+        ],
+        "semantic_goal_results": [],
+    }
+
+
+def _ingest_identity_gate_report(ctx, report: dict, *, source_text: str | None = None):
+    source = ctx.root / "P0001.identity-gate.json"
+    source.write_text(source_text if source_text is not None else json.dumps(report), encoding="utf-8")
+    result = ingest_patchlet_report(
+        ctx,
+        patchlet={
+            "patchlet_id": "P0001",
+            "goal_item_ids": ["GI001"],
+            "proof_obligation_ids": ["PO001"],
+            "probe_ids": ["GP001"],
+            "work_slice_id": "WS001",
+            "allowed_product_runtime_file": "app.py",
+            "slice_change_boundary": {
+                "allowed_changes": [{"key": "app", "new_value": "requested_state"}],
+                "forbidden_changes": [],
+            },
+        },
+        attempt_id="P0001_attempt1",
+        report_path=source,
+    )
+    return result, source
+
+
+def test_v1_report_is_rejected_before_reorganization(git_repo: Path):
+    ctx = _ctx(git_repo)
+    result, _ = _ingest_identity_gate_report(ctx, _identity_gate_report())
+    assert result["accepted"] is False
+    assert result["report_reorganization_used"] is False
+
+
+def test_v1_report_is_rejected_before_probe_ref_normalization(git_repo: Path):
+    ctx = _ctx(git_repo)
+    result, _ = _ingest_identity_gate_report(ctx, _identity_gate_report())
+    assert result["normalization_applied"] is False
+    assert result["normalization_kinds"] == []
+    assert not (ctx.paths.runs_dir / "P0001_attempt1/gates/probe_artifact_refs_normalization_result.json").exists()
+
+
+def test_v1_report_is_rejected_before_probe_command_normalization(git_repo: Path):
+    ctx = _ctx(git_repo)
+    result, _ = _ingest_identity_gate_report(ctx, _identity_gate_report())
+    assert result["normalization_applied"] is False
+    assert not (ctx.paths.runs_dir / "P0001_attempt1/gates/probe_commands_normalization_result.json").exists()
+
+
+def test_v1_report_is_rejected_before_semantic_normalization(git_repo: Path):
+    ctx = _ctx(git_repo)
+    result, _ = _ingest_identity_gate_report(ctx, _identity_gate_report())
+    assert result["normalization_applied"] is False
+    assert not (ctx.paths.runs_dir / "P0001_attempt1/gates/semantic_goal_results_normalization_result.json").exists()
+
+
+def test_v1_report_raw_bytes_are_preserved(git_repo: Path):
+    ctx = _ctx(git_repo)
+    raw_text = json.dumps(_identity_gate_report(), indent=3) + "\n"
+    result, source = _ingest_identity_gate_report(ctx, _identity_gate_report(), source_text=raw_text)
+    assert result["accepted"] is False
+    assert (ctx.paths.reports_dir / "P0001.raw.json").read_bytes() == source.read_bytes()
+
+
+def test_v1_report_writes_unsupported_version_failure(git_repo: Path):
+    ctx = _ctx(git_repo)
+    result, _ = _ingest_identity_gate_report(ctx, _identity_gate_report())
+    assert result["normalized_failure_signature"] == "WORKER_REPORT_UNSUPPORTED_SCHEMA_VERSION"
+
+
+def test_wrong_v2_kind_is_rejected_before_reorganization(git_repo: Path):
+    ctx = _ctx(git_repo)
+    report = _identity_gate_report(schema_version="2.0", kind="patchlet_report")
+    result, _ = _ingest_identity_gate_report(ctx, report)
+    assert result["accepted"] is False
+    assert result["report_reorganization_used"] is False
+    assert result["normalization_applied"] is False
+
+
+def test_wrong_v2_kind_writes_invalid_kind_failure(git_repo: Path):
+    ctx = _ctx(git_repo)
+    report = _identity_gate_report(schema_version="2.0", kind="patchlet_report")
+    result, _ = _ingest_identity_gate_report(ctx, report)
+    assert result["normalized_failure_signature"] == "WORKER_REPORT_INVALID_KIND"
+
+
+def test_v1_rejection_never_writes_canonical_report(git_repo: Path):
+    ctx = _ctx(git_repo)
+    result, _ = _ingest_identity_gate_report(ctx, _identity_gate_report())
+    assert result["canonical_report_path"] is None
+    assert not (ctx.paths.reports_dir / "P0001.json").exists()
+
+
+def _v2_extension_report(**extensions) -> dict:
+    report = _identity_gate_report(
+        schema_version="2.0",
+        kind="worker_patchlet_report",
+    )
+    report.update(extensions)
+    return report
+
+
+def _ingest_v2_extension(ctx, **extensions):
+    return _ingest_identity_gate_report(ctx, _v2_extension_report(**extensions))[0]
+
+
+def test_acceptance_criteria_result_is_unknown_v2_extension(git_repo: Path):
+    ctx = _ctx(git_repo)
+    result = _ingest_v2_extension(
+        ctx,
+        acceptance_criteria_result="PASS: worker claims success",
+    )
+    assert result["unknown_fields"] == ["acceptance_criteria_result"]
+    assert result["unknown_field_status"] == "WARNING"
+    assert result["report_reorganization_used"] is True
+
+
+def test_acceptance_criteria_result_value_is_never_normalized(git_repo: Path):
+    ctx = _ctx(git_repo)
+    result = _ingest_v2_extension(
+        ctx,
+        acceptance_criteria_result="PASS: worker claims success",
+    )
+    canonical = read_json(ctx.root / result["canonical_report_path"])
+    assert canonical["acceptance_criteria_result"] == "PASS: worker claims success"
+
+
+def test_acceptance_criteria_result_never_adds_raw_or_detail_fields(git_repo: Path):
+    ctx = _ctx(git_repo)
+    result = _ingest_v2_extension(
+        ctx,
+        acceptance_criteria_result="PASS: worker claims success",
+    )
+    canonical = read_json(ctx.root / result["canonical_report_path"])
+    assert "acceptance_criteria_result_raw" not in canonical
+    assert "acceptance_criteria_result_detail" not in canonical
+    assert "acceptance_criteria_result_status_prefix" not in canonical
+
+
+def test_acceptance_criteria_result_never_enters_normalization_kinds(git_repo: Path):
+    ctx = _ctx(git_repo)
+    result = _ingest_v2_extension(
+        ctx,
+        acceptance_criteria_result="PASS: worker claims success",
+    )
+    assert "acceptance_criteria_result_status_prefix" not in result["normalization_kinds"]
+    assert "acceptance_criteria_result_normalization" not in result
+
+
+def test_acceptance_criteria_result_never_emits_normalized_status_event(git_repo: Path):
+    ctx = _ctx(git_repo)
+    _ingest_v2_extension(
+        ctx,
+        acceptance_criteria_result="PASS: worker claims success",
+    )
+    assert not any(
+        event["event_type"] == "report_ingestion_normalized_status"
+        for event in read_operator_events(ctx.root)
+    )
+
+
+def test_acceptance_criteria_result_never_changes_report_acceptance(git_repo: Path):
+    ctx = _ctx(git_repo)
+    result = _ingest_v2_extension(
+        ctx,
+        acceptance_criteria_result="PASS: worker claims success",
+    )
+    assert result["accepted"] is True
+
+
+def test_worker_supplied_semantic_claims_is_unknown_extension(git_repo: Path):
+    ctx = _ctx(git_repo)
+    result = _ingest_v2_extension(
+        ctx,
+        worker_semantic_claims=[{"claim_id": "worker-invented"}],
+    )
+    assert result["unknown_fields"] == ["worker_semantic_claims"]
+    assert result["unknown_field_status"] == "WARNING"
+
+
+def test_worker_supplied_semantic_claims_never_survives_as_canonical_authority(git_repo: Path):
+    ctx = _ctx(git_repo)
+    result = _ingest_v2_extension(
+        ctx,
+        worker_semantic_claims=[{"claim_id": "worker-invented"}],
+    )
+    canonical = read_json(ctx.root / result["canonical_report_path"])
+    assert {"claim_id": "worker-invented"} not in canonical.get("worker_semantic_claims", [])
+
+
+def test_worker_supplied_semantic_claims_is_replaced_by_normalized_claims(git_repo: Path):
+    ctx = _ctx(git_repo)
+    report = _v2_extension_report(
+        worker_semantic_claims=[{"claim_id": "worker-invented"}],
+        semantic_goal_results=[
+            {
+                "goal_item_id": "GI001",
+                "result": "app.py app=requested_state current slice is ready",
+            }
+        ],
+    )
+    result, _ = _ingest_identity_gate_report(ctx, report)
+    canonical = read_json(ctx.root / result["canonical_report_path"])
+    assert {"claim_id": "worker-invented"} not in canonical["worker_semantic_claims"]
+    assert canonical["worker_semantic_claims"]
+
+
+def test_worker_supplied_semantic_claims_without_semantic_results_is_removed(git_repo: Path):
+    ctx = _ctx(git_repo)
+    report = _v2_extension_report(
+        worker_semantic_claims=[{"claim_id": "worker-invented"}],
+    )
+    report.pop("semantic_goal_results")
+    result, _ = _ingest_identity_gate_report(ctx, report)
+    canonical = read_json(ctx.root / result["canonical_report_path"])
+    assert "worker_semantic_claims" not in canonical
+
+
+def test_derived_semantic_claims_are_created_only_by_normalizer(git_repo: Path):
+    ctx = _ctx(git_repo)
+    report = _v2_extension_report()
+    report.pop("semantic_goal_results")
+    result, _ = _ingest_identity_gate_report(ctx, report)
+    canonical = read_json(ctx.root / result["canonical_report_path"])
+    assert "worker_semantic_claims" not in canonical
+
+
+def test_raw_worker_semantic_claims_remain_available_only_in_raw_report(git_repo: Path):
+    ctx = _ctx(git_repo)
+    result = _ingest_v2_extension(
+        ctx,
+        worker_semantic_claims=[{"claim_id": "worker-invented"}],
+    )
+    raw = read_json(ctx.paths.reports_dir / "P0001.raw.json")
+    canonical = read_json(ctx.root / result["canonical_report_path"])
+    assert raw["worker_semantic_claims"] == [{"claim_id": "worker-invented"}]
+    assert {"claim_id": "worker-invented"} not in canonical.get("worker_semantic_claims", [])
 
 
 def test_changed_runtime_file_is_unknown_v2_extension(git_repo: Path):
@@ -117,9 +403,7 @@ def test_p0005_v2_unknown_acceptance_criteria_result_is_warning_and_does_not_blo
     ctx = _ctx(git_repo)
     scenario = ctx.paths.workflow_dir / "mock" / "next_patchlet_result.json"
     scenario.parent.mkdir(parents=True, exist_ok=True)
-    scenario.write_text(json.dumps({"report_override": {
-        "schema_version": "2.0",
-        "kind": "worker_patchlet_report",
+    scenario.write_text(json.dumps({"handoff_override": {
         "acceptance_criteria_result": {"status": "PASS"},
     }}), encoding="utf-8")
 
@@ -283,6 +567,85 @@ def test_report_ingestion_rejects_missing_probe_file(git_repo: Path):
 
     errors = read_json(ctx.paths.runs_dir / "P0001_attempt1/gates/report_validation_errors.json")["errors"]
     assert errors[0]["normalized_signature"] == "probe_artifact_refs_missing_file"
+
+
+def test_report_ingestion_accepts_inventory_known_skipped_limit_ref_with_warning(git_repo: Path):
+    ctx = _ctx(git_repo)
+    skipped_path = ".artifacts/probes/P0001/run_001/zz-overflow/evidence-57.txt"
+    scenario = ctx.paths.workflow_dir / "mock" / "next_patchlet_result.json"
+    scenario.write_text(
+        json.dumps(
+            {
+                "extra_worker_evidence_file_count": 65,
+                "report_production_override": {
+                    "probe_artifact_refs": [
+                        {
+                            "patchlet_id": "P0001",
+                            "probe_root": ".artifacts/probes/P0001/run_001/zz-overflow",
+                            "run_id": "zz-overflow",
+                            "files": [
+                                {
+                                    "path": skipped_path,
+                                    "kind": "diagnostic",
+                                    "sha256": "f" * 64,
+                                    "size_bytes": 999999,
+                                }
+                            ],
+                        }
+                    ]
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = run_next_patchlet(ctx, worker_mode="mock", use_worktree=True)
+
+    ingestion = read_json(ctx.paths.runs_dir / "P0001_attempt1/gates/report_ingestion_result.json")
+    normalization = read_json(
+        ctx.paths.runs_dir / "P0001_attempt1/gates/probe_artifact_refs_normalization_result.json"
+    )
+    canonical = read_json(ctx.paths.reports_dir / "P0001.json")
+    assert result.status == "VERIFIED_NO_CHANGE_NEEDED"
+    assert ingestion["accepted"] is True
+    assert ingestion["probe_artifact_ref_warning_count"] == 1
+    assert normalization["warnings"] == [
+        f"probe_artifact_ref_not_durable:SKIPPED_LIMIT:{skipped_path}"
+    ]
+    assert canonical["probe_artifact_refs"][0]["files"] == []
+    assert not (ctx.root / skipped_path).exists()
+
+
+def test_report_only_retry_does_not_rerun_task_worker_or_mutate_frozen_candidate(git_repo: Path):
+    ctx = _ctx(git_repo)
+    scenario = ctx.paths.workflow_dir / "mock" / "next_patchlet_result.json"
+    scenario.write_text(
+        json.dumps(
+            {
+                "status": "COMPLETE",
+                "change_allowed_product": True,
+                "report_production_override": {
+                    "changed_product_runtime_file": "other.py",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = run_next_patchlet(ctx, worker_mode="mock", use_worktree=True)
+
+    run_dir = ctx.paths.runs_dir / "P0001_attempt1"
+    first = read_json(run_dir / "gates/report_production_worker/attempt_1/report_production_trace.json")
+    second = read_json(run_dir / "gates/report_production_worker/attempt_2/report_production_trace.json")
+    events = read_operator_events(ctx.root)
+    assert result.status == "FAILED_WITH_EVIDENCE"
+    assert first["candidate_patch_sha256"] == second["candidate_patch_sha256"]
+    assert first["task_handoff_sha256"] == second["task_handoff_sha256"]
+    assert first["deterministic_validation"]["valid"] is False
+    assert second["deterministic_validation"]["valid"] is False
+    assert sum(event["event_type"] == "patchlet_worker_started" for event in events) == 1
+    assert sum(event["event_type"] == "report_production_worker_failed" for event in events) == 2
+    assert not (run_dir / "patch_promotion/clean_candidate_promotion_result.json").exists()
 
 
 def test_report_ingestion_rejects_patchlet_mismatch(git_repo: Path):

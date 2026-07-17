@@ -84,11 +84,10 @@ def _report(ctx, artifact: Path, probe_artifact_refs: list[Any]) -> dict[str, An
     rel = artifact.relative_to(ctx.root).as_posix()
     digest = hashlib.sha256(artifact.read_bytes()).hexdigest()
     return {
-        "schema_version": "1.0",
-        "kind": "patchlet_report",
+        "schema_version": "2.0",
+        "kind": "worker_patchlet_report",
         "patchlet_id": "P0002",
         "status": "COMPLETE",
-        "final_status_marker": "FINAL_STATUS: PASS",
         "changed_product_runtime_file": "observability.ini",
         "changed_artifact_files": [".codex-orchestrator/reports/P0002.json"],
         "probe_commands": ["grep -qx 'metrics=enabled' observability.ini"],
@@ -116,7 +115,6 @@ def _report(ctx, artifact: Path, probe_artifact_refs: list[Any]) -> dict[str, An
                 "files": [{"path": rel, "kind": "cleanup_proof", "sha256": digest, "size_bytes": artifact.stat().st_size}],
             }
         ],
-        "acceptance_criteria_result": "pass",
     }
 
 

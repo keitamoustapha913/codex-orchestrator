@@ -32,10 +32,23 @@ When repeating a real-Codex smoke on the same target, check
 unless `--allow-dirty-target` is used and recorded. `--live-progress` uses an
 invocation cursor so old `operator_events.jsonl` entries are not replayed.
 
-The generated smoke prompt injects the operator contract from:
+The generated smoke attempt uses two deliberately separate contracts:
 
-- `src/codex_orchestrator/prompt_templates/real_codex_patchlet_contract.md`
-- `.codex-orchestrator/subprompts/<attempt>.md`
+- the task prompt embeds
+  `.codex-orchestrator/runs/<attempt>/worker_memory/TASK_COMPLETION_HANDOFF_CONTRACT.md`
+- `.codex-orchestrator/runs/<attempt>/worker_memory/REPORT_SCHEMA_CONTRACT.md`
+  is generated for the later constrained Report Production Worker and is not
+  embedded in the task-worker prompt
+
+The task worker writes `$CXOR_TASK_COMPLETION_HANDOFF_PATH`. After it exits, the
+candidate is frozen and evidence is inventoried and preserved. The Report
+Production Worker receives read-only copies of those inputs, uses the exact
+assigned repository-relative product path, and references only durably captured
+evidence when producing V2.
+
+V1 reports are rejected before reorganization and normalization. Unknown V2
+extensions are warning-only and non-authoritative; `acceptance_criteria_result`
+has no special normalization path.
 
 Before doing any task work, real Codex is instructed to read:
 
@@ -57,24 +70,28 @@ worker_stage/. If real Codex writes a top-level `worker_stage/`, diagnosis
 reports `worker_capsule_path_violation`. This is a Codex path-obedience issue,
 not orchestrator wiring failure. Do not weaken validators.
 
-If a real-Codex attempt exits `0` but writes a malformed patchlet report, the
+If report production or ingestion produces a malformed formal report, the
 diagnosis is `patchlet_report_schema_violation`, not `network_or_api_error`.
 The valid report statuses are `COMPLETE`, `VERIFIED_NO_CHANGE_NEEDED`,
 `BLOCKED_WITH_EVIDENCE`, and `FAILED_WITH_EVIDENCE`. `FIXED`, `DONE`,
 `SUCCESS`, `PASSED`, and `OK` are invalid. `cleanup_proof` must be a string,
 not an object, and `changed_product_runtime_file`, `deterministic_run_counts`,
 `before_after_state`, `row_ledger`, and `trace_ledger` must be present. Repair
-patchlets receive a report skeleton with these fields.
+task workers receive the same handoff contract; the Report Production Worker
+owns the formal V2 fields.
 
-Real Codex may write shorthand `semantic_goal_results` with `goal_item` and
-`result`. Report ingestion may normalize that shorthand into
-`worker_semantic_claims` only when it is linked to the current patchlet goal,
+Real Codex may write shorthand `semantic_goal_results` with `goal_item_id` and
+`result`. Report ingestion may derive canonical `worker_semantic_claims` from
+that shorthand only when it is linked to the current patchlet goal,
 proof obligation, slice boundary, and probe plan. The raw worker output is
 preserved. The shorthand is not proof and cannot set `passed=true`; the
 orchestrator canonicalizes the semantic result only after independent probe
-rerun. Vague shorthand and future-slice claims are rejected before proof.
+rerun. Workers never emit authoritative `worker_semantic_claims`; vague
+shorthand and future-slice claims are rejected before proof.
 
-For probe artifacts, canonical reports require object-shaped
+For probe artifacts, the task worker writes only beneath
+`$CXOR_WORKER_EVIDENCE_DIR`; it does not construct formal artifact references.
+Canonical reports require object-shaped
 `probe_artifact_refs`. Raw real-Codex string refs are preserved in
 `.codex-orchestrator/reports/<PATCHLET_ID>.raw.json` and may be normalized only
 by report ingestion when they point to existing files under
@@ -89,6 +106,11 @@ files. Worker-provided hashes are not trusted, worker-provided sizes are not
 trusted, and raw worker metadata is preserved for audit in
 `probe_artifact_refs_normalization_result.json`. Unsafe paths, missing files,
 patchlet mismatches, and product files remain rejected.
+
+Inventory-known `SKIPPED_LIMIT` and `SKIPPED_UNSAFE_OBJECT` references, plus
+captured files that could not be preserved, are warning-only and excluded from
+canonical references. A reference absent from the inventory is still rejected
+as genuinely missing. The 64-file capture limit is unchanged.
 
 Workers edit product/runtime files only in `CXOR_EXECUTION_ROOT`.
 `CXOR_TARGET_ROOT` product/runtime files are read-only to the worker; target

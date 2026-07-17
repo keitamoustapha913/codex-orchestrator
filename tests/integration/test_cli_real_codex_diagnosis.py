@@ -23,7 +23,10 @@ def _seed_failed_attempt(ctx) -> str:
     )
     prompt_artifact = ctx.paths.subprompts_dir / "0001_app.md"
     prompt_artifact.parent.mkdir(parents=True, exist_ok=True)
-    prompt_artifact.write_text("# Real Codex Patchlet Contract\nCXOR_REPORT_PATH\n", encoding="utf-8")
+    prompt_artifact.write_text(
+        "# Task Completion Handoff Contract\nCXOR_TASK_COMPLETION_HANDOFF_PATH\n",
+        encoding="utf-8",
+    )
     append_run_record(
         ctx,
         {

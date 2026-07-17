@@ -45,7 +45,7 @@ def _setup_compiled_ctx(git_repo: Path):
 
 
 def _write_invalid_report_scenario(ctx) -> None:
-    scenario = {"report_override": {"probe_artifact_refs": ["not-an-object"]}}
+    scenario = {"report_production_override": {"probe_artifact_refs": ["not-an-object"]}}
     scenario_path = ctx.paths.workflow_dir / "mock" / "next_patchlet_result.json"
     scenario_path.parent.mkdir(parents=True, exist_ok=True)
     scenario_path.write_text(json.dumps(scenario), encoding="utf-8")

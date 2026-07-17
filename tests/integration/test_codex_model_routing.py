@@ -38,16 +38,16 @@ def _successful_fake_codex() -> str:
     return """#!/usr/bin/env python3
 import json, os
 from pathlib import Path
-Path(os.environ["CXOR_REPORT_PATH"]).parent.mkdir(parents=True, exist_ok=True)
-Path(os.environ["CXOR_REPORT_PATH"]).write_text(json.dumps({
-  "schema_version":"1.0","kind":"patchlet_report","patchlet_id":"P0001",
+Path(os.environ["CXOR_TASK_COMPLETION_HANDOFF_PATH"]).parent.mkdir(parents=True, exist_ok=True)
+Path(os.environ["CXOR_TASK_COMPLETION_HANDOFF_PATH"]).write_text(json.dumps({
+  "schema_version":"1.0","kind":"task_worker_completion_handoff","patchlet_id":"P0001",
   "status":"VERIFIED_NO_CHANGE_NEEDED","changed_product_runtime_file":None,
   "changed_artifact_files":[".artifacts/probes/P0001/probe.py"],
   "probe_commands":["python .artifacts/probes/P0001/probe.py"],
   "deterministic_run_counts":{"baseline":"5/5","proof_of_fix":"5/5","negative_controls":"5/5"},
   "root_cause_classification":{"observed_failure":"none","immediate_cause":"none","why_immediate_cause_happened":"already ok","deeper_owner_boundary":"target","producer_transformer_consumer_boundary":"target -> probe","not_downstream_of_unprobed_state_proof":"direct","negative_control_proof":"direct"},
   "before_after_state":[{"before":"ok","after":"ok"}],"row_ledger":[],"trace_ledger":[],
-  "cleanup_proof":"ok","acceptance_criteria_result":"pass"
+  "cleanup_proof":"ok"
 }), encoding="utf-8")
 """
 

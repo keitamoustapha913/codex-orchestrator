@@ -6,8 +6,8 @@ from codex_orchestrator.validators.schema_validator import iter_jsonschema_error
 
 def _bad_report():
     return {
-        "schema_version": "1.0",
-        "kind": "patchlet_report",
+        "schema_version": "2.0",
+        "kind": "worker_patchlet_report",
         "patchlet_id": "P0002",
         "status": "VERIFIED_NO_CHANGE_NEEDED",
         "changed_product_runtime_file": None,
@@ -20,12 +20,11 @@ def _bad_report():
         "trace_ledger": [],
         "cleanup_proof": "ok",
         "probe_artifact_refs": [".artifacts/probes/P0002/comparison.txt"],
-        "acceptance_criteria_result": "pass",
     }
 
 
 def _detail():
-    error = next(iter(iter_jsonschema_errors(_bad_report(), "patchlet_report.schema.json")))
+    error = next(iter(iter_jsonschema_errors(_bad_report(), "worker_patchlet_report_v2.schema.json")))
     return detail_from_jsonschema_error(error, error_id="RVE000001", patchlet_id="P0002")
 
 
@@ -50,7 +49,7 @@ def test_probe_artifact_refs_string_item_gets_specific_signature():
 def test_probe_artifact_refs_missing_required_field_gets_specific_signature():
     report = _bad_report()
     report["probe_artifact_refs"] = [{"patchlet_id": "P0002", "probe_root": ".artifacts/probes/P0002"}]
-    error = next(iter(iter_jsonschema_errors(report, "patchlet_report.schema.json")))
+    error = next(iter(iter_jsonschema_errors(report, "worker_patchlet_report_v2.schema.json")))
     detail = detail_from_jsonschema_error(error, error_id="RVE000001", patchlet_id="P0002")
     assert detail["normalized_signature"] == "probe_artifact_refs_missing_required_field"
 

@@ -55,7 +55,7 @@ Path(os.environ["CXOR_FINAL_REPORT_PATH"]).write_text(
 )
 report = {{
     "schema_version": "1.0",
-    "kind": "patchlet_report",
+    "kind": "task_worker_completion_handoff",
     "patchlet_id": patchlet_id,
     "status": "VERIFIED_NO_CHANGE_NEEDED",
     "changed_product_runtime_file": None,
@@ -91,10 +91,9 @@ report = {{
         "actual_value": "ok",
         "passed": True
     }}],
-    "acceptance_criteria_result": "pass"
 }}
-Path(os.environ["CXOR_REPORT_PATH"]).parent.mkdir(parents=True, exist_ok=True)
-Path(os.environ["CXOR_REPORT_PATH"]).write_text(json.dumps(report), encoding="utf-8")
+Path(os.environ["CXOR_TASK_COMPLETION_HANDOFF_PATH"]).parent.mkdir(parents=True, exist_ok=True)
+Path(os.environ["CXOR_TASK_COMPLETION_HANDOFF_PATH"]).write_text(json.dumps(report), encoding="utf-8")
 print(json.dumps({{"event": "turn.completed", "summary": "verified no change"}}), flush=True)
 """,
         encoding="utf-8",

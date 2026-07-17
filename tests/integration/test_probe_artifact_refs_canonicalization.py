@@ -129,6 +129,72 @@ def test_object_probe_artifact_ref_missing_file_is_rejected(git_repo: Path):
     assert result.errors[0]["normalized_signature"] == "probe_artifact_refs_missing_file"
 
 
+def test_inventory_known_skipped_limit_ref_is_non_blocking_and_excluded(git_repo: Path):
+    path = ".artifacts/probes/P0002/run_001/proof_runs.jsonl"
+    result = normalize_probe_artifact_refs(
+        [_object_ref(path)],
+        target_repo_root=git_repo,
+        patchlet_id="P0002",
+        evidence_inventory={
+            "entries": [
+                {
+                    "relative_path": "GP002/run_001/proof_runs.jsonl",
+                    "capture_status": "SKIPPED_LIMIT",
+                }
+            ]
+        },
+        evidence_preservation={"files": []},
+    )
+
+    assert result.errors == []
+    assert result.normalized_refs[0]["files"] == []
+    assert result.warnings == [f"probe_artifact_ref_not_durable:SKIPPED_LIMIT:{path}"]
+
+
+def test_inventory_known_unsafe_object_ref_is_non_blocking_and_excluded(git_repo: Path):
+    path = ".artifacts/probes/P0002/run_001/unsafe.json"
+    result = normalize_probe_artifact_refs(
+        [_object_ref(path)],
+        target_repo_root=git_repo,
+        patchlet_id="P0002",
+        evidence_inventory={
+            "entries": [
+                {
+                    "relative_path": "GP002/run_001/unsafe.json",
+                    "capture_status": "SKIPPED_UNSAFE_OBJECT",
+                }
+            ]
+        },
+        evidence_preservation={"files": []},
+    )
+
+    assert result.errors == []
+    assert result.normalized_refs[0]["files"] == []
+    assert result.warnings == [f"probe_artifact_ref_not_durable:SKIPPED_UNSAFE_OBJECT:{path}"]
+
+
+def test_inventory_capture_with_failed_preservation_is_non_blocking(git_repo: Path):
+    path = ".artifacts/probes/P0002/run_001/result.json"
+    result = normalize_probe_artifact_refs(
+        [_object_ref(path)],
+        target_repo_root=git_repo,
+        patchlet_id="P0002",
+        evidence_inventory={
+            "entries": [
+                {
+                    "relative_path": "GP002/run_001/result.json",
+                    "capture_status": "CAPTURED",
+                }
+            ]
+        },
+        evidence_preservation={"files": [], "preservation_complete": False},
+    )
+
+    assert result.errors == []
+    assert result.normalized_refs[0]["files"] == []
+    assert result.warnings == [f"probe_artifact_ref_not_durable:PRESERVATION_FAILED:{path}"]
+
+
 def test_object_probe_artifact_ref_outside_repo_is_rejected(git_repo: Path, tmp_path: Path):
     outside = tmp_path / "outside.json"
     outside.write_text("{}", encoding="utf-8")

@@ -49,7 +49,7 @@ def test_patchlet_run_context_default_uses_target_repo_for_execution_and_artifac
     assert run_ctx.worktree_path is None
 
 
-def test_mock_worker_writes_reports_and_probes_to_artifact_root(git_repo: Path, tmp_path: Path):
+def test_mock_worker_writes_handoff_and_staged_evidence_to_attempt_root(git_repo: Path, tmp_path: Path):
     from codex_orchestrator.stages.run_patchlet import PatchletRunContext
 
     ctx, patchlet = _compiled_ctx(git_repo)
@@ -70,10 +70,11 @@ def test_mock_worker_writes_reports_and_probes_to_artifact_root(git_repo: Path, 
 
     result = MockWorker().run_patchlet(ctx, patchlet, run_ctx=run_ctx)
 
-    assert result.report_path == ctx.paths.reports_dir / "P0001.json"
-    assert (ctx.paths.reports_dir / "P0001.json").exists()
-    assert (ctx.paths.probe_dir / "P0001" / "probe.py").exists()
-    assert (ctx.paths.probe_dir / "P0001" / "run_001" / "row_ledger.jsonl").exists()
+    assert result.report_path == run_ctx.run_dir / "P0001.task_completion_handoff.json"
+    assert result.report_path.exists()
+    assert not (ctx.paths.reports_dir / "P0001.json").exists()
+    assert (run_ctx.worker_evidence_dir / "GP001" / "probe.py").exists()
+    assert (run_ctx.worker_evidence_dir / "GP001" / "run_001" / "row_ledger.jsonl").exists()
     assert not (execution_root / ".codex-orchestrator" / "reports" / "P0001.json").exists()
     assert not (execution_root / ".artifacts" / "probes" / "P0001" / "run_001" / "row_ledger.jsonl").exists()
 
@@ -114,7 +115,7 @@ def test_run_next_default_behavior_preserves_existing_artifact_paths(git_repo: P
     assert result.patchlet_id == "P0001"
     assert (ctx.paths.reports_dir / "P0001.json").exists()
     assert (ctx.paths.probe_dir / "P0001" / "run_001" / "row_ledger.jsonl").exists()
-    assert validate_json_file(ctx.paths.reports_dir / "P0001.json", "patchlet_report.schema.json") == []
+    assert validate_json_file(ctx.paths.reports_dir / "P0001.json", "worker_patchlet_report_v2.schema.json") == []
 
 
 def test_run_next_default_behavior_keeps_existing_full_mock_flow_green(git_repo: Path):

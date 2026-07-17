@@ -27,11 +27,9 @@ def _default_report(patchlet: dict) -> dict:
         })
     return {
         "schema_version": "1.0",
-        "kind": "patchlet_report",
+        "kind": "task_worker_completion_handoff",
         "patchlet_id": pid,
         "status": "VERIFIED_NO_CHANGE_NEEDED",
-        "changed_product_runtime_file": None,
-        "changed_artifact_files": [f".artifacts/probes/{pid}/probe.py"],
         "probe_commands": [f"python .artifacts/probes/{pid}/probe.py"],
         "deterministic_run_counts": {"baseline": "5/5", "proof_of_fix": "5/5", "negative_controls": "5/5"},
         "root_cause_classification": {
@@ -52,13 +50,7 @@ def _default_report(patchlet: dict) -> dict:
         "row_ledger": [],
         "trace_ledger": [],
         "cleanup_proof": "mock probe writes no persistent product state",
-        "probe_artifact_refs": [{
-            "patchlet_id": pid,
-            "probe_root": f".artifacts/probes/{pid}",
-            "run_id": "run_001",
-        }],
         "semantic_goal_results": semantic_goal_results,
-        "acceptance_criteria_result": "pass",
     }
 
 
@@ -82,8 +74,11 @@ def _write_final_report_stage(run_ctx: PatchletRunContext, patchlet: dict, repor
     )
 
 
-def _write_probe_run_artifacts(run_ctx: PatchletRunContext, patchlet_id: str) -> list[str]:
-    probe_root = run_ctx.probe_dir / patchlet_id
+def _write_probe_run_artifacts(run_ctx: PatchletRunContext, patchlet: dict) -> None:
+    patchlet_id = patchlet["patchlet_id"]
+    probe_ids = sorted(set(patchlet.get("probe_ids") or []))
+    probe_id = probe_ids[0] if probe_ids else patchlet_id
+    probe_root = run_ctx.worker_evidence_dir / probe_id
     probe_root.mkdir(parents=True, exist_ok=True)
     probe = probe_root / "probe.py"
     probe.write_text("print('mock probe passed')\n", encoding="utf-8")
@@ -98,12 +93,9 @@ def _write_probe_run_artifacts(run_ctx: PatchletRunContext, patchlet_id: str) ->
         "cleanup_proof.json": json.dumps({"cleanup_passed": True}) + "\n",
         "semantic_goal_result.json": json.dumps({"mock": "semantic"}) + "\n",
     }
-    changed = [f".artifacts/probes/{patchlet_id}/probe.py"]
     for name, content in files_and_contents.items():
         path = run_root / name
         path.write_text(content, encoding="utf-8")
-        changed.append(f".artifacts/probes/{patchlet_id}/run_001/{name}")
-    return changed
 
 
 def _structured_python_return_content(patchlet: dict) -> str | None:
@@ -160,22 +152,34 @@ class MockWorker(Worker):
                 product.write_text(semantic_content, encoding="utf-8")
                 semantic_autofix_applied = True
 
-        changed_probe_artifacts = _write_probe_run_artifacts(run_ctx, pid)
+        _write_probe_run_artifacts(run_ctx, patchlet)
+        extra_evidence_count = int(scenario.get("extra_worker_evidence_file_count") or 0)
+        if extra_evidence_count:
+            probe_id = sorted(set(patchlet.get("probe_ids") or []))[0]
+            extra_root = run_ctx.worker_evidence_dir / probe_id / "run_001" / "zz-overflow"
+            extra_root.mkdir(parents=True, exist_ok=True)
+            for index in range(extra_evidence_count):
+                (extra_root / f"evidence-{index:02d}.txt").write_text(
+                    f"diagnostic {index}\n",
+                    encoding="utf-8",
+                )
 
         report = _default_report(patchlet)
-        report["changed_artifact_files"] = changed_probe_artifacts
         if scenario.get("status") == "COMPLETE" or semantic_autofix_applied:
             report["status"] = "COMPLETE"
-            report["changed_product_runtime_file"] = patchlet["allowed_product_runtime_file"]
-            report["acceptance_criteria_result"] = "pass"
-        report.update(scenario.get("report_override", {}))
+        report.update(scenario.get("handoff_override", {}))
         if scenario.get("force_failed_report"):
             report["status"] = "FAILED_WITH_EVIDENCE"
-            report["acceptance_criteria_result"] = "fail"
+            report["failed_probe_evidence"] = "mock failure requested by scenario"
             report["root_cause_classification"]["observed_failure"] = "mock failure requested"
 
-        report_path = run_ctx.reports_dir / f"{pid}.json"
+        report_path = run_ctx.task_completion_handoff_path(pid)
         write_json(report_path, report)
+        if scenario.get("report_production_override") is not None:
+            write_json(
+                run_dir / "mock_report_production_override.json",
+                scenario["report_production_override"],
+            )
         _write_final_report_stage(run_ctx, patchlet, report["status"])
         run_dir.mkdir(parents=True, exist_ok=True)
         (run_dir / "output.jsonl").write_text(json.dumps({"mock": True, "patchlet_id": pid}) + "\n", encoding="utf-8")

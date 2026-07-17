@@ -41,7 +41,29 @@ class CodexRuntimeDebrisWorker:
         return result
 
 
-def _run_regression(git_repo: Path, monkeypatch: pytest.MonkeyPatch):
+class EvidenceBudgetWorker:
+    def __init__(self):
+        self.mock = MockWorker()
+
+    def run_patchlet(self, ctx, patchlet, *, run_dir=None, run_ctx=None):
+        result = self.mock.run_patchlet(ctx, patchlet, run_dir=run_dir, run_ctx=run_ctx)
+        assert run_ctx is not None
+        overflow = run_ctx.worker_evidence_dir / patchlet["probe_ids"][0] / "run_001" / "zz-overflow"
+        overflow.mkdir(parents=True, exist_ok=True)
+        for index in range(65):
+            (overflow / f"evidence-{index:02d}.txt").write_text(
+                f"diagnostic {index}\n",
+                encoding="utf-8",
+            )
+        return result
+
+
+def _run_regression(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    worker=None,
+):
     limits = git_repo / "limits.mjs"
     limits.write_text("export const limit = 1;\n", encoding="utf-8")
     subprocess.run(["git", "add", "limits.mjs"], cwd=git_repo, check=True)
@@ -74,12 +96,54 @@ def _run_regression(git_repo: Path, monkeypatch: pytest.MonkeyPatch):
     scenario.write_text(json.dumps({"change_allowed_product": True, "status": "COMPLETE"}), encoding="utf-8")
     monkeypatch.setattr(
         "codex_orchestrator.stages.run_patchlet.worker_for_mode",
-        lambda _mode: CodexRuntimeDebrisWorker(),
+        lambda _mode: worker or CodexRuntimeDebrisWorker(),
     )
 
     result = run_next_patchlet(ctx, worker_mode="mock", use_worktree=False)
     run_dir = ctx.paths.runs_dir / "P0002_attempt1"
     return ctx, result, run_dir
+
+
+def test_more_than_64_evidence_files_reach_all_authoritative_gates_and_promotion(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    ctx, result, run_dir = _run_regression(
+        git_repo,
+        monkeypatch,
+        worker=EvidenceBudgetWorker(),
+    )
+    inventory = read_json(run_dir / "gates" / "worker_evidence_inventory.json")
+    preservation = read_json(run_dir / "gates" / "worker_evidence_preservation_result.json")
+    report = read_json(ctx.paths.reports_dir / "P0002.json")
+    report_files = [
+        item["path"]
+        for group in report["probe_artifact_refs"]
+        for item in group.get("files", [])
+    ]
+
+    assert result.status == "COMPLETE"
+    assert inventory["captured_file_count"] == 64
+    assert inventory["skipped_file_count"] == 8
+    assert inventory["inventory_truncated"] is True
+    assert inventory["promotion_blocked"] is False
+    assert len(preservation["files"]) == 64
+    assert len(report_files) == 64
+    assert all("evidence-57.txt" not in path for path in report_files)
+    assert read_json(run_dir / "patch_promotion" / "patch_reconstruction_result.json")["accepted"] is True
+    assert read_json(run_dir / "gates" / "independent_probe_rerun_result.json")["accepted"] is True
+    assert read_json(run_dir / "gates" / "goal_coverage_gate_result.json")["accepted"] is True
+    assert read_json(run_dir / "gates" / "canonical_patchlet_semantic_result.json")["accepted"] is True
+    promotion = read_json(run_dir / "patch_promotion" / "clean_candidate_promotion_result.json")
+    assert promotion["promotion_accepted"] is True
+    promoted = subprocess.run(
+        ["git", "ls-tree", "-r", "--name-only", promotion["integration_ref_after"]],
+        cwd=git_repo,
+        text=True,
+        stdout=subprocess.PIPE,
+        check=True,
+    ).stdout.splitlines()
+    assert not any(path.startswith(".artifacts/") for path in promoted)
 
 
 def _debris_paths(hygiene: dict) -> set[str]:

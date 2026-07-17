@@ -113,15 +113,12 @@ Fake-success parity now proves the exact `worker_mode=real_codex` +
 valid report and durable probe artifacts. Real Codex success to DONE remains
 dependent on actual Codex output quality and is not guaranteed.
 
-Use `src/codex_orchestrator/prompt_templates/real_codex_patchlet_contract.md`
-as the operator-facing patchlet contract for required paths, report fields, and
-durable probe files.
-
-For the opt-in smoke, that contract is injected into the generated prompt
-artifact under `.codex-orchestrator/subprompts/` so the installed Codex binary
-receives the same path contract already proven by fake-success parity. The
-template now includes a minimal valid report example for `CXOR_REPORT_PATH` and
-a minimal durable probe example rooted at `CXOR_PROBE_ROOT`.
+WorkerPatchletReportV2 is the sole worker-report boundary. The orchestrator
+generates `REPORT_SCHEMA_CONTRACT.md` per attempt from `report_contract.py`
+and embeds it in the worker task prompt. V1 reports fail before reorganization
+and normalization. Unknown V2 extensions remain warning-only and
+non-authoritative; `acceptance_criteria_result` has no adapter. Canonical
+`worker_semantic_claims` can only be derived by semantic-result normalization.
 
 When a real/non-mock worker exits non-zero, `run_manifest.json` should retain a `WORKER_FAILED` patchlet run entry together with preserved `stdout.txt`, `stderr.txt`, `command.json`, and `output.jsonl` artifact paths. Blind retry is not allowed.
 

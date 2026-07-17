@@ -46,13 +46,13 @@ def test_worker_capsule_writes_task_contract(git_repo: Path):
     assert task_contract.exists()
 
 
-def test_task_contract_contains_report_probe_and_allowed_file_paths(git_repo: Path):
+def test_task_contract_contains_handoff_probe_and_allowed_file_paths(git_repo: Path):
     ctx = _compiled_ctx(git_repo)
 
     run_next_patchlet(ctx, worker_mode="mock")
 
     text = (ctx.paths.runs_dir / "P0001_attempt1" / "worker_memory" / "TASK_CONTRACT.md").read_text(encoding="utf-8")
-    assert ".codex-orchestrator/reports/P0001.json" in text
+    assert "P0001.task_completion_handoff.json" in text
     assert ".artifacts/probes/P0001" in text
     assert "app.py" in text
 

@@ -80,7 +80,6 @@ def test_verify_group_failed_patchlet_report_creates_failure_record(git_repo: Pa
     report_path = ctx.paths.reports_dir / "P0001.json"
     report = read_json(report_path)
     report["status"] = "FAILED_WITH_EVIDENCE"
-    report["acceptance_criteria_result"] = "fail"
     report["failed_probe_evidence"] = "group verifier consumed a failing report"
     report_path.write_text(__import__("json").dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
@@ -117,8 +116,6 @@ def test_verify_group_is_read_only_for_product_runtime_files(git_repo: Path):
 
 
 def test_cli_verify_group_outputs_group_result_and_artifact_path(git_repo: Path, tmp_path: Path):
-    from codex_orchestrator.stages.verify_group import verify_group
-
     ctx = _ctx(git_repo)
     run_next_patchlet(ctx, worker_mode="mock")
     result = _run_cli(["verify-group", "--repo", str(git_repo), "TG001"], cwd=tmp_path)

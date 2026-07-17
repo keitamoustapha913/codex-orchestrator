@@ -8,8 +8,8 @@ from codex_orchestrator.validators.report_validator import ReportValidationError
 
 def _report(refs):
     return {
-        "schema_version": "1.0",
-        "kind": "patchlet_report",
+        "schema_version": "2.0",
+        "kind": "worker_patchlet_report",
         "patchlet_id": "P0001",
         "status": "VERIFIED_NO_CHANGE_NEEDED",
         "changed_product_runtime_file": None,
@@ -22,7 +22,6 @@ def _report(refs):
         "trace_ledger": [],
         "cleanup_proof": "ok",
         "probe_artifact_refs": refs,
-        "acceptance_criteria_result": "pass",
     }
 
 

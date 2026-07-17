@@ -124,10 +124,10 @@ import os
 from pathlib import Path
 run_dir = Path(os.environ["CXOR_RUN_DIR"])
 (run_dir / "env.json").write_text(json.dumps(dict(os.environ), sort_keys=True), encoding="utf-8")
-Path(os.environ["CXOR_REPORT_PATH"]).parent.mkdir(parents=True, exist_ok=True)
-Path(os.environ["CXOR_REPORT_PATH"]).write_text(json.dumps({
+Path(os.environ["CXOR_TASK_COMPLETION_HANDOFF_PATH"]).parent.mkdir(parents=True, exist_ok=True)
+Path(os.environ["CXOR_TASK_COMPLETION_HANDOFF_PATH"]).write_text(json.dumps({
     "schema_version": "1.0",
-    "kind": "patchlet_report",
+    "kind": "task_worker_completion_handoff",
     "patchlet_id": "P0001",
     "status": "VERIFIED_NO_CHANGE_NEEDED",
     "changed_product_runtime_file": None,
@@ -147,7 +147,6 @@ Path(os.environ["CXOR_REPORT_PATH"]).write_text(json.dumps({
     "row_ledger": [],
     "trace_ledger": [],
     "cleanup_proof": "cleanup ok",
-    "acceptance_criteria_result": "pass"
 }), encoding="utf-8")
 """,
         encoding="utf-8",

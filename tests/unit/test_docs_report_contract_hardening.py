@@ -12,6 +12,11 @@ DOCS = [
     Path("IMPLEMENTATION_STATUS.md"),
 ]
 
+STATIC_CONTRACT_MARKERS = (
+    "real_codex_patchlet_contract.md",
+    "CXOR_REAL_CODEX_CONTRACT_PATH",
+)
+
 
 def _docs_text() -> str:
     return "\n".join(path.read_text(encoding="utf-8") for path in DOCS if path.exists())
@@ -68,3 +73,26 @@ def test_docs_explain_validate_list_export_after_safe_failure():
     assert "validate-real-codex-smoke-runbook" in text
     assert "list-real-codex-smoke-runbooks" in text
     assert "export-real-codex-smoke-runbook" in text
+
+
+def test_docs_contain_no_static_report_contract_path():
+    text = _docs_text()
+    for marker in STATIC_CONTRACT_MARKERS:
+        assert marker not in text
+
+
+def test_docs_contain_no_acceptance_result_normalization():
+    text = _docs_text().lower().replace("`", "")
+    assert "normalize acceptance_criteria_result" not in text
+    assert "acceptance_criteria_result normalization" not in text
+    assert (
+        "acceptance_criteria_result receives no special" in text
+        or "acceptance_criteria_result has no" in text
+        or "acceptance_criteria_result is not normalized" in text
+    )
+
+
+def test_docs_define_worker_semantic_claims_as_orchestrator_derived():
+    text = _docs_text().lower()
+    assert "worker_semantic_claims" in text
+    assert "orchestrator-derived" in text or "orchestrator derived" in text

@@ -41,14 +41,12 @@ from pathlib import Path
 run_dir = Path(os.environ["CXOR_RUN_DIR"])
 run_dir.mkdir(parents=True, exist_ok=True)
 (run_dir / "env.json").write_text(json.dumps(dict(os.environ), indent=2, sort_keys=True), encoding="utf-8")
-Path(os.environ["CXOR_REPORT_PATH"]).parent.mkdir(parents=True, exist_ok=True)
-Path(os.environ["CXOR_REPORT_PATH"]).write_text(json.dumps({
+Path(os.environ["CXOR_TASK_COMPLETION_HANDOFF_PATH"]).parent.mkdir(parents=True, exist_ok=True)
+Path(os.environ["CXOR_TASK_COMPLETION_HANDOFF_PATH"]).write_text(json.dumps({
     "schema_version": "1.0",
-    "kind": "patchlet_report",
+    "kind": "task_worker_completion_handoff",
     "patchlet_id": os.environ["CXOR_PATCHLET_ID"],
     "status": "VERIFIED_NO_CHANGE_NEEDED",
-    "changed_product_runtime_file": None,
-    "changed_artifact_files": [],
     "probe_commands": ["python noop.py"],
     "deterministic_run_counts": {"baseline": "1/1", "proof_of_fix": "1/1", "negative_controls": "1/1"},
     "root_cause_classification": {
@@ -65,8 +63,6 @@ Path(os.environ["CXOR_REPORT_PATH"]).write_text(json.dumps({
     "row_ledger": [],
     "trace_ledger": [],
     "cleanup_proof": "cleanup ok",
-    "probe_artifact_refs": [],
-    "acceptance_criteria_result": "pass"
 }, indent=2), encoding="utf-8")
 print(Path.cwd())
 """,
@@ -107,7 +103,7 @@ def test_codex_worker_exposes_target_execution_and_artifact_roots_to_fake_binary
     assert env_dump["CXOR_ARTIFACT_ROOT"] == str(ctx.root)
 
 
-def test_codex_worker_exposes_patchlet_attempt_report_and_probe_paths(
+def test_codex_worker_exposes_patchlet_attempt_handoff_and_probe_paths(
     git_repo: Path,
     tmp_path: Path,
     monkeypatch,
@@ -122,7 +118,10 @@ def test_codex_worker_exposes_patchlet_attempt_report_and_probe_paths(
     assert env_dump["CXOR_PATCHLET_ID"] == "P0001"
     assert env_dump["CXOR_ATTEMPT_ID"] == "P0001_attempt1"
     assert env_dump["CXOR_REPORTS_DIR"] == str(ctx.paths.reports_dir)
-    assert env_dump["CXOR_REPORT_PATH"] == str(ctx.paths.reports_dir / "P0001.json")
+    assert env_dump["CXOR_TASK_COMPLETION_HANDOFF_PATH"] == str(
+        ctx.paths.runs_dir / "P0001_attempt1" / "P0001.task_completion_handoff.json"
+    )
+    assert "CXOR_REPORT_PATH" not in env_dump
     assert env_dump["CXOR_PROBE_ROOT"] == str(Path(env_dump["CXOR_WORKER_EVIDENCE_DIR"]) / patchlet["probe_ids"][0])
     assert env_dump["CXOR_RUNS_DIR"] == str(ctx.paths.runs_dir)
     assert env_dump["CXOR_RUN_DIR"] == str(ctx.paths.runs_dir / "P0001_attempt1")
@@ -155,7 +154,9 @@ def test_codex_worker_environment_paths_point_to_target_artifact_root_in_worktre
     assert env_dump["CXOR_TARGET_ROOT"] == str(ctx.root)
     assert env_dump["CXOR_EXECUTION_ROOT"] == str(execution_root)
     assert env_dump["CXOR_ARTIFACT_ROOT"] == str(ctx.root)
-    assert env_dump["CXOR_REPORT_PATH"] == str(ctx.paths.reports_dir / "P0001.json")
+    assert env_dump["CXOR_TASK_COMPLETION_HANDOFF_PATH"] == str(
+        ctx.paths.runs_dir / "P0001_attempt1" / "P0001.task_completion_handoff.json"
+    )
     assert env_dump["CXOR_PROBE_ROOT"] == str(Path(env_dump["CXOR_WORKER_EVIDENCE_DIR"]) / patchlet["probe_ids"][0])
     assert env_dump["CXOR_RUN_DIR"] == str(ctx.paths.runs_dir / "P0001_attempt1")
     assert not env_dump["CXOR_WORKER_EVIDENCE_DIR"].startswith(str(execution_root) + os.sep)
@@ -181,7 +182,7 @@ def test_codex_worker_environment_does_not_point_artifacts_to_worktree_in_worktr
         worktree_path=execution_root,
     )
 
-    assert not env_dump["CXOR_REPORT_PATH"].startswith(str(execution_root))
+    assert not env_dump["CXOR_TASK_COMPLETION_HANDOFF_PATH"].startswith(str(execution_root))
     assert not env_dump["CXOR_PROBE_ROOT"].startswith(str(execution_root))
     assert not env_dump["CXOR_RUN_DIR"].startswith(str(execution_root))
 

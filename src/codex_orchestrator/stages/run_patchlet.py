@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
+import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -41,6 +43,11 @@ from codex_orchestrator.patch_promotion import (
 )
 from codex_orchestrator.prompt_index import upsert_prompt_index_entry
 from codex_orchestrator.report_ingestion import ingest_patchlet_report
+from codex_orchestrator.report_production import (
+    REPORT_PRODUCTION_MAX_ATTEMPTS,
+    launch_report_production_worker,
+)
+from codex_orchestrator.report_contract import contract_fingerprint
 from codex_orchestrator.run_records import upsert_run_record
 from codex_orchestrator.semantic_result_normalization import canonicalize_semantic_goal_results_after_probe
 from codex_orchestrator.semantic_goal_runner import run_semantic_goal_checks
@@ -718,7 +725,7 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
             "attempt_root": _record_path_for_manifest(ctx, initial_run_dir),
             "attempt_scratch_dir": _record_path_for_manifest(ctx, initial_run_dir / "worker_scratch"),
             "quarantine_dir": _record_path_for_manifest(ctx, initial_run_dir / "quarantined_scratch"),
-            "required_report_path": _record_path_for_manifest(ctx, ctx.paths.reports_dir / f"{pid}.json"),
+            "required_report_path": _record_path_for_manifest(ctx, initial_run_dir / f"{pid}.task_completion_handoff.json"),
             "required_probe_artifact_root": _record_path_for_manifest(ctx, ctx.paths.probe_dir / pid),
         },
     )
@@ -763,6 +770,7 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
     run_ctx.worker_evidence_dir.mkdir(parents=True, exist_ok=True)
     run_ctx.quarantine_dir.mkdir(parents=True, exist_ok=True)
     run_ctx.required_report_path(pid).parent.mkdir(parents=True, exist_ok=True)
+    run_ctx.task_completion_handoff_path(pid).parent.mkdir(parents=True, exist_ok=True)
     run_ctx.required_probe_artifact_root(pid).mkdir(parents=True, exist_ok=True)
     evidence_contract = create_worker_evidence_contract(run_ctx, patchlet)
     ensure_worker_capsule(ctx, worker_capsule)
@@ -773,7 +781,7 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
     prompt_path = _record_path_for_manifest(ctx, run_dir / "codex_task_prompt.md")
     attempt_prompt_path = run_dir / "codex_task_prompt.md"
     if not attempt_prompt_path.exists():
-        report_contract = worker_capsule.worker_memory_dir / "REPORT_SCHEMA_CONTRACT.md"
+        handoff_contract = worker_capsule.worker_memory_dir / "TASK_COMPLETION_HANDOFF_CONTRACT.md"
         final_contract = worker_capsule.worker_memory_dir / "FINAL_REPORT_CONTRACT.md"
         work_slice_contract = worker_capsule.worker_memory_dir / "WORK_SLICE_CONTRACT.md"
         forbidden_files = patchlet.get("prompt_scope", {}).get("forbidden_edit_files", [])
@@ -803,8 +811,8 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
             f"{_semantic_worker_prompt_section(patchlet)}"
             "## Work slice contract\n\n"
             f"{work_slice_contract.read_text(encoding='utf-8') if work_slice_contract.exists() else ''}\n\n"
-            "## Report schema contract\n\n"
-            f"{report_contract.read_text(encoding='utf-8') if report_contract.exists() else ''}\n\n"
+            "## Task completion handoff contract\n\n"
+            f"{handoff_contract.read_text(encoding='utf-8') if handoff_contract.exists() else ''}\n\n"
             "## Final report contract\n\n"
             f"{final_contract.read_text(encoding='utf-8') if final_contract.exists() else ''}\n",
             encoding="utf-8",
@@ -825,7 +833,7 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
         "contracts": [
             "TASK_CONTRACT.md",
             "WORK_SLICE_CONTRACT.md",
-            "REPORT_SCHEMA_CONTRACT.md",
+            "TASK_COMPLETION_HANDOFF_CONTRACT.md",
             "FINAL_REPORT_CONTRACT.md",
             "RUNTIME_SIDE_EFFECT_CONTRACT.md",
         ],
@@ -859,7 +867,7 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
         details={
             "attempt_scratch_dir": _record_path_for_manifest(ctx, run_ctx.attempt_scratch_dir),
             "quarantine_dir": _record_path_for_manifest(ctx, run_ctx.quarantine_dir),
-            "required_report_path": _record_path_for_manifest(ctx, run_ctx.required_report_path(pid)),
+            "required_report_path": _record_path_for_manifest(ctx, run_ctx.task_completion_handoff_path(pid)),
             "required_probe_artifact_root": _record_path_for_manifest(ctx, run_ctx.required_probe_artifact_root(pid)),
             "worker_evidence_dir": str(run_ctx.worker_evidence_dir),
             "worker_evidence_contract": _record_path_for_manifest(ctx, run_dir / "gates" / "worker_evidence_contract.json"),
@@ -1310,13 +1318,110 @@ def run_next_patchlet(ctx: TargetRepoContext, *, worker_mode: str = "mock", use_
         else:
             try:
                 if worker_result.report_path is None:
-                    raise ReportValidationError("Worker did not create a report")
-                report_ingestion_result = ingest_patchlet_report(
-                    ctx,
-                    patchlet=patchlet,
-                    attempt_id=run_id,
-                    report_path=worker_result.report_path,
-                )
+                    raise ReportValidationError("Task worker did not create a completion handoff")
+                task_handoff_path = run_ctx.task_completion_handoff_path(pid)
+                if worker_result.report_path.resolve() != task_handoff_path.resolve():
+                    shutil.copyfile(worker_result.report_path, task_handoff_path)
+                report_production_errors: list[dict] = []
+                produced_report_path: Path | None = None
+                frozen_report_input_paths = {
+                    "task_handoff": task_handoff_path,
+                    "candidate_patch": patch_promotion_result.patch_path,
+                    "evidence_inventory": run_dir / "gates" / "worker_evidence_inventory.json",
+                    "evidence_preservation": run_dir / "gates" / "worker_evidence_preservation_result.json",
+                }
+                frozen_report_input_hashes = {
+                    name: hashlib.sha256(path.read_bytes()).hexdigest()
+                    for name, path in frozen_report_input_paths.items()
+                }
+                for report_attempt in range(1, REPORT_PRODUCTION_MAX_ATTEMPTS + 1):
+                    production_dir = run_dir / "gates" / "report_production_worker" / f"attempt_{report_attempt}"
+                    mock_override_path = run_dir / "mock_report_production_override.json"
+                    production = launch_report_production_worker(
+                        task_handoff_path=task_handoff_path,
+                        context={
+                            "schema_version": "1.0",
+                            "kind": "report_production_context",
+                            "patchlet_id": pid,
+                            "attempt_id": run_id,
+                            "report_attempt": report_attempt,
+                            "maximum_report_attempts": REPORT_PRODUCTION_MAX_ATTEMPTS,
+                            "allowed_product_runtime_file": patchlet.get("allowed_product_runtime_file"),
+                            "work_slice_id": patchlet.get("work_slice_id"),
+                            "goal_item_ids": list(patchlet.get("goal_item_ids") or []),
+                            "proof_obligation_ids": list(patchlet.get("proof_obligation_ids") or []),
+                            "probe_ids": list(patchlet.get("probe_ids") or []),
+                            "contract_fingerprint": contract_fingerprint(),
+                            "task_handoff_sha256": hashlib.sha256(task_handoff_path.read_bytes()).hexdigest(),
+                            "candidate_patch_sha256": (patch_promotion_result.patch_manifest.get("patch_sha256") if patch_promotion_result else None),
+                            "candidate_changed_paths": list(changed_paths),
+                            "previous_validation_errors": report_production_errors,
+                            "mock_report_override": (
+                                read_json(mock_override_path)
+                                if worker_mode == "mock" and mock_override_path.exists()
+                                else None
+                            ),
+                            "authoritative": False,
+                        },
+                        evidence_inventory_path=run_dir / "gates" / "worker_evidence_inventory.json",
+                        evidence_preservation_path=run_dir / "gates" / "worker_evidence_preservation_result.json",
+                        output_dir=production_dir,
+                    )
+                    mutated_inputs = sorted(
+                        name
+                        for name, path in frozen_report_input_paths.items()
+                        if not path.is_file()
+                        or hashlib.sha256(path.read_bytes()).hexdigest()
+                        != frozen_report_input_hashes[name]
+                    )
+                    if mutated_inputs:
+                        production = {
+                            "accepted": False,
+                            "failure_code": "REPORT_PRODUCTION_INPUT_MUTATION",
+                            "mutated_inputs": mutated_inputs,
+                        }
+                    _append_patchlet_event(
+                        ctx,
+                        "report_production_worker_completed" if production.get("accepted") else "report_production_worker_failed",
+                        patchlet_id=pid,
+                        attempt_id=run_id,
+                        severity="success" if production.get("accepted") else "error",
+                        summary=f"Report Production Worker attempt {report_attempt} {'completed' if production.get('accepted') else 'failed'} for {pid}.",
+                        artifact_paths=[_record_path_for_manifest(ctx, production_dir)],
+                        details={
+                            "report_attempt": report_attempt,
+                            "maximum_report_attempts": REPORT_PRODUCTION_MAX_ATTEMPTS,
+                            "accepted": bool(production.get("accepted")),
+                            "authoritative": False,
+                            "product_candidate_frozen": True,
+                        },
+                    )
+                    if not production.get("accepted"):
+                        report_production_errors = [
+                            {
+                                "message": str(production.get("failure_code") or "report production failed"),
+                                "normalized_signature": str(production.get("failure_code") or "REPORT_PRODUCTION_FAILED"),
+                            }
+                        ]
+                        continue
+                    produced_report_path = Path(production["report_path"])
+                    report_ingestion_result = ingest_patchlet_report(
+                        ctx,
+                        patchlet=patchlet,
+                        attempt_id=run_id,
+                        report_path=produced_report_path,
+                    )
+                    report_validation_errors = read_json(
+                        ctx.root / report_ingestion_result["validation"]["errors_path"]
+                    ).get("errors", [])
+                    if report_ingestion_result["accepted"]:
+                        break
+                    report_production_errors = list(report_validation_errors)
+                if report_ingestion_result is None or not report_ingestion_result.get("accepted"):
+                    message = "; ".join(
+                        str(error.get("message", "")) for error in report_production_errors
+                    ) or "Report Production Worker exhausted bounded attempts"
+                    raise ReportValidationError(message, report_production_errors)
                 canonical_report_path = ctx.root / report_ingestion_result["canonical_report_path"] if report_ingestion_result.get("canonical_report_path") else worker_result.report_path
                 report_validation_errors = read_json(ctx.root / report_ingestion_result["validation"]["errors_path"]).get("errors", [])
                 report_failure_signature = report_ingestion_result.get("normalized_failure_signature")

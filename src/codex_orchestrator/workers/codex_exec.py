@@ -32,8 +32,8 @@ from codex_orchestrator.prompt_index import upsert_prompt_index_entry
 from codex_orchestrator.target_repo import TargetRepoContext
 from codex_orchestrator.worker_capsule import (
     final_report_contract_text,
-    report_schema_contract_text,
     runtime_side_effect_contract_text,
+    task_completion_handoff_contract_text,
 )
 
 from .base import Worker, WorkerResult, ensure_run_context
@@ -112,7 +112,7 @@ class CodexExecWorker(Worker):
             raise WorkerPreconditionError(f"Codex binary not found: {self.codex_binary}")
         run_dir.mkdir(parents=True, exist_ok=True)
         task_contract_path = run_dir / "worker_memory" / "TASK_CONTRACT.md"
-        report_contract_path = run_dir / "worker_memory" / "REPORT_SCHEMA_CONTRACT.md"
+        handoff_contract_path = run_dir / "worker_memory" / "TASK_COMPLETION_HANDOFF_CONTRACT.md"
         final_report_contract_path = run_dir / "worker_memory" / "FINAL_REPORT_CONTRACT.md"
         runtime_contract_path = run_dir / "worker_memory" / "RUNTIME_SIDE_EFFECT_CONTRACT.md"
         evidence_contract_path = run_dir / "gates" / "worker_evidence_contract.json"
@@ -134,7 +134,7 @@ class CodexExecWorker(Worker):
         attempt_prompt_text = (
             "Before doing any task work, read:\n"
             f"- {task_contract_path}\n"
-            f"- {report_contract_path}\n"
+            f"- {handoff_contract_path}\n"
             f"- {final_report_contract_path}\n"
             f"- {runtime_contract_path}\n"
             f"- {evidence_contract_path}\n"
@@ -211,7 +211,7 @@ class CodexExecWorker(Worker):
             "-",
         ])
         patchlet_id = patchlet["patchlet_id"]
-        report_path = run_ctx.required_report_path(patchlet_id)
+        report_path = run_ctx.task_completion_handoff_path(patchlet_id)
         mapped_probe_ids = sorted(set(patchlet.get("probe_ids") or []))
         mapped_probe_id = mapped_probe_ids[0] if mapped_probe_ids else patchlet_id
         probe_root = worker_evidence_dir / mapped_probe_id
@@ -232,10 +232,10 @@ class CodexExecWorker(Worker):
             + f"Forbidden product/runtime edit path: $CXOR_TARGET_ROOT/{allowed_file} ({run_ctx.target_root / allowed_file})\n"
             + "Product/runtime files and durable workflow evidence under target root are read-only to the worker. "
             + f"Write mapped probe evidence only beneath $CXOR_WORKER_EVIDENCE_DIR ({worker_evidence_dir}).\n\n"
-            + "## Embedded report schema contract\n\n"
-            + report_schema_contract_text(
+            + "## Embedded task completion handoff contract\n\n"
+            + task_completion_handoff_contract_text(
                 patchlet_id=patchlet_id,
-                report_path=str(report_path),
+                handoff_path=str(report_path),
             )
             + "\n\n## Embedded final report contract\n\n"
             + final_report_contract_text(
@@ -264,7 +264,7 @@ class CodexExecWorker(Worker):
             "reasoning": self.codex_reasoning,
             "contracts": [
                 "TASK_CONTRACT.md",
-                "REPORT_SCHEMA_CONTRACT.md",
+                "TASK_COMPLETION_HANDOFF_CONTRACT.md",
                 "FINAL_REPORT_CONTRACT.md",
                 "RUNTIME_SIDE_EFFECT_CONTRACT.md",
             ],
@@ -356,7 +356,7 @@ class CodexExecWorker(Worker):
             "CXOR_WORKER_HOOKS_DIR": str(worker_hooks_dir),
             "CXOR_GATES_DIR": str(gates_dir),
             "CXOR_DIAGNOSTICS_DIR": str(diagnostics_dir),
-            "CXOR_REQUIRED_REPORT_PATH": str(report_path),
+            "CXOR_TASK_COMPLETION_HANDOFF_PATH": str(report_path),
             "CXOR_REQUIRED_PROBE_ARTIFACT_ROOT": str(probe_root),
             "CXOR_WORKER_EVIDENCE_DIR": str(worker_evidence_dir),
             "CXOR_WORKER_EVIDENCE_CONTRACT": str(evidence_contract_path),
@@ -368,7 +368,6 @@ class CodexExecWorker(Worker):
             "CXOR_TIMEOUT_SECONDS": str(self.timeout_seconds),
             "CXOR_SOFT_DEADLINE_SECONDS": str(self.soft_deadline_seconds),
             "CXOR_ALLOWED_PRODUCT_RUNTIME_FILE": patchlet.get("allowed_product_runtime_file", ""),
-            "CXOR_REPORT_PATH": str(report_path),
             "CXOR_PROBE_ROOT": str(probe_root),
             **scratch_env,
         }
@@ -424,7 +423,7 @@ class CodexExecWorker(Worker):
             "selected_reasoning": self.codex_reasoning,
             "env": {
                 "CXOR_ATTEMPT_ROOT": str(run_dir),
-                "CXOR_REQUIRED_REPORT_PATH": str(report_path),
+                "CXOR_TASK_COMPLETION_HANDOFF_PATH": str(report_path),
                 "CXOR_REQUIRED_PROBE_ARTIFACT_ROOT": str(probe_root),
                 "CXOR_WORKER_EVIDENCE_DIR": str(worker_evidence_dir),
                 "CXOR_WORKER_EVIDENCE_CONTRACT": str(evidence_contract_path),
@@ -483,12 +482,8 @@ class CodexExecWorker(Worker):
                 f"codex worker failed with exit_code={result.exit_code};{timeout_note} "
                 f"cwd={run_ctx.execution_root}; target repo={run_ctx.target_root}"
             )
-        execution_report_path = run_ctx.execution_root / ".codex-orchestrator" / "reports" / f"{patchlet_id}.json"
-        if not report_path.exists() and execution_report_path.exists():
-            report_path.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(execution_report_path, report_path)
         if not report_path.exists():
-            raise WorkerExecutionError(f"codex worker did not produce report: {report_path}")
+            raise WorkerExecutionError(f"codex worker did not produce task completion handoff: {report_path}")
         return WorkerResult(
             exit_code=result.exit_code,
             stdout=result.stdout,

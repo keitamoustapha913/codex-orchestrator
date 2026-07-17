@@ -1,16 +1,14 @@
 from __future__ import annotations
 
 import json
-import os
 import re
-from pathlib import Path
 
 from codex_orchestrator.errors import StagePreconditionError
 from codex_orchestrator.jsonio import read_json, write_json
 from codex_orchestrator.loop_governor import read_loop_governor
 from codex_orchestrator.operator_events import append_operator_event
 from codex_orchestrator.prompt_index import upsert_prompt_index_entry
-from codex_orchestrator.worker_capsule import final_report_contract_text, report_schema_contract_text
+from codex_orchestrator.worker_capsule import final_report_contract_text, task_completion_handoff_contract_text
 from codex_orchestrator.state import load_state, transition
 from codex_orchestrator.target_repo import TargetRepoContext
 
@@ -42,16 +40,6 @@ def _latest_repair_plan_path(ctx: TargetRepoContext):
     if not plans:
         raise FileNotFoundError(f"No repair plans found in {ctx.paths.repair_plans_dir}")
     return plans[-1]
-
-
-def _real_codex_contract_text() -> str:
-    contract_path = os.environ.get("CXOR_REAL_CODEX_CONTRACT_PATH")
-    if not contract_path:
-        return ""
-    path = Path(contract_path)
-    if not path.exists():
-        raise RuntimeError(f"Missing real Codex contract template: {path}")
-    return "\n\n" + path.read_text(encoding="utf-8").strip() + "\n"
 
 
 def _member_patchlet_ids_for_transaction_group(ctx: TargetRepoContext, transaction_group_id: str) -> list[str]:
@@ -268,21 +256,25 @@ def regenerate_patchlets(ctx: TargetRepoContext, *, from_repair_plan: str = "lat
             "## ROOT-CAUSE PROBE-ONLY INVESTIGATION\n\n"
             "First prove the root cause with a direct probe before any product/runtime edit.\n"
             + _report_shape_repair_guidance(failure)
-            + "\n## Report schema contract\n\n"
-            + report_schema_contract_text(
+            + "\n## Task completion handoff contract\n\n"
+            + task_completion_handoff_contract_text(
                 patchlet_id=patchlet_id,
-                report_path=f".codex-orchestrator/reports/{patchlet_id}.json",
-                patchlet=repair_patchlet,
+                handoff_path=(
+                    f".codex-orchestrator/runs/{patchlet_id}_attempt1/"
+                    f"{patchlet_id}.task_completion_handoff.json"
+                ),
             )
             + "\n## Final report contract\n\n"
             + final_report_contract_text(
                 patchlet_id=patchlet_id,
                 attempt_id=f"{patchlet_id}_attempt1",
                 final_report_path=f".codex-orchestrator/runs/{patchlet_id}_attempt1/worker_stage/05_final_report.md",
-                report_path=f".codex-orchestrator/reports/{patchlet_id}.json",
+                report_path=(
+                    f".codex-orchestrator/runs/{patchlet_id}_attempt1/"
+                    f"{patchlet_id}.task_completion_handoff.json"
+                ),
                 probe_root=f".artifacts/probes/{patchlet_id}",
-            )
-            + _real_codex_contract_text(),
+            ),
             encoding="utf-8",
         )
         upsert_prompt_index_entry(ctx.root, {
@@ -299,7 +291,7 @@ def regenerate_patchlets(ctx: TargetRepoContext, *, from_repair_plan: str = "lat
             "model": None,
             "reasoning": None,
             "contracts": [
-                "REPORT_SCHEMA_CONTRACT.md",
+                "TASK_COMPLETION_HANDOFF_CONTRACT.md",
                 "FINAL_REPORT_CONTRACT.md",
             ],
             "artifact_paths": [subprompt_rel],

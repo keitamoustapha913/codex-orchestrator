@@ -223,11 +223,11 @@ from pathlib import Path
 target_root = Path(os.environ["CXOR_TARGET_ROOT"])
 (target_root / "worker_stage").mkdir(parents=True, exist_ok=True)
 (target_root / "worker_stage" / "05_final_report.md").write_text("FINAL_STATUS: PASS\\n", encoding="utf-8")
-report_path = Path(os.environ["CXOR_REPORT_PATH"])
+report_path = Path(os.environ["CXOR_TASK_COMPLETION_HANDOFF_PATH"])
 report_path.parent.mkdir(parents=True, exist_ok=True)
 report_path.write_text(json.dumps({
     "schema_version": "1.0",
-    "kind": "patchlet_report",
+    "kind": "task_worker_completion_handoff",
     "patchlet_id": os.environ["CXOR_PATCHLET_ID"],
     "status": "VERIFIED_NO_CHANGE_NEEDED"
 }), encoding="utf-8")

@@ -97,16 +97,6 @@ def _existing_patchlets(ctx: TargetRepoContext) -> dict[str, dict]:
     return {patchlet["patchlet_id"]: patchlet for patchlet in index.get("patchlets", [])}
 
 
-def _real_codex_contract_text() -> str:
-    contract_path = os.environ.get("CXOR_REAL_CODEX_CONTRACT_PATH")
-    if not contract_path:
-        return ""
-    path = Path(contract_path)
-    if not path.exists():
-        raise RuntimeError(f"Missing real Codex contract template: {path}")
-    return "\n\n" + path.read_text(encoding="utf-8").strip() + "\n"
-
-
 def _semantic_fields(patchlet: dict, semantic_criteria: list[dict]) -> None:
     if not semantic_criteria:
         return
@@ -182,7 +172,6 @@ def _write_patchlet_subprompt(
     semantic_criteria: list[dict],
     timeout_seconds: int,
     soft_deadline: int,
-    real_codex_contract: str,
 ) -> None:
     patchlet_id = patchlet["patchlet_id"]
     subprompt = ctx.root / patchlet["subprompt_path"]
@@ -235,17 +224,18 @@ def _write_patchlet_subprompt(
         "## Proof-of-fix gate\n\n"
         "Only after the direct probe proves the root cause may the allowed file be edited. "
         "After implementation, rerun baseline, proof-of-fix, and negative-control probes.\n\n"
-        "## Report contract\n\n"
-        f"Write `.codex-orchestrator/reports/{patchlet_id}.json` with status COMPLETE, "
+        "## Task completion handoff\n\n"
+        "Write `$CXOR_TASK_COMPLETION_HANDOFF_PATH` with status COMPLETE, "
         "VERIFIED_NO_CHANGE_NEEDED, BLOCKED_WITH_EVIDENCE, or FAILED_WITH_EVIDENCE, "
-        "and include valid `probe_artifact_refs`.\n"
+        "using TASK_COMPLETION_HANDOFF_CONTRACT.md. Do not author the formal V2 report or "
+        "include product-path or evidence-reference fields; the separate Report Production "
+        "Worker derives them after the candidate and evidence inventory are frozen.\n"
         "\n## Wall-clock budget\n\n"
         f"You have a hard timeout of {timeout_seconds} seconds. "
         f"Aim to finish by {soft_deadline} seconds. "
         "If you cannot complete, write `worker_stage/05_final_report.md` with an explicit "
         "BLOCKED or FAILED status and preserve what you learned. "
-        "Do not keep investigating indefinitely. Do not use blind retry.\n"
-        + real_codex_contract,
+        "Do not keep investigating indefinitely. Do not use blind retry.\n",
         encoding="utf-8",
     )
     upsert_prompt_index_entry(ctx.root, {
@@ -273,7 +263,6 @@ def _compile_from_patchlet_plan(
     semantic_criteria: list[dict],
     timeout_seconds: int,
     soft_deadline: int,
-    real_codex_contract: str,
 ) -> tuple[list[dict], list[dict]]:
     invariant = invariants[0] if invariants else {}
     patchlets: list[dict] = []
@@ -377,7 +366,6 @@ def _compile_from_patchlet_plan(
             semantic_criteria=semantic_criteria,
             timeout_seconds=int(patchlet.get("time_budget_seconds") or timeout_seconds),
             soft_deadline=soft_deadline_seconds(int(patchlet.get("time_budget_seconds") or timeout_seconds)),
-            real_codex_contract=real_codex_contract,
         )
     return patchlets, transaction_groups
 
@@ -404,7 +392,6 @@ def compile_patchlets(ctx: TargetRepoContext) -> dict:
             return index
     invariants = _load_invariants(ctx)
     existing_patchlets = _existing_patchlets(ctx)
-    real_codex_contract = _real_codex_contract_text()
     timeout_seconds = resolve_patchlet_timeout_seconds(os.environ)
     soft_deadline = soft_deadline_seconds(timeout_seconds)
     semantic_criteria: list[dict] = []
@@ -448,7 +435,6 @@ def compile_patchlets(ctx: TargetRepoContext) -> dict:
             semantic_criteria=semantic_criteria,
             timeout_seconds=timeout_seconds,
             soft_deadline=soft_deadline,
-            real_codex_contract=real_codex_contract,
         )
     except PatchletProbeMappingError as exc:
         append_operator_event(
